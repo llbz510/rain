@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Rain 视觉配色原型 v2（一次性）</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c232c;
+  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.05);
+  --text:#e6edf3; --dim:#8b949e; --dimmer:#6e7681;
+  --sel-bg:#0a0d12; --sel-text:rgba(230,237,243,.72);
+  --play-bar:#ffffff; --play-bg:rgba(255,255,255,.06);
+  --c-concept:#539bf5; --c-example:#3fb950; --c-analogy:#db6d28; --c-trans:#7d8590;
+  --fail:#f85149; --proc:#d29922; --queue:#6e7681;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:13px/1.6 "PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+.screen{display:flex;flex-direction:column;height:100vh}
+.topbar{height:36px;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+.topbar .logo{font-weight:600}
+.topbar .vt{color:var(--dim);font-size:12px}
+.topbar .sp{flex:1}
+.btn{border:1px solid var(--line);background:transparent;color:var(--text);padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer}
+.btn.active{background:var(--sel-bg);color:var(--sel-text);border-color:var(--line2)}
+.iconbtn{border:1px solid var(--line);background:transparent;color:var(--dim);width:28px;height:26px;border-radius:6px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.main{flex:1;display:grid;grid-template-columns:200px 1fr 280px;min-height:0}
+.tree{border-right:1px solid var(--line);background:var(--panel);overflow:auto;padding:8px 6px}
+.tnode{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;font-size:12px;color:var(--text);margin:1px 0}
+.tnode .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.tnode .ic{color:var(--dimmer);font-size:10px;width:12px}
+.tnode.sub{padding-left:24px;color:var(--dim)}
+.tnode.par{padding-left:42px}
+.tnode.sel{background:var(--sel-bg);color:var(--sel-text)}
+.tnode.play{box-shadow:inset 2px 0 0 var(--play-bar);background:var(--play-bg)}
+.tnode.selplay{background:var(--sel-bg);color:var(--sel-text);box-shadow:inset 2px 0 0 var(--play-bar)}
+.center{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.catalog{display:flex;flex-direction:column;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+.row{display:flex;align-items:center;gap:8px}
+.row .lab{color:var(--dimmer);font-size:11px;width:42px;flex:none}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{position:relative;height:24px;padding:0 10px;display:flex;align-items:center;border-radius:6px;font-size:12px;white-space:nowrap;overflow:hidden;color:#fff}
+.pill .fill{position:absolute;left:0;top:0;bottom:0}
+.pill .tx{position:relative;z-index:2}
+.pill.box{background:rgba(255,255,255,.06)}
+.pill.box .fill{background:rgba(255,255,255,.45)}
+.pill.t-concept{background:rgba(83,155,245,.16)}
+.pill.t-concept .fill{background:rgba(83,155,245,.85)}
+.pill.t-example{background:rgba(63,185,80,.16)}
+.pill.t-example .fill{background:rgba(63,185,80,.85)}
+.pill.t-analogy{background:rgba(219,109,40,.16)}
+.pill.t-analogy .fill{background:rgba(219,109,40,.85)}
+.pill.t-trans{background:rgba(125,133,144,.16)}
+.pill.t-trans .fill{background:rgba(125,133,144,.7)}
+.pill.play{box-shadow:inset 2px 0 0 var(--play-bar)}
+.pill.play .glaze{position:absolute;inset:0;background:var(--play-bg);z-index:1}
+.pill.sel{background:var(--sel-bg)!important}
+.pill.sel .fill{opacity:.35}
+.pill.selplay{background:var(--sel-bg)!important;box-shadow:inset 2px 0 0 var(--play-bar)}
+.pill.selplay .fill{opacity:.35}
+.videozone{flex:0 0 58%;display:flex;flex-direction:column;border-bottom:1px solid var(--line);min-height:0}
+.video{flex:1;background:#000;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+.video .ph{color:var(--dimmer);font-size:12px}
+.video .cc{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;padding:3px 10px;border-radius:4px;font-size:13px}
+.ctl{height:38px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+.ctl .t{color:var(--dim);font-variant-numeric:tabular-nums}
+.ctl .pg{flex:1;height:4px;background:var(--line2);border-radius:2px;position:relative}
+.ctl .pg i{position:absolute;left:0;top:0;bottom:0;background:var(--text);border-radius:2px}
+.textzone{flex:1;overflow:auto;padding:12px 14px}
+.para{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--panel)}
+.phead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.cap{font-size:11px;padding:2px 8px;border-radius:10px;cursor:pointer}
+.cap.concept{color:var(--c-concept);background:rgba(83,155,245,.14);border:1px solid rgba(83,155,245,.3)}
+.cap.example{color:var(--c-example);background:rgba(63,185,80,.14);border:1px solid rgba(63,185,80,.3)}
+.cap.analogy{color:var(--c-analogy);background:rgba(219,109,40,.14);border:1px solid rgba(219,109,40,.3)}
+.cap.trans{color:var(--c-trans);background:rgba(125,133,144,.14);border:1px solid rgba(125,133,144,.3)}
+.ptitle{font-size:12px;color:var(--dim)}
+.phead .r{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--dimmer);font-size:11px}
+.pbody{font-size:13px;color:var(--text)}
+.sent{display:inline;padding:2px 1px;border-radius:3px}
+.sent.play{background:var(--play-bg);box-shadow:inset 2px 0 0 var(--play-bar)}
+.sent.sel{background:var(--sel-bg);color:var(--sel-text)}
+.side{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.tabs{display:flex;border-bottom:1px solid var(--line);flex:none}
+.tab{padding:8px 14px;font-size:12px;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent}
+.tab.on{color:var(--text);border-bottom-color:var(--text)}
+.sidebody{flex:1;overflow:auto;padding:12px}
+.note{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;background:var(--panel2)}
+.note .meta{font-size:11px;color:var(--dimmer);margin-bottom:4px}
+.note .quote{color:var(--dim);border-left:2px solid var(--line);padding-left:8px;margin:6px 0;font-size:12px}
+.link{color:var(--dim);text-decoration:underline;text-underline-offset:2px}
+.listmain{flex:1;overflow:auto;padding:16px}
+.listbar{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+.listbar .search{flex:1;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.thumb{height:92px;background:#000;position:relative;display:flex;align-items:center;justify-content:center;color:var(--dimmer);font-size:11px}
+.thumb .ov{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.badge{position:absolute;left:8px;top:8px;font-size:11px;padding:2px 7px;border-radius:4px;z-index:2}
+.badge.fail{background:rgba(248,81,73,.18);color:var(--fail);border:1px solid rgba(248,81,73,.4)}
+.badge.proc{background:rgba(210,153,34,.18);color:var(--proc);border:1px solid rgba(210,153,34,.4)}
+.badge.queue{background:rgba(110,118,129,.2);color:var(--dim);border:1px solid var(--line)}
+.cinfo{padding:8px 10px}
+.ctitle{font-size:12px;margin-bottom:6px}
+.cbar{height:3px;background:var(--line2);border-radius:2px;overflow:hidden;margin-bottom:5px}
+.cbar i{display:block;height:100%;background:var(--text)}
+.cmeta{font-size:11px;color:var(--dimmer);display:flex;justify-content:space-between}
+.sw{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:4px;display:flex;gap:4px;z-index:60}
+.sw button{border:none;background:transparent;color:var(--dim);padding:6px 14px;border-radius:16px;font-size:12px;cursor:pointer}
+.sw button.on{background:var(--sel-bg);color:var(--text)}
+.legend{position:fixed;right:12px;bottom:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:11px;color:var(--dim);max-width:230px;z-index:50;line-height:1.7}
+.legend b{color:var(--text)}
+.tag{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-right:4px}
+</style>
+</head>
+<body>
+
+<!-- 学习界面 -->
+<div class="screen" id="learn">
+  <div class="topbar">
+    <button class="btn">← 返回列表</button>
+    <span class="logo">Rain</span><span class="vt">/ 深度学习之道 · 第3集</span>
+    <span class="sp"></span>
+  </div>
+  <div class="main">
+    <div class="tree">
+      <div class="tnode"><span class="ic">▾</span><span class="dot" style="background:rgba(255,255,255,.5)"></span>第一章 引入</div>
+      <div class="tnode sub"><span class="dot" style="background:rgba(255,255,255,.5)"></span>1.1 背景</div>
+      <div class="tnode par"><span class="dot" style="background:var(--c-concept)"></span>概念·定义</div>
+      <div class="tnode par sel"><span class="dot" style="background:var(--c-analogy)"></span>类比·像练琴</div>
+      <div class="tnode"><span class="ic">▾</span><span class="dot" style="background:rgba(255,255,255,.5)"></span>第二章 核心方法</div>
+      <div class="tnode sub"><span class="dot" style="background:rgba(255,255,255,.5)"></span>2.1 方法</div>
+      <div class="tnode par play"><span class="dot" style="background:var(--c-example)"></span>例子·ImageNet</div>
+      <div class="tnode par selplay"><span class="dot" style="background:var(--c-concept)"></span>概念·反向传播</div>
+      <div class="tnode par"><span class="dot" style="background:var(--c-trans)"></span>过渡</div>
+    </div>
+
+    <div class="center">
+      <div class="catalog">
+        <div class="row"><span class="lab">章节</span>
+          <div class="pills">
+            <div class="pill box"><div class="fill" style="width:100%"></div><span class="tx">第一章 引入</span></div>
+            <div class="pill box play"><div class="fill" style="width:42%"></div><div class="glaze"></div><span class="tx">第二章 核心方法</span></div>
+            <div class="pill box"><div class="fill" style="width:0%"></div><span class="tx">第三章 实践</span></div>
+          </div>
+        </div>
+        <div class="row"><span class="lab">段落</span>
+          <div class="pills">
+            <div class="pill t-concept"><div class="fill" style="width:100%"></div><span class="tx">概念·什么是深度学习</span></div>
+            <div class="pill t-example play"><div class="fill" style="width:60%"></div><div class="glaze"></div><span class="tx">例子·ImageNet</span></div>
+            <div class="pill t-analogy sel"><div class="fill" style="width:0%"></div><span class="tx">类比·像练琴</span></div>
+            <div class="pill t-trans"><div class="fill" style="width:0%"></div><span class="tx">过渡</span></div>
+            <div class="pill t-concept selplay"><div class="fill" style="width:30%"></div><span class="tx">概念·反向传播</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="videozone">
+        <div class="video">
+          <span class="ph">视频画面（占位）</span>
+          <div class="cc">所以反向传播其实就是把误差一层层往回传</div>
+        </div>
+        <div class="ctl">
+          <span class="iconbtn">▶</span>
+          <span class="t">4:42 / 12:15</span>
+          <div class="pg"><i style="width:38%"></i></div>
+          <span class="iconbtn">🔊</span>
+          <span class="iconbtn">⚙</span>
+          <button class="btn">文本展开</button>
+          <button class="btn">导图展开</button>
+          <span class="iconbtn">⤢</span>
+        </div>
+      </div>
+
+      <div class="textzone">
+        <div class="para">
+          <div class="phead"><span class="cap example">例子 ▾</span><span class="ptitle">ImageNet 竞赛</span><span class="r">摘注 ⋯</span></div>
+          <div class="pbody">
+            <span class="sent">2012 年 ImageNet 比赛里，深度网络第一次大幅领先。</span>
+            <span class="sent play">它把错误率从 26% 直接压到了 15%，</span>
+            <span class="sent sel">这一跳让整个学界意识到深度学习的潜力。</span>
+            <span class="sent">随后几年模型越做越大。</span>
+          </div>
+        </div>
+        <div class="para">
+          <div class="phead"><span class="cap analogy">类比 ▾</span><span class="ptitle">像练琴</span><span class="r">摘注 ⋯</span></div>
+          <div class="pbody">
+            <span class="sent">学深度学习有点像练琴，</span>
+            <span class="sent">光看谱子没用，得一遍遍上手弹。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="tabs"><div class="tab on">随记</div><div class="tab">AI 助手</div></div>
+      <div class="sidebody">
+        <div class="note">
+          <div class="meta">来自「例子·ImageNet」· 2 小时前</div>
+          <div class="quote">这一跳让整个学界意识到深度学习的潜力。</div>
+          <div>错误率从 26% 到 15% 这步是关键转折，<a class="link">回到视频 4:42</a>。</div>
+        </div>
+        <div class="note">
+          <div class="meta">自由笔记</div>
+          <div>反向传播 = 误差回传，类比练琴的"纠错反馈"。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 视频列表主页 -->
+<div class="screen" id="listpg" style="display:none">
+  <div class="topbar">
+    <span class="logo">Rain</span><span class="vt">/ 我的视频</span>
+    <span class="sp"></span>
+  </div>
+  <div class="listmain">
+    <div class="listbar">
+      <button class="btn">最近学习 ▾</button>
+      <input class="search" placeholder="搜索标题…">
+      <button class="btn">＋ 导入</button>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="thumb">缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">深度学习之道·第3集</div>
+          <div class="cbar"><i style="width:38%"></i></div>
+          <div class="cmeta"><span>2小时前·中英·本地</span><span>12:15</span></div></div></div>
+      <div class="card"><div class="thumb"><div class="badge proc">处理中 62%</div>缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">Transformer 详解</div>
+          <div class="cmeta"><span>导入中</span><span>—</span></div></div></div>
+      <div class="card"><div class="thumb"><div class="badge fail">失败 · 重试</div>缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">强化学习入门</div>
+          <div class="cmeta"><span>导入失败</span><span>—</span></div></div></div>
+      <div class="card"><div class="thumb"><div class="badge queue">排队中</div>缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">CNN 原理</div>
+          <div class="cmeta"><span>等待</span><span>—</span></div></div></div>
+      <div class="card"><div class="thumb">缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">注意力机制</div>
+          <div class="cbar"><i style="width:100%"></i></div>
+          <div class="cmeta"><span>已看完·昨天</span><span>9:40</span></div></div></div>
+      <div class="card"><div class="thumb">缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">梯度下降直觉</div>
+          <div class="cbar"><i style="width:12%"></i></div>
+          <div class="cmeta"><span>3天前·在线</span><span>18:02</span></div></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="sw">
+  <button data-s="learn" class="on" onclick="show('learn')">学习界面</button>
+  <button data-s="list" onclick="show('list')">视频列表</button>
+</div>
+<div class="legend">
+  <b>一次性原型 v2 · 配色+布局验证</b><br>
+  <span class="tag" style="background:var(--c-concept)"></span>概念=蓝
+  <span class="tag" style="background:var(--c-example)"></span>例子=绿
+  <span class="tag" style="background:var(--c-analogy)"></span>类比=橙
+  <span class="tag" style="background:var(--c-trans)"></span>过渡=灰<br>
+  段落节点：■=类型色，文字=白<br>
+  选中=变暗　播放=变亮(白条)　同现=暗底叠白条<br>
+  控制栏收进视频区；树/面板全高<br>
+  底部切换：学习界面 / 视频列表
+</div>
+<script>
+function show(s){
+  document.getElementById('learn').style.display = s==='learn'?'flex':'none';
+  document.getElementById('listpg').style.display = s==='list'?'flex':'none';
+  document.querySelectorAll('.sw button').forEach(function(b){b.classList.toggle('on', b.dataset.s===s);});
+}
+</script>
+</body>
+</html>

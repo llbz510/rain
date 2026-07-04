@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Rain 文本区编辑交互原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #0f1115; color: #e6e6e6; height: 100vh; overflow: hidden;
+    font-size: 14px;
+  }
+  .app { display: grid; grid-template-columns: 200px 1fr 280px; height: 100vh; }
+
+  /* 左树 stub */
+  .left-tree { background: #16191f; border-right: 1px solid #23262e; padding: 12px 8px; overflow: auto; }
+  .left-tree .node { padding: 5px 8px; border-radius: 4px; cursor: pointer; color: #9aa0aa; font-size: 13px; }
+  .left-tree .node:hover { background: #1e222a; color: #e6e6e6; }
+  .left-tree .node.lvl0 { font-weight: 600; color: #cfd3da; }
+  .left-tree .node.lvl1 { padding-left: 24px; }
+  .left-tree .node.lvl2 { padding-left: 40px; color: #7a808a; }
+  .left-tree .node.cur { background: #2a3142; color: #fff; }
+
+  /* 文本区 */
+  .text-zone { padding: 20px 28px; overflow: auto; background: #0f1115; }
+  .text-zone h2 { font-size: 12px; color: #6a7080; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; }
+  .para { margin-bottom: 22px; border-left: 3px solid #333; padding-left: 14px; position: relative; border-radius: 2px; }
+  .para[data-type="concept"] { border-left-color: #4a9eff; }
+  .para[data-type="example"] { border-left-color: #4caf72; }
+  .para[data-type="analogy"]  { border-left-color: #a974ff; }
+  .para[data-type="transition"]{ border-left-color: #888; }
+
+  .para-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-height: 26px; position: relative; }
+
+  /* 类型胶囊 */
+  .type-chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; cursor: pointer;
+    border: 1px solid; position: relative; user-select: none; white-space: nowrap;
+  }
+  .type-chip.concept   { color: #4a9eff; border-color: #2a5a9e; background: #14233a; }
+  .type-chip.example   { color: #4caf72; border-color: #2e6b46; background: #14271c; }
+  .type-chip.analogy   { color: #a974ff; border-color: #5e3a9e; background: #241638; }
+  .type-chip.transition{ color: #aaa;    border-color: #555;    background: #222; }
+
+  .type-dropdown {
+    position: absolute; top: 26px; left: 0; background: #1c2028; border: 1px solid #333;
+    border-radius: 6px; padding: 4px; z-index: 50; display: none; min-width: 110px;
+  }
+  .type-dropdown.show { display: block; }
+  .type-dropdown div { padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .type-dropdown div:hover { background: #2a3142; }
+
+  .para-title { flex: 1; font-weight: 600; color: #d0d3da; font-size: 14px; cursor: text; }
+  .para-title[contenteditable="true"] { background: #1a1f2a; padding: 2px 6px; border-radius: 3px; outline: 1px solid #4a9eff; }
+  .para-title.hint { color: #666; font-weight: 400; font-style: italic; }
+
+  .excerpt-btn { background: none; border: 1px solid #333; color: #888; border-radius: 4px;
+    padding: 0 8px; height: 22px; cursor: pointer; font-size: 12px; }
+  .excerpt-btn:hover { border-color: #4a9eff; color: #4a9eff; }
+
+  .more-btn { background: none; border: none; color: #777; cursor: pointer; font-size: 16px;
+    width: 26px; height: 22px; border-radius: 4px; }
+  .more-btn:hover { background: #23262e; color: #fff; }
+
+  .more-menu {
+    position: absolute; top: 26px; right: 0; background: #1c2028; border: 1px solid #333;
+    border-radius: 6px; padding: 4px; z-index: 50; display: none; min-width: 130px;
+  }
+  .more-menu.show { display: block; }
+  .more-menu div { padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #cfd3da; }
+  .more-menu div:hover { background: #2a3142; }
+  .more-menu div.danger:hover { background: #3a1a1a; color: #ff6b6b; }
+  .more-menu .sep { height: 1px; background: #2a2e36; margin: 4px 0; }
+
+  /* 变体 B：悬停工具条 */
+  .hover-toolbar {
+    display: none; gap: 4px; align-items: center; margin-bottom: 8px;
+    background: #1a1f2a; border: 1px solid #2a3142; border-radius: 6px; padding: 3px;
+    width: fit-content;
+  }
+  .hover-toolbar button { background: none; border: none; color: #b0b6c0; cursor: pointer;
+    font-size: 12px; padding: 4px 8px; border-radius: 4px; display: flex; align-items: center; gap: 4px; }
+  .hover-toolbar button:hover { background: #2a3142; color: #fff; }
+  .hover-toolbar .ttype { position: relative; }
+  .hover-toolbar .tdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  /* 变体 C：类型点 */
+  .type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .type-dot.concept { background: #4a9eff; }
+  .type-dot.example { background: #4caf72; }
+  .type-dot.analogy { background: #a974ff; }
+  .type-dot.transition { background: #888; }
+
+  .para-body { color: #b8bcc4; line-height: 1.7; font-size: 13.5px; user-select: none; }
+  .sentence { cursor: text; padding: 1px 0; border-radius: 2px; }
+  .sentence.selected { background: #3a4a1e; color: #e8f5d0; }
+  .sentence.cur-play { background: #2a3142; }
+
+  /* 选中工具栏 */
+  .sel-toolbar {
+    position: absolute; display: none; background: #1c2028; border: 1px solid #333;
+    border-radius: 6px; padding: 3px; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,.5);
+    display: none; gap: 2px;
+  }
+  .sel-toolbar.show { display: flex; }
+  .sel-toolbar button { background: none; border: none; color: #cfd3da; cursor: pointer;
+    font-size: 12px; padding: 5px 10px; border-radius: 4px; white-space: nowrap; }
+  .sel-toolbar button:hover { background: #2a3142; color: #fff; }
+  .sel-toolbar .sep { width: 1px; background: #2a2e36; margin: 4px 2px; }
+
+  /* 右键菜单（变体C） */
+  .ctx-menu {
+    position: fixed; display: none; background: #1c2028; border: 1px solid #333;
+    border-radius: 6px; padding: 4px; z-index: 200; min-width: 130px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.5);
+  }
+  .ctx-menu.show { display: block; }
+  .ctx-menu div { padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #cfd3da; position: relative; }
+  .ctx-menu div:hover { background: #2a3142; color: #fff; }
+  .ctx-menu .has-sub::after { content: "▸"; position: absolute; right: 8px; color: #666; }
+  .ctx-menu .sub {
+    position: absolute; left: 100%; top: -4px; display: none; background: #1c2028;
+    border: 1px solid #333; border-radius: 6px; padding: 4px; min-width: 110px;
+  }
+  .ctx-menu .has-sub:hover .sub { display: block; }
+  .ctx-menu .sub div { padding: 5px 10px; }
+  .ctx-menu .sep { height: 1px; background: #2a2e36; margin: 4px 0; }
+
+  /* 右侧 stub */
+  .right-panel { background: #16191f; border-left: 1px solid #23262e; padding: 12px; }
+  .right-panel .tab { display: inline-block; padding: 6px 14px; border-bottom: 2px solid transparent; color: #777; cursor: pointer; font-size: 13px; }
+  .right-panel .tab.active { color: #fff; border-bottom-color: #4a9eff; }
+  .right-panel .panel-hint { color: #555; font-size: 12px; margin-top: 16px; text-align: center; }
+
+  /* 切换条 */
+  .switcher {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: #1a1f2a; border: 1px solid #2a3142; border-radius: 24px; padding: 8px 16px;
+    display: flex; align-items: center; gap: 14px; z-index: 300; box-shadow: 0 4px 20px rgba(0,0,0,.6);
+    font-size: 12px;
+  }
+  .switcher button { background: none; border: none; color: #cfd3da; cursor: pointer; font-size: 16px; width: 24px; }
+  .switcher button:hover { color: #4a9eff; }
+  .switcher .label { color: #cfd3da; min-width: 140px; text-align: center; }
+  .switcher .label b { color: #4a9eff; }
+  .switcher .hint { color: #666; font-size: 11px; max-width: 200px; }
+
+  .flash { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+    background: #2a4a1e; color: #d8f5b0; padding: 8px 16px; border-radius: 6px; font-size: 12px;
+    z-index: 400; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  .flash.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="left-tree">
+    <div class="node lvl0">第一章 引言</div>
+    <div class="node lvl1">1.1 什么是多模态</div>
+    <div class="node lvl2 cur">段落·定义</div>
+    <div class="node lvl2">段落·例子</div>
+    <div class="node lvl1">1.2 为什么重要</div>
+    <div class="node lvl2">段落·类比</div>
+    <div class="node lvl0">第二章 实现</div>
+    <div class="node lvl1">2.1 技术栈</div>
+  </aside>
+
+  <main class="text-zone">
+    <h2>文本区 · 段落编辑交互原型（拖选句子 / 悬停或右键段落头）</h2>
+
+    <div class="para" data-type="concept" data-idx="0">
+      <div class="para-header">
+        <span class="type-chip concept" onclick="toggleTypeDropdown(this)">概念描述 ▾
+          <div class="type-dropdown">
+            <div onclick="setType(event,'concept')">概念描述</div>
+            <div onclick="setType(event,'example')">例子</div>
+            <div onclick="setType(event,'analogy')">类比</div>
+            <div onclick="setType(event,'transition')">过渡</div>
+          </div>
+        </span>
+        <span class="para-title" onclick="rename(this)">多模态学习的定义</span>
+        <button class="excerpt-btn" title="摘注（快捷键 `）" onclick="flash('已创建摘注笔记')">摘注</button>
+        <button class="more-btn" onclick="toggleMoreMenu(this)">⋯
+          <div class="more-menu">
+            <div onclick="menuAction('重命名')">重命名</div>
+            <div onclick="menuAction('改类型')">改类型</div>
+            <div class="sep"></div>
+            <div onclick="menuAction('提取为新小节')">提取为新小节</div>
+            <div onclick="menuAction('合并')">合并</div>
+            <div class="sep"></div>
+            <div class="danger" onclick="menuAction('删除')">删除</div>
+          </div>
+        </button>
+      </div>
+      <div class="hover-toolbar">
+        <button onclick="renameTitle(this)"><span>✎</span>重命名</button>
+        <button class="ttype" onclick="toggleTType(this)"><span class="tdot concept"></span>类型</button>
+        <button onclick="flash('提取为新小节')"><span>📁</span>提取小节</button>
+        <button onclick="flash('合并')"><span>🔗</span>合并</button>
+        <button onclick="flash('删除')"><span>🗑</span>删除</button>
+        <button onclick="flash('已创建摘注笔记')"><span>`</span>摘注</button>
+      </div>
+      <div class="para-body">
+        <span class="sentence">多模态学习是指模型能够同时处理和理解多种不同类型的数据输入。</span>
+        <span class="sentence">这些数据类型包括文本、图像、音频、视频等。</span>
+        <span class="sentence">与单一模态的模型不同，多模态模型能够建立不同模态之间的关联。</span>
+        <span class="sentence">例如它可以看到一张图并用文字描述图中的内容。</span>
+      </div>
+    </div>
+
+    <div class="para" data-type="example" data-idx="1">
+      <div class="para-header">
+        <span class="type-chip example" onclick="toggleTypeDropdown(this)">例子 ▾
+          <div class="type-dropdown">
+            <div onclick="setType(event,'concept')">概念描述</div>
+            <div onclick="setType(event,'example')">例子</div>
+            <div onclick="setType(event,'analogy')">类比</div>
+            <div onclick="setType(event,'transition')">过渡</div>
+          </div>
+        </span>
+        <span class="para-title" onclick="rename(this)">图文互译的实例</span>
+        <button class="excerpt-btn" title="摘注（快捷键 `）" onclick="flash('已创建摘注笔记')">摘注</button>
+        <button class="more-btn" onclick="toggleMoreMenu(this)">⋯
+          <div class="more-menu">
+            <div onclick="menuAction('重命名')">重命名</div>
+            <div onclick="menuAction('改类型')">改类型</div>
+            <div class="sep"></div>
+            <div onclick="menuAction('提取为新小节')">提取为新小节</div>
+            <div onclick="menuAction('合并')">合并</div>
+            <div class="sep"></div>
+            <div class="danger" onclick="menuAction('删除')">删除</div>
+          </div>
+        </button>
+      </div>
+      <div class="hover-toolbar">
+        <button onclick="renameTitle(this)"><span>✎</span>重命名</button>
+        <button class="ttype" onclick="toggleTType(this)"><span class="tdot example"></span>类型</button>
+        <button onclick="flash('提取为新小节')"><span>📁</span>提取小节</button>
+        <button onclick="flash('合并')"><span>🔗</span>合并</button>
+        <button onclick="flash('删除')"><span>🗑</span>删除</button>
+        <button onclick="flash('已创建摘注笔记')"><span>`</span>摘注</button>
+      </div>
+      <div class="para-body">
+        <span class="sentence">最典型的多模态例子是 OpenAI 的 CLIP 模型。</span>
+        <span class="sentence">它把图像和文本映射到同一个向量空间。</span>
+        <span class="sentence">这样可以做以图搜文或者以文搜图。</span>
+      </div>
+    </div>
+
+    <div class="para" data-type="analogy" data-idx="2">
+      <div class="para-header">
+        <span class="type-chip analogy" onclick="toggleTypeDropdown(this)">类比 ▾
+          <div class="type-dropdown">
+            <div onclick="setType(event,'concept')">概念描述</div>
+            <div onclick="setType(event,'example')">例子</div>
+            <div onclick="setType(event,'analogy')">类比</div>
+            <div onclick="setType(event,'transition')">过渡</div>
+          </div>
+        </span>
+        <span class="para-title" onclick="rename(this)">用人类感官来类比</span>
+        <button class="excerpt-btn" title="摘注（快捷键 `）" onclick="flash('已创建摘注笔记')">摘注</button>
+        <button class="more-btn" onclick="toggleMoreMenu(this)">⋯
+          <div class="more-menu">
+            <div onclick="menuAction('重命名')">重命名</div>
+            <div onclick="menuAction('改类型')">改类型</div>
+            <div class="sep"></div>
+            <div onclick="menuAction('提取为新小节')">提取为新小节</div>
+            <div onclick="menuAction('合并')">合并</div>
+            <div class="sep"></div>
+            <div class="danger" onclick="menuAction('删除')">删除</div>
+          </div>
+        </button>
+      </div>
+      <div class="hover-toolbar">
+        <button onclick="renameTitle(this)"><span>✎</span>重命名</button>
+        <button class="ttype" onclick="toggleTType(this)"><span class="tdot analogy"></span>类型</button>
+        <button onclick="flash('提取为新小节')"><span>📁</span>提取小节</button>
+        <button onclick="flash('合并')"><span>🔗</span>合并</button>
+        <button onclick="flash('删除')"><span>🗑</span>删除</button>
+        <button onclick="flash('已创建摘注笔记')"><span>`</span>摘注</button>
+      </div>
+      <div class="para-body">
+        <span class="sentence">可以把多模态模型想象成一个同时有眼睛和耳朵的人。</span>
+        <span class="sentence">眼睛看图像，耳朵听声音，大脑把它们整合成统一的理解。</span>
+        <span class="sentence">这种整合能力正是多模态模型区别于单模态模型的关键。</span>
+        <span class="sentence">不过这个类比也有局限，模型并不真的"看见"或"听见"。</span>
+      </div>
+    </div>
+  </main>
+
+  <aside class="right-panel">
+    <span class="tab active">AI助手</span>
+    <span class="tab">随记</span>
+    <div class="panel-hint">右侧面板 stub</div>
+  </aside>
+</div>
+
+<div class="sel-toolbar" id="selToolbar">
+  <button onclick="extractPara()">✂ 提取为新段落</button>
+  <div class="sep"></div>
+  <button onclick="selectAllPara()">全选段落</button>
+  <button onclick="copySel()">复制</button>
+</div>
+
+<div class="ctx-menu" id="ctxMenu">
+  <div onclick="ctxAction('重命名')">重命名</div>
+  <div class="has-sub">改类型
+    <div class="sub">
+      <div onclick="ctxSetType('concept')">概念描述</div>
+      <div onclick="ctxSetType('example')">例子</div>
+      <div onclick="ctxSetType('analogy')">类比</div>
+      <div onclick="ctxSetType('transition')">过渡</div>
+    </div>
+  </div>
+  <div class="sep"></div>
+  <div onclick="ctxAction('提取为新小节')">提取为新小节</div>
+  <div onclick="ctxAction('合并')">合并</div>
+  <div class="sep"></div>
+  <div class="danger" onclick="ctxAction('删除')" style="color:#ff6b6b">删除</div>
+</div>
+
+<div class="switcher">
+  <button onclick="cycle(-1)">◀</button>
+  <span class="label"><b id="vKey">A</b> <span id="vName">悬停菜单型</span></span>
+  <button onclick="cycle(1)">▶</button>
+  <span class="hint" id="vHint">类型胶囊常驻 + 悬停 ⋯ 菜单</span>
+</div>
+
+<div class="flash" id="flash"></div>
+
+<script>
+const variants = {
+  A: { name: '悬停菜单型', hint: '类型胶囊常驻 + 悬停 ⋯ 菜单（已同意方案）' },
+  B: { name: '悬停工具条型', hint: '悬停整条工具栏平铺，无折叠' },
+  C: { name: '右键菜单型', hint: '悬停无浮现，右键出菜单，最干净' }
+};
+const order = ['A','B','C'];
+let curVar = 'A';
+
+function applyVariant(v) {
+  curVar = v;
+  document.body.className = 'v' + v;
+  document.getElementById('vKey').textContent = v;
+  document.getElementById('vName').textContent = variants[v].name;
+  document.getElementById('vHint').textContent = variants[v].hint;
+  // 关所有菜单
+  document.querySelectorAll('.more-menu.show,.type-dropdown.show').forEach(e=>e.classList.remove('show'));
+  hideCtx();
+}
+function cycle(dir) {
+  let i = order.indexOf(curVar);
+  i = (i + dir + order.length) % order.length;
+  applyVariant(order[i]);
+}
+
+/* 变体 A/B：悬停浮现 */
+document.querySelectorAll('.para').forEach(p => {
+  const toolbar = p.querySelector('.hover-toolbar');
+  const moreBtn = p.querySelector('.more-btn');
+  p.querySelector('.para-header').addEventListener('mouseenter', () => {
+    if (curVar === 'B' && toolbar) toolbar.style.display = 'flex';
+  });
+  p.querySelector('.para-header').addEventListener('mouseleave', () => {
+    if (curVar === 'B' && toolbar) toolbar.style.display = 'none';
+  });
+});
+
+/* 变体 C：右键菜单 */
+document.addEventListener('contextmenu', e => {
+  if (curVar !== 'C') return;
+  const para = e.target.closest('.para');
+  if (!para) return;
+  e.preventDefault();
+  const m = document.getElementById('ctxMenu');
+  m.classList.add('show');
+  m.style.left = Math.min(e.clientX, window.innerWidth-160) + 'px';
+  m.style.top = Math.min(e.clientY, window.innerHeight-220) + 'px';
+  window._ctxPara = para;
+});
+function hideCtx(){ document.getElementById('ctxMenu').classList.remove('show'); }
+document.addEventListener('click', e => {
+  if (!e.target.closest('#ctxMenu')) hideCtx();
+  if (!e.target.closest('.more-btn') && !e.target.closest('.more-menu'))
+    document.querySelectorAll('.more-menu.show').forEach(x=>x.classList.remove('show'));
+  if (!e.target.closest('.type-chip'))
+    document.querySelectorAll('.type-dropdown.show').forEach(x=>x.classList.remove('show'));
+});
+function ctxAction(a){ flash('右键['+a+'] @ 段落'); hideCtx(); }
+function ctxSetType(t){
+  if (window._ctxPara) setTypeOn(window._ctxPara, t);
+  hideCtx();
+}
+
+/* 类型胶囊下拉（变体A） */
+function toggleTypeDropdown(chip){
+  if (curVar !== 'A') return;
+  const dd = chip.querySelector('.type-dropdown');
+  document.querySelectorAll('.type-dropdown.show').forEach(x=>{ if(x!==dd) x.classList.remove('show'); });
+  dd.classList.toggle('show');
+  event.stopPropagation();
+}
+function setType(e, t){ e.stopPropagation(); const para = e.target.closest('.para'); setTypeOn(para, t); }
+function setTypeOn(para, t){
+  para.setAttribute('data-type', t);
+  const chip = para.querySelector('.type-chip');
+  chip.className = 'type-chip ' + t;
+  const names = {concept:'概念描述',example:'例子',analogy:'类比',transition:'过渡'};
+  chip.firstChild.textContent = names[t] + ' ▾ ';
+  // 变体B工具条色点
+  const dot = para.querySelector('.tdot');
+  if (dot) { dot.className = 'tdot ' + t; }
+  flash('类型改为：' + names[t]);
+  document.querySelectorAll('.type-dropdown.show,.more-menu.show').forEach(x=>x.classList.remove('show'));
+}
+
+/* ⋯ 更多菜单（变体A） */
+function toggleMoreMenu(btn){
+  if (curVar !== 'A') return;
+  const m = btn.querySelector('.more-menu');
+  document.querySelectorAll('.more-menu.show').forEach(x=>{ if(x!==m) x.classList.remove('show'); });
+  m.classList.toggle('show');
+  event.stopPropagation();
+}
+function menuAction(a){ flash('菜单['+a+']'); document.querySelectorAll('.more-menu.show').forEach(x=>x.classList.remove('show')); }
+
+/* 变体B 工具条类型选择 */
+function toggleTType(btn){
+  const para = btn.closest('.para');
+  const cur = para.getAttribute('data-type');
+  const cycle = {concept:'example',example:'analogy',analogy:'transition',transition:'concept'};
+  setTypeOn(para, cycle[cur]);
+}
+function renameTitle(btn){ rename(btn.closest('.para').querySelector('.para-title')); }
+
+/* 重命名 */
+function rename(titleEl){
+  titleEl.setAttribute('contenteditable','true');
+  titleEl.classList.remove('hint');
+  titleEl.focus();
+  const range = document.createRange(); range.selectNodeContents(titleEl);
+  const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+  const finish = () => {
+    titleEl.removeAttribute('contenteditable');
+    if (!titleEl.textContent.trim()) { titleEl.textContent = '未命名段落'; }
+    flash('已重命名：' + titleEl.textContent);
+  };
+  titleEl.onblur = finish;
+  titleEl.onkeydown = ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); titleEl.blur(); }
+    if (ev.key === 'Escape') { titleEl.blur(); }
+  };
+}
+
+/* —— 拖选句子 —— */
+let dragging = false, startPara = null, selSet = [];
+document.querySelectorAll('.sentence').forEach(s => {
+  s.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    clearSel();
+    dragging = true; startPara = s.closest('.para-body');
+    s.classList.add('selected'); selSet = [s];
+    e.preventDefault();
+  });
+  s.addEventListener('mouseenter', () => {
+    if (!dragging) return;
+    const myPara = s.closest('.para-body');
+    if (myPara !== startPara) return; // 跨段截断
+    s.classList.add('selected'); selSet.push(s);
+  });
+});
+document.addEventListener('mouseup', e => {
+  if (!dragging) return;
+  dragging = false;
+  if (selSet.length === 0) return;
+  // 定位工具栏
+  const tb = document.getElementById('selToolbar');
+  const first = selSet[0].getBoundingClientRect();
+  const last = selSet[selSet.length-1].getBoundingClientRect();
+  tb.style.left = (first.left + last.width/2 - 90) + 'px';
+  tb.style.top = (first.top - 44) + 'px';
+  tb.classList.add('show');
+});
+function clearSel(){
+  selSet.forEach(s=>s.classList.remove('selected'));
+  selSet = [];
+  document.getElementById('selToolbar').classList.remove('show');
+}
+document.addEventListener('mousedown', e => {
+  if (dragging) return;
+  if (e.target.closest('.sel-toolbar')) return;
+  if (!e.target.closest('.sentence')) clearSel();
+});
+
+function extractPara(){
+  if (selSet.length === 0) return;
+  flash('✂ 已提取为新段落（' + selSet.length + ' 句），标题输入框已聚焦');
+  clearSel();
+}
+function selectAllPara(){
+  if (!startPara) return;
+  clearSel();
+  startPara.querySelectorAll('.sentence').forEach(s=>{ s.classList.add('selected'); selSet.push(s); });
+  const tb = document.getElementById('selToolbar');
+  const first = selSet[0].getBoundingClientRect();
+  tb.style.left = (first.left + 60) + 'px';
+  tb.style.top = (first.top - 44) + 'px';
+  tb.classList.add('show');
+}
+function copySel(){
+  const text = selSet.map(s=>s.textContent).join('');
+  navigator.clipboard && navigator.clipboard.writeText(text);
+  flash('已复制 ' + selSet.length + ' 句');
+}
+
+/* flash 提示 */
+let flashTimer;
+function flash(msg){
+  const f = document.getElementById('flash');
+  f.textContent = msg; f.classList.add('show');
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(()=>f.classList.remove('show'), 1600);
+}
+
+/* 键盘切换 */
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input,textarea,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(1);
+});
+
+applyVariant('A');
+</script>
+</body>
+</html>

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Rain 模型管理原型（一次性）</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c232c;
+  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.05);
+  --text:#e6edf3; --dim:#8b949e; --dimmer:#6e7681;
+  --sel-bg:#0a0d12; --sel-text:rgba(230,237,243,.72);
+  --play-bar:#ffffff;
+  --c-concept:#539bf5; --c-example:#3fb950; --c-analogy:#db6d28; --c-trans:#7d8590;
+  --fail:#f85149; --proc:#d29922; --ok:#3fb950;
+  --font-cn:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --fs-xl:18px; --fs-lg:16px; --fs-md:14px; --fs-sm:13px; --fs-xs:12px;
+  --lh-title:1.3; --lh-body:1.7; --lh-sub:1.5;
+  --fw-reg:400; --fw-med:600; --fw-bold:700;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px; --sp-12:48px;
+  --r-0:0; --r-sm:4px; --r-md:8px; --r-lg:12px; --r-cap:9999px;
+  --shadow-float:0 4px 16px rgba(0,0,0,.4);
+  --h-topbar:40px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-cn);font-size:var(--fs-md);line-height:var(--lh-body)}
+.screen{display:flex;flex-direction:column;height:100vh}
+.topbar{height:var(--h-topbar);display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-3);border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+.topbar .logo{font-size:var(--fs-lg);font-weight:var(--fw-med)}
+.topbar .vt{color:var(--dim);font-size:var(--fs-xs)}
+.topbar .sp{flex:1}
+.btn{border:1px solid var(--line);background:transparent;color:var(--text);padding:var(--sp-1) var(--sp-3);border-radius:var(--r-md);font-size:var(--fs-xs);cursor:pointer;font-family:var(--font-cn)}
+.btn.primary{background:rgba(255,255,255,.12);border-color:transparent}
+.mini{border:1px solid var(--line);background:transparent;color:var(--dim);padding:2px var(--sp-2);border-radius:var(--r-sm);font-size:var(--fs-xs);cursor:pointer;font-family:var(--font-cn)}
+.mini:hover{color:var(--text);border-color:var(--dimmer)}
+.mini.danger{color:var(--fail);border-color:rgba(248,81,73,.3)}
+
+.settings{flex:1;display:grid;grid-template-columns:180px 1fr;min-height:0}
+.sidenav{border-right:1px solid var(--line);background:var(--panel);padding:var(--sp-3) var(--sp-2);overflow:auto}
+.navitem{padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);font-size:var(--fs-sm);color:var(--dim);cursor:pointer;margin-bottom:2px}
+.navitem.on{background:var(--sel-bg);color:var(--sel-text)}
+.settingsmain{overflow:auto;padding:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-4)}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-4)}
+.cardhead{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-3)}
+.cardtitle{font-size:var(--fs-sm);font-weight:var(--fw-med);color:var(--text)}
+.cardhead .sp{flex:1}
+.cardhint{font-size:var(--fs-xs);color:var(--dimmer);margin-top:var(--sp-1)}
+
+.rolerow{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-2) 0;border-bottom:1px solid var(--line2)}
+.rolerow:last-child{border-bottom:none}
+.rolelab{font-size:var(--fs-sm);width:110px;flex:none}
+.rolelab .sub{font-size:var(--fs-xs);color:var(--dimmer);font-weight:var(--fw-reg)}
+.roledesc{font-size:var(--fs-xs);color:var(--dimmer);margin-left:auto}
+select,input[type=text],input[type=password]{background:var(--bg);border:1px solid var(--line);color:var(--text);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-md);font-size:var(--fs-sm);font-family:var(--font-cn);min-width:220px}
+select:focus,input:focus{outline:none;border-color:var(--dimmer)}
+
+.pool{display:flex;flex-direction:column;gap:var(--sp-1)}
+.poolhead{display:grid;grid-template-columns:160px 150px 1fr 150px;gap:var(--sp-2);padding:0 var(--sp-2) var(--sp-1);font-size:var(--fs-xs);color:var(--dimmer);border-bottom:1px solid var(--line2)}
+.poolrow{display:grid;grid-template-columns:160px 150px 1fr 150px;gap:var(--sp-2);align-items:center;padding:var(--sp-2);border-radius:var(--r-md);font-size:var(--fs-sm)}
+.poolrow:hover{background:var(--panel2)}
+.palias{font-weight:var(--fw-med)}
+.pmeta{display:flex;gap:var(--sp-1);flex-wrap:wrap}
+.pinfo{color:var(--dim);font-size:var(--fs-xs)}
+.pact{display:flex;gap:var(--sp-1);justify-content:flex-end}
+.tag{font-size:var(--fs-xs);padding:1px var(--sp-2);border-radius:var(--r-sm);border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.tag-llm{color:var(--c-concept);border-color:rgba(83,155,245,.3);background:rgba(83,155,245,.1)}
+.tag-asr{color:var(--c-analogy);border-color:rgba(219,109,40,.3);background:rgba(219,109,40,.1)}
+.tag-whisper{color:var(--c-example);border-color:rgba(63,185,80,.3);background:rgba(63,185,80,.1)}
+.tag-vision{color:var(--c-example);border-color:rgba(63,185,80,.3);background:rgba(63,185,80,.1)}
+.tag-downloaded{color:var(--dim);border-color:var(--line)}
+
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:80}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);width:520px;max-width:92vw;max-height:90vh;overflow:auto;box-shadow:var(--shadow-float)}
+.modaltitle{font-size:var(--fs-md);font-weight:var(--fw-med);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line)}
+.form{padding:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
+.field{display:flex;flex-direction:column;gap:var(--sp-1)}
+.field label{font-size:var(--fs-xs);color:var(--dim)}
+.field input,.field select{width:100%;min-width:0}
+.typesel{display:flex;gap:var(--sp-4);font-size:var(--fs-sm)}
+.radio{display:inline-flex;align-items:center;gap:var(--sp-1);color:var(--text);cursor:pointer}
+.check{flex-direction:row;align-items:center;gap:var(--sp-2);color:var(--text);font-size:var(--fs-sm)}
+.modalfoot{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--line)}
+.modalfoot .sp{flex:1}
+.hidden{display:none!important}
+.testresult{font-size:var(--fs-xs);color:var(--ok);padding:var(--sp-1) var(--sp-2);background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);border-radius:var(--r-sm)}
+</style>
+</head>
+<body>
+
+<div class="screen">
+  <div class="topbar">
+    <button class="btn">← 返回</button>
+    <span class="logo">Rain</span><span class="vt">/ 设置 · 模型管理</span>
+    <span class="sp"></span>
+  </div>
+  <div class="settings">
+    <div class="sidenav">
+      <div class="navitem on">模型管理</div>
+      <div class="navitem">外观</div>
+      <div class="navitem">高级</div>
+      <div class="navitem">关于</div>
+    </div>
+    <main class="settingsmain">
+
+      <!-- 角色选择 -->
+      <section class="card">
+        <div class="cardhead">
+          <div class="cardtitle">角色选择</div>
+          <span class="sp"></span>
+          <span class="cardhint">每个角色从下方"模型池"里选一个当前使用</span>
+        </div>
+        <div class="rolerow">
+          <div class="rolelab">ASR <div class="sub">语音转文字</div></div>
+          <select>
+            <option>用视频字幕（无需模型）</option>
+            <option selected>阿里 ASR（paraformer）</option>
+            <option>Whisper-medium（本地）</option>
+          </select>
+          <div class="roledesc">三档：字幕 / API / 本地</div>
+        </div>
+        <div class="rolerow">
+          <div class="rolelab">结构化 LLM <div class="sub">文本结构化</div></div>
+          <select>
+            <option>通义千问（qwen-max）</option>
+            <option selected>DeepSeek（deepseek-chat）</option>
+            <option>Claude 3.5（claude-3-5-sonnet）</option>
+          </select>
+          <div class="roledesc">纯文本，需大输出</div>
+        </div>
+        <div class="rolerow">
+          <div class="rolelab">助手 LLM <div class="sub">AI 助手问答</div></div>
+          <select>
+            <option selected>GPT-4o（gpt-4o）</option>
+            <option>Claude 3.5（claude-3-5-sonnet）</option>
+          </select>
+          <div class="roledesc">必须 vision（只列勾了 vision 的）</div>
+        </div>
+      </section>
+
+      <!-- 模型池 -->
+      <section class="card">
+        <div class="cardhead">
+          <div class="cardtitle">模型池</div>
+          <span class="sp"></span>
+          <button class="btn primary" onclick="openModal()">＋ 添加模型</button>
+        </div>
+        <div class="poolhead">
+          <div>别名</div><div>类型</div><div>供应商 · 模型名</div><div style="text-align:right">操作</div>
+        </div>
+        <div class="pool">
+          <div class="poolrow">
+            <div class="palias">GPT-4o</div>
+            <div class="pmeta"><span class="tag tag-llm">LLM</span><span class="tag tag-vision">vision</span></div>
+            <div class="pinfo">OpenAI 兼容 · gpt-4o</div>
+            <div class="pact"><button class="mini">测试</button><button class="mini">编辑</button><button class="mini danger">删除</button></div>
+          </div>
+          <div class="poolrow">
+            <div class="palias">Claude 3.5</div>
+            <div class="pmeta"><span class="tag tag-llm">LLM</span><span class="tag tag-vision">vision</span></div>
+            <div class="pinfo">自定义 · claude-3-5-sonnet</div>
+            <div class="pact"><button class="mini">测试</button><button class="mini">编辑</button><button class="mini danger">删除</button></div>
+          </div>
+          <div class="poolrow">
+            <div class="palias">通义千问</div>
+            <div class="pmeta"><span class="tag tag-llm">LLM</span></div>
+            <div class="pinfo">阿里 · qwen-max</div>
+            <div class="pact"><button class="mini">测试</button><button class="mini">编辑</button><button class="mini danger">删除</button></div>
+          </div>
+          <div class="poolrow">
+            <div class="palias">DeepSeek</div>
+            <div class="pmeta"><span class="tag tag-llm">LLM</span></div>
+            <div class="pinfo">自定义 · deepseek-chat</div>
+            <div class="pact"><button class="mini">测试</button><button class="mini">编辑</button><button class="mini danger">删除</button></div>
+          </div>
+          <div class="poolrow">
+            <div class="palias">阿里 ASR</div>
+            <div class="pmeta"><span class="tag tag-asr">ASR-API</span></div>
+            <div class="pinfo">阿里 · paraformer（句级时间戳·长音频）</div>
+            <div class="pact"><button class="mini">测试</button><button class="mini">编辑</button><button class="mini danger">删除</button></div>
+          </div>
+          <div class="poolrow">
+            <div class="palias">Whisper-medium</div>
+            <div class="pmeta"><span class="tag tag-whisper">本地 Whisper</span><span class="tag tag-downloaded">已下载</span></div>
+            <div class="pinfo">medium · 1.5GB</div>
+            <div class="pact"><button class="mini">编辑</button><button class="mini danger">删除</button></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- 添加模型弹窗 -->
+<div class="overlay" id="modal" style="display:none">
+  <div class="modal">
+    <div class="modaltitle">添加模型</div>
+    <div class="form">
+      <div class="field">
+        <label>类型</label>
+        <div class="typesel">
+          <label class="radio"><input type="radio" name="mtype" value="llm" checked onchange="syncType()"> LLM</label>
+          <label class="radio"><input type="radio" name="mtype" value="asr" onchange="syncType()"> ASR-API</label>
+          <label class="radio"><input type="radio" name="mtype" value="whisper" onchange="syncType()"> 本地 Whisper</label>
+        </div>
+      </div>
+
+      <div class="field f-api">
+        <label>供应商</label>
+        <select id="provider" onchange="syncProvider()">
+          <option value="ali">阿里（预置）</option>
+          <option value="tencent">腾讯（预置）</option>
+          <option value="xunfei">讯飞（预置）</option>
+          <option value="openai">OpenAI 兼容（预置）</option>
+          <option value="custom">自定义…</option>
+        </select>
+      </div>
+      <div class="field f-api" id="baseurlfield">
+        <label>baseURL</label>
+        <input type="text" value="https://dashscope.aliyuncs.com/compatible-mode/v1">
+      </div>
+      <div class="field f-api">
+        <label>API Key</label>
+        <input type="password" value="sk-xxxxxxxxxxxxxxxx">
+      </div>
+      <div class="field f-api">
+        <label>模型名</label>
+        <input type="text" value="qwen-max">
+      </div>
+
+      <div class="field f-whisper hidden">
+        <label>模型大小</label>
+        <select>
+          <option>tiny（39MB，最快最差）</option>
+          <option>base（74MB）</option>
+          <option>small（244MB）</option>
+          <option selected>medium（769MB）</option>
+          <option>large-v3（1.5GB，最慢最好）</option>
+        </select>
+        <div class="cardhint">首次使用触发下载，显示进度</div>
+      </div>
+
+      <div class="field">
+        <label>别名（在池里显示的名字）</label>
+        <input type="text" value="通义千问">
+      </div>
+
+      <label class="check f-llm"><input type="checkbox" checked> 支持画面（vision）—— 助手 LLM 角色只列勾选此项的</label>
+    </div>
+    <div class="modalfoot">
+      <button class="mini">测试</button>
+      <span class="sp"></span>
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openModal(){ document.getElementById('modal').style.display='flex'; syncType(); }
+function closeModal(){ document.getElementById('modal').style.display='none'; }
+function syncType(){
+  var t=document.querySelector('input[name="mtype"]:checked').value;
+  var api=document.querySelectorAll('.f-api'), llm=document.querySelector('.f-llm'), wh=document.querySelector('.f-whisper');
+  var showApi=(t==='llm'||t==='asr');
+  api.forEach(function(e){e.classList.toggle('hidden',!showApi);});
+  llm.classList.toggle('hidden',t!=='llm');
+  wh.classList.toggle('hidden',t!=='whisper');
+  syncProvider();
+}
+function syncProvider(){
+  var p=document.getElementById('provider');
+  var bf=document.getElementById('baseurlfield');
+  if(!p||p.closest('.hidden'))return;
+  bf.classList.toggle('hidden', p.value!=='custom');
+}
+</script>
+</body>
+</html>

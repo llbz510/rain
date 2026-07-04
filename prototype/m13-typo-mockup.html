@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Rain 排版+令牌基线模板（一次性原型）</title>
+<style>
+:root{
+  /* 配色（决策63-72，沿用 v2）*/
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c232c;
+  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.05);
+  --text:#e6edf3; --dim:#8b949e; --dimmer:#6e7681;
+  --sel-bg:#0a0d12; --sel-text:rgba(230,237,243,.72);
+  --play-bar:#ffffff; --play-bg:rgba(255,255,255,.06);
+  --c-concept:#539bf5; --c-example:#3fb950; --c-analogy:#db6d28; --c-trans:#7d8590;
+  --fail:#f85149; --proc:#d29922; --queue:#6e7681;
+
+  /* 字体族（决策73）*/
+  --font-cn:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+
+  /* 字号阶梯 */
+  --fs-xl:18px;   /* 大标题 */
+  --fs-lg:16px;   /* 区标题 / 字幕(暂定) */
+  --fs-md:14px;   /* 正文 */
+  --fs-sm:13px;   /* 次正文 */
+  --fs-xs:12px;   /* 辅助 */
+
+  /* 行距 */
+  --lh-title:1.3;
+  --lh-body:1.7;
+  --lh-sub:1.5;
+
+  /* 字重 */
+  --fw-reg:400; --fw-med:600; --fw-bold:700;
+
+  /* 间距阶梯 */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px; --sp-12:48px;
+
+  /* 圆角 */
+  --r-0:0; --r-sm:4px; --r-md:8px; --r-lg:12px; --r-cap:9999px;
+
+  /* 阴影（仅浮层）*/
+  --shadow-float:0 4px 16px rgba(0,0,0,.4);
+
+  /* 关键高度 */
+  --h-topbar:40px; --h-control:40px; --h-catalog:80px;
+}
+/* 正文 13 切换：覆盖 --fs-md */
+body.fs13{ --fs-md:13px; }
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-cn);font-size:var(--fs-md);line-height:var(--lh-body)}
+.screen{display:flex;flex-direction:column;height:100vh}
+
+/* 顶栏 40 */
+.topbar{height:var(--h-topbar);display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-3);border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+.topbar .logo{font-size:var(--fs-lg);font-weight:var(--fw-med)}
+.topbar .vt{color:var(--dim);font-size:var(--fs-xs)}
+.topbar .sp{flex:1}
+.btn{border:1px solid var(--line);background:transparent;color:var(--text);padding:var(--sp-1) var(--sp-3);border-radius:var(--r-md);font-size:var(--fs-xs);cursor:pointer}
+.btn.active{background:var(--sel-bg);color:var(--sel-text);border-color:var(--line2)}
+.iconbtn{border:1px solid var(--line);background:transparent;color:var(--dim);width:var(--sp-6);height:26px;border-radius:var(--r-md);font-size:var(--fs-sm);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+
+/* 主区 */
+.main{flex:1;display:grid;grid-template-columns:200px 1fr 340px;min-height:0}
+
+/* 左树 */
+.tree{border-right:1px solid var(--line);background:var(--panel);overflow:auto;padding:var(--sp-2) var(--sp-2)}
+.tnode{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-md);font-size:var(--fs-sm);color:var(--text);margin:1px 0}
+.tnode .dot{width:8px;height:8px;border-radius:var(--r-cap);flex:none}
+.tnode .ic{color:var(--dimmer);font-size:10px;width:12px}
+.tnode.sub{padding-left:var(--sp-6);color:var(--dim)}
+.tnode.par{padding-left:42px}
+.tnode.sel{background:var(--sel-bg);color:var(--sel-text)}
+.tnode.play{box-shadow:inset 2px 0 0 var(--play-bar);background:var(--play-bg)}
+.tnode.selplay{background:var(--sel-bg);color:var(--sel-text);box-shadow:inset 2px 0 0 var(--play-bar)}
+
+/* 中区 */
+.center{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+
+/* 目录横条 80 */
+.catalog{height:var(--h-catalog);display:flex;flex-direction:column;justify-content:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+.row{display:flex;align-items:center;gap:var(--sp-2)}
+.row .lab{color:var(--dimmer);font-size:var(--fs-xs);width:42px;flex:none}
+.pills{display:flex;gap:var(--sp-2);flex-wrap:wrap}
+.pill{position:relative;height:var(--sp-6);padding:0 var(--sp-2);display:flex;align-items:center;border-radius:var(--r-md);font-size:var(--fs-xs);white-space:nowrap;overflow:hidden;color:#fff}
+.pill .fill{position:absolute;left:0;top:0;bottom:0}
+.pill .tx{position:relative;z-index:2}
+.pill.box{background:rgba(255,255,255,.06)}
+.pill.box .fill{background:rgba(255,255,255,.45)}
+.pill.t-concept{background:rgba(83,155,245,.16)}
+.pill.t-concept .fill{background:rgba(83,155,245,.85)}
+.pill.t-example{background:rgba(63,185,80,.16)}
+.pill.t-example .fill{background:rgba(63,185,80,.85)}
+.pill.t-analogy{background:rgba(219,109,40,.16)}
+.pill.t-analogy .fill{background:rgba(219,109,40,.85)}
+.pill.t-trans{background:rgba(125,133,144,.16)}
+.pill.t-trans .fill{background:rgba(125,133,144,.7)}
+.pill.play{box-shadow:inset 2px 0 0 var(--play-bar)}
+.pill.play .glaze{position:absolute;inset:0;background:var(--play-bg);z-index:1}
+.pill.sel{background:var(--sel-bg)!important}
+.pill.sel .fill{opacity:.35}
+.pill.selplay{background:var(--sel-bg)!important;box-shadow:inset 2px 0 0 var(--play-bar)}
+.pill.selplay .fill{opacity:.35}
+
+/* 视频区 */
+.videozone{flex:0 0 58%;display:flex;flex-direction:column;border-bottom:1px solid var(--line);min-height:0}
+.video{flex:1;background:#000;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+.video .ph{color:var(--dimmer);font-size:var(--fs-xs)}
+.video .cc{position:absolute;left:50%;bottom:var(--sp-4);transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);font-size:var(--fs-lg);line-height:var(--lh-title);font-weight:var(--fw-reg);text-shadow:0 1px 2px rgba(0,0,0,.5);max-width:80%;text-align:center}
+.ctl{height:var(--h-control);flex:none;display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-3);background:var(--panel);border-top:1px solid var(--line);font-size:var(--fs-xs);color:var(--dim)}
+.ctl .t{color:var(--dim);font-variant-numeric:tabular-nums}
+.ctl .pg{flex:1;height:var(--sp-1);background:var(--line2);border-radius:var(--r-sm);position:relative}
+.ctl .pg i{position:absolute;left:0;top:0;bottom:0;background:var(--text);border-radius:var(--r-sm)}
+
+/* 文本区 */
+.textzone{flex:1;overflow:auto;padding:var(--sp-3) var(--sp-4)}
+.para{border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-3);margin-bottom:var(--sp-3);background:var(--panel)}
+.phead{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-2)}
+.cap{font-size:var(--fs-xs);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-md);cursor:pointer}
+.cap.concept{color:var(--c-concept);background:rgba(83,155,245,.14);border:1px solid rgba(83,155,245,.3)}
+.cap.example{color:var(--c-example);background:rgba(63,185,80,.14);border:1px solid rgba(63,185,80,.3)}
+.cap.analogy{color:var(--c-analogy);background:rgba(219,109,40,.14);border:1px solid rgba(219,109,40,.3)}
+.cap.trans{color:var(--c-trans);background:rgba(125,133,144,.14);border:1px solid rgba(125,133,144,.3)}
+.ptitle{font-size:var(--fs-sm);color:var(--dim)}
+.phead .r{margin-left:auto;display:flex;gap:var(--sp-2);align-items:center;color:var(--dimmer);font-size:var(--fs-xs)}
+.pbody{font-size:var(--fs-md);line-height:var(--lh-body);color:var(--text)}
+.sent{display:inline;padding:2px 1px;border-radius:var(--r-sm)}
+.sent.play{background:var(--play-bg);box-shadow:inset 2px 0 0 var(--play-bar)}
+.sent.sel{background:var(--sel-bg);color:var(--sel-text)}
+
+/* 右侧面板 */
+.side{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.tabs{display:flex;border-bottom:1px solid var(--line);flex:none}
+.tab{padding:var(--sp-2) var(--sp-3);font-size:var(--fs-xs);color:var(--dim);cursor:pointer;border-bottom:2px solid transparent}
+.tab.on{color:var(--text);font-weight:var(--fw-med);border-bottom-color:var(--text)}
+.sidebody{flex:1;overflow:auto;padding:var(--sp-3)}
+.note{border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-3);margin-bottom:var(--sp-3);background:var(--panel2)}
+.note .meta{font-size:var(--fs-xs);color:var(--dimmer);margin-bottom:var(--sp-1)}
+.note .quote{color:var(--dim);border-left:2px solid var(--line);padding-left:var(--sp-2);margin:var(--sp-2) 0;font-size:var(--fs-xs);line-height:var(--lh-sub)}
+.note .body{font-size:var(--fs-sm);line-height:var(--lh-sub)}
+.link{color:var(--dim);text-decoration:underline;text-underline-offset:2px}
+.chat{display:flex;flex-direction:column;gap:var(--sp-3)}
+.msg{display:flex;flex-direction:column;gap:var(--sp-1)}
+.msg.user{align-items:flex-end}
+.msg.ai{align-items:flex-start}
+.bubble{max-width:88%;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);font-size:var(--fs-sm);line-height:var(--lh-sub)}
+.msg.user .bubble{background:var(--panel2);color:var(--text)}
+.msg.ai .bubble{background:var(--panel);border:1px solid var(--line);color:var(--text)}
+.msgact{font-size:var(--fs-xs)}
+.framechip{display:inline-flex;align-items:center;gap:var(--sp-1);font-size:var(--fs-xs);color:var(--dim);background:var(--panel2);border:1px solid var(--line);padding:2px var(--sp-2);border-radius:var(--r-sm)}
+.framechip.inline{align-self:flex-start}
+.thumb-s{width:26px;height:15px;background:#000;border-radius:var(--r-sm);flex:none}
+.aifoot{flex:none;border-top:1px solid var(--line);padding:var(--sp-2) var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-2);background:var(--panel)}
+.qa{font-size:var(--fs-xs);color:var(--dimmer);display:flex;flex-wrap:wrap;gap:var(--sp-1);align-items:center}
+.qlab{color:var(--dimmer);margin-right:2px}
+.chip{border:1px solid var(--line);background:transparent;color:var(--dim);padding:2px var(--sp-2);border-radius:var(--r-cap);font-size:var(--fs-xs);cursor:pointer;white-space:nowrap}
+.inputrow{display:flex;gap:var(--sp-2);align-items:flex-end}
+.ainput{flex:1;resize:none;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:var(--sp-2);border-radius:var(--r-md);font-size:var(--fs-sm);font-family:var(--font-cn);min-height:42px;max-height:120px}
+
+/* 视频列表主页 */
+/* 导图区（目录展开模式） */
+.mapzone{flex:1;overflow:hidden;position:relative;background:var(--bg);cursor:grab}
+.mapcanvas{position:absolute;left:0;top:0;transform-origin:0 0;padding:var(--sp-4)}
+.mtree{display:flex;flex-direction:column;gap:var(--sp-4)}
+.mbranch{display:flex;align-items:center;position:relative}
+.mkids{display:flex;flex-direction:column;gap:var(--sp-2);padding-left:28px;position:relative}
+.mapsvg{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.mapsvg path{stroke:rgba(255,255,255,.3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.mnode{position:relative;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);border:1px solid var(--line);font-size:var(--fs-sm);color:#fff;overflow:hidden;cursor:pointer;min-width:150px}
+.mnode .mfill{position:absolute;left:0;top:0;bottom:0;z-index:0}
+.mnode .mtx{position:relative;z-index:2;display:flex;align-items:center;gap:var(--sp-2);white-space:nowrap}
+.mnode .mic{color:rgba(255,255,255,.75);font-size:10px;width:12px}
+.mnode.box{background:rgba(255,255,255,.06)}
+.mnode.box .mfill{background:rgba(255,255,255,.45)}
+.mnode.t-concept{background:rgba(83,155,245,.16)}
+.mnode.t-concept .mfill{background:rgba(83,155,245,.85)}
+.mnode.t-example{background:rgba(63,185,80,.16)}
+.mnode.t-example .mfill{background:rgba(63,185,80,.85)}
+.mnode.t-analogy{background:rgba(219,109,40,.16)}
+.mnode.t-analogy .mfill{background:rgba(219,109,40,.85)}
+.mnode.t-trans{background:rgba(125,133,144,.16)}
+.mnode.t-trans .mfill{background:rgba(125,133,144,.7)}
+.mnode.sel{background:var(--sel-bg)!important}
+.mnode.sel .mfill{opacity:.35}
+.mnode.play{box-shadow:inset 2px 0 0 var(--play-bar)}
+.mnode.selplay{background:var(--sel-bg)!important;box-shadow:inset 2px 0 0 var(--play-bar)}
+.mnode.selplay .mfill{opacity:.35}
+.preview{flex:0 0 150px;border-top:1px solid var(--line);background:var(--panel);padding:var(--sp-3);overflow:auto}
+.preview .ph{font-size:var(--fs-xs);color:var(--dimmer);margin-bottom:var(--sp-2)}
+.preview .pt{font-size:var(--fs-md);line-height:var(--lh-body);color:var(--text)}
+.listmain{flex:1;overflow:auto;padding:var(--sp-4)}
+.listbar{display:flex;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-4)}
+.listbar .search{flex:1;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:var(--sp-1) var(--sp-3);border-radius:var(--r-md);font-size:var(--fs-sm)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--sp-4)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.thumb{aspect-ratio:16/9;background:#000;position:relative;display:flex;align-items:center;justify-content:center;color:var(--dimmer);font-size:var(--fs-xs)}
+.thumb .ov{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.badge{position:absolute;left:var(--sp-2);top:var(--sp-2);font-size:var(--fs-xs);padding:2px var(--sp-2);border-radius:var(--r-sm);z-index:2}
+.badge.fail{background:rgba(248,81,73,.18);color:var(--fail);border:1px solid rgba(248,81,73,.4)}
+.badge.proc{background:rgba(210,153,34,.18);color:var(--proc);border:1px solid rgba(210,153,34,.4)}
+.badge.queue{background:rgba(110,118,129,.2);color:var(--dim);border:1px solid var(--line)}
+.langtag{position:absolute;right:var(--sp-1);bottom:var(--sp-1);font-size:var(--fs-xs);padding:2px var(--sp-2);border-radius:var(--r-sm);background:rgba(0,0,0,.6);color:var(--dim);z-index:2}
+.cinfo{padding:var(--sp-2) var(--sp-3)}
+.ctitle{font-size:var(--fs-sm);line-height:var(--lh-sub);margin-bottom:var(--sp-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cbarrow{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-2)}
+.cbarrow .cbar{flex:1;margin-bottom:0}
+.ctime{font-size:var(--fs-xs);color:var(--dimmer);font-variant-numeric:tabular-nums}
+.cbar{height:var(--sp-1);background:var(--line2);border-radius:var(--r-sm);overflow:hidden;margin-bottom:var(--sp-1)}
+.cbar i{display:block;height:100%;background:var(--text)}
+.cmeta{font-size:var(--fs-xs);color:var(--dimmer)}
+.empty{min-height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:var(--sp-2);color:var(--dim)}
+.empty .big{font-size:var(--fs-xl);font-weight:var(--fw-bold);margin-bottom:var(--sp-2)}
+
+/* 切换条 */
+.sw{position:fixed;left:50%;bottom:var(--sp-3);transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-cap);padding:var(--sp-1);display:flex;gap:var(--sp-1);z-index:60;box-shadow:var(--shadow-float)}
+.sw button{border:none;background:transparent;color:var(--dim);padding:var(--sp-2) var(--sp-4);border-radius:var(--r-cap);font-size:var(--fs-xs);cursor:pointer;font-family:var(--font-cn)}
+.sw button.on{background:var(--sel-bg);color:var(--text)}
+
+/* 令牌图例 */
+.legend{position:fixed;right:var(--sp-3);bottom:var(--sp-3);background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-3);font-size:var(--fs-xs);color:var(--dim);max-width:260px;z-index:50;line-height:1.7;box-shadow:var(--shadow-float)}
+.legend b{color:var(--text);display:block;margin-bottom:var(--sp-1)}
+.legend .row2{display:flex;gap:var(--sp-2);align-items:center;margin:2px 0}
+.legend .samp{background:var(--panel);border:1px solid var(--line);padding:0 var(--sp-2);color:var(--text);border-radius:var(--r-md)}
+</style>
+</head>
+<body>
+
+<!-- 学习界面 -->
+<div class="screen" id="learn">
+  <div class="topbar">
+    <button class="btn">← 返回列表</button>
+    <span class="logo">Rain</span><span class="vt">/ 深度学习之道 · 第3集</span>
+    <span class="sp"></span>
+  </div>
+  <div class="main">
+    <div class="tree">
+      <div class="tnode"><span class="ic">▾</span><span class="dot" style="background:rgba(255,255,255,.5)"></span>第一章 引入</div>
+      <div class="tnode sub"><span class="dot" style="background:rgba(255,255,255,.5)"></span>1.1 背景</div>
+      <div class="tnode par"><span class="dot" style="background:var(--c-concept)"></span>概念·定义</div>
+      <div class="tnode par sel"><span class="dot" style="background:var(--c-analogy)"></span>类比·像练琴</div>
+      <div class="tnode"><span class="ic">▾</span><span class="dot" style="background:rgba(255,255,255,.5)"></span>第二章 核心方法</div>
+      <div class="tnode sub"><span class="dot" style="background:rgba(255,255,255,.5)"></span>2.1 方法</div>
+      <div class="tnode par play"><span class="dot" style="background:var(--c-example)"></span>例子·ImageNet</div>
+      <div class="tnode par selplay"><span class="dot" style="background:var(--c-concept)"></span>概念·反向传播</div>
+      <div class="tnode par"><span class="dot" style="background:var(--c-trans)"></span>过渡</div>
+    </div>
+
+    <div class="center">
+      <div class="catalog">
+        <div class="row"><span class="lab">章节</span>
+          <div class="pills">
+            <div class="pill box"><div class="fill" style="width:100%"></div><span class="tx">第一章 引入</span></div>
+            <div class="pill box play"><div class="fill" style="width:42%"></div><div class="glaze"></div><span class="tx">第二章 核心方法</span></div>
+            <div class="pill box"><div class="fill" style="width:0%"></div><span class="tx">第三章 实践</span></div>
+          </div>
+        </div>
+        <div class="row"><span class="lab">段落</span>
+          <div class="pills">
+            <div class="pill t-concept"><div class="fill" style="width:100%"></div><span class="tx">概念·什么是深度学习</span></div>
+            <div class="pill t-example play"><div class="fill" style="width:60%"></div><div class="glaze"></div><span class="tx">例子·ImageNet</span></div>
+            <div class="pill t-analogy sel"><div class="fill" style="width:0%"></div><span class="tx">类比·像练琴</span></div>
+            <div class="pill t-trans"><div class="fill" style="width:0%"></div><span class="tx">过渡</span></div>
+            <div class="pill t-concept selplay"><div class="fill" style="width:30%"></div><span class="tx">概念·反向传播</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="videozone">
+        <div class="video">
+          <span class="ph">视频画面（占位）</span>
+          <div class="cc">所以反向传播其实就是把误差一层层往回传</div>
+        </div>
+        <div class="ctl">
+          <span class="iconbtn">▶</span>
+          <span class="t">4:42 / 12:15</span>
+          <div class="pg"><i style="width:38%"></i></div>
+          <span class="iconbtn">🔊</span>
+          <span class="iconbtn">⚙</span>
+          <button class="btn">文本展开</button>
+          <button class="btn">导图展开</button>
+          <span class="iconbtn">⤢</span>
+        </div>
+      </div>
+
+      <div class="textzone">
+        <div class="para">
+          <div class="phead"><span class="cap example">例子 ▾</span><span class="ptitle">ImageNet 竞赛</span><span class="r">摘注 ⋯</span></div>
+          <div class="pbody">
+            <span class="sent">2012 年 ImageNet 比赛里，深度网络第一次大幅领先。</span>
+            <span class="sent play">它把错误率从 26% 直接压到了 15%，</span>
+            <span class="sent sel">这一跳让整个学界意识到深度学习的潜力。</span>
+            <span class="sent">随后几年模型越做越大，研究者开始关注更深、更宽的网络结构，也由此催生了后面一系列关于优化与正则化的讨论。</span>
+          </div>
+        </div>
+        <div class="para">
+          <div class="phead"><span class="cap analogy">类比 ▾</span><span class="ptitle">像练琴</span><span class="r">摘注 ⋯</span></div>
+          <div class="pbody">
+            <span class="sent">学深度学习有点像练琴，</span>
+            <span class="sent">光看谱子没用，得一遍遍上手弹，错了再改、改了再弹，肌肉记忆和理解才会一起长出来。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="tabs"><div class="tab" data-tab="notes">随记</div><div class="tab on" data-tab="ai">AI 助手</div></div>
+      <div class="sidebody" data-panel="notes" style="display:none">
+        <div class="note">
+          <div class="meta">来自「例子·ImageNet」· 2 小时前</div>
+          <div class="quote">这一跳让整个学界意识到深度学习的潜力。</div>
+          <div class="body">错误率从 26% 到 15% 这步是关键转折，<a class="link">回到视频 4:42</a>。后来整个领域的基准被这一次比赛重新定义了。</div>
+        </div>
+        <div class="note">
+          <div class="meta">自由笔记</div>
+          <div class="body">反向传播 = 误差回传，类比练琴的"纠错反馈"。练琴是耳朵纠错，网络是损失函数纠错，机制不同但都是"反馈驱动迭代"。</div>
+        </div>
+      </div>
+      <div class="sidebody" data-panel="ai">
+        <div class="chat">
+          <div class="msg user">
+            <div class="framechip"><div class="thumb-s"></div><span>附带当前帧 4:42</span></div>
+            <div class="bubble">这个类比没太懂，练琴的反馈具体怎么对应反向传播？</div>
+          </div>
+          <div class="msg ai">
+            <div class="bubble">练琴时耳朵听到错音→大脑判断→调整手指，是一条"反馈-修正"回路。反向传播：前向算损失→反向算梯度→更新权重，结构同构。对应点：错音≈损失，判断≈梯度，调整手指≈更新权重。</div>
+            <div class="msgact"><a class="link">存入随记</a></div>
+          </div>
+          <div class="msg user">
+            <div class="bubble">那"梯度消失"在练琴里对应什么？</div>
+          </div>
+          <div class="msg ai">
+            <div class="bubble">类似轻微走音听不出：反馈太弱，修正信号传不到动作，错误固化。梯度消失=深层信号衰减到近零，网络"听不到"深层的错。</div>
+            <div class="msgact"><a class="link">存入随记</a></div>
+          </div>
+        </div>
+      </div>
+      <div class="aifoot">
+        <div class="qa"><span class="qlab">类比</span><span class="chip">解释对应关系</span><span class="chip">换个类比</span><span class="chip">指出类比局限</span><span class="qlab">通用</span><span class="chip">解释画面</span><span class="chip">总结本节</span></div>
+        <div class="inputrow"><textarea class="ainput" placeholder="问点什么…（Enter 发送，Alt+Enter 换行）"></textarea><button class="btn">发送</button></div>
+        <div class="framechip inline"><div class="thumb-s"></div><span>附带当前帧 4:42 · 点此改定帧</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 视频列表主页 -->
+<div class="screen" id="listpg" style="display:none">
+  <div class="topbar">
+    <span class="logo">Rain</span><span class="vt">/ 我的视频</span>
+    <span class="sp"></span>
+  </div>
+  <div class="listmain">
+    <div class="listbar">
+      <button class="btn">最近学习 ▾</button>
+      <input class="search" placeholder="搜索标题…">
+      <button class="btn">＋ 导入</button>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="thumb">缩略图<div class="ov"></div><div class="langtag">中英·本地</div></div>
+        <div class="cinfo"><div class="ctitle">深度学习之道·第3集</div>
+          <div class="cbarrow"><div class="cbar"><i style="width:38%"></i></div><span class="ctime">12:15</span></div>
+          <div class="cmeta">2小时前</div></div></div>
+      <div class="card"><div class="thumb"><div class="badge proc">处理中 62%</div>缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">Transformer 详解</div>
+          <div class="cmeta">导入中</div></div></div>
+      <div class="card"><div class="thumb"><div class="badge fail">失败 · 重试</div>缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">强化学习入门</div>
+          <div class="cmeta">导入失败</div></div></div>
+      <div class="card"><div class="thumb"><div class="badge queue">排队中</div>缩略图<div class="ov"></div></div>
+        <div class="cinfo"><div class="ctitle">CNN 原理</div>
+          <div class="cmeta">等待</div></div></div>
+      <div class="card"><div class="thumb">缩略图<div class="ov"></div><div class="langtag">中·在线</div></div>
+        <div class="cinfo"><div class="ctitle">注意力机制</div>
+          <div class="cbarrow"><div class="cbar"><i style="width:100%"></i></div><span class="ctime">9:40</span></div>
+          <div class="cmeta">已看完·昨天</div></div></div>
+      <div class="card"><div class="thumb">缩略图<div class="ov"></div><div class="langtag">英·在线</div></div>
+        <div class="cinfo"><div class="ctitle">梯度下降直觉</div>
+          <div class="cbarrow"><div class="cbar"><i style="width:12%"></i></div><span class="ctime">18:02</span></div>
+          <div class="cmeta">3天前</div></div></div>
+    </div>
+    <div class="empty" style="display:none"><div class="big">还没有视频</div><div>点右上「导入」导入你的第一个视频</div></div>
+  </div>
+</div>
+
+<!-- 导图展开模式 -->
+<div class="screen" id="mappg" style="display:none">
+  <div class="topbar">
+    <button class="btn">← 返回列表</button>
+    <span class="logo">Rain</span><span class="vt">/ 深度学习之道 · 第3集</span>
+    <span class="sp"></span>
+  </div>
+  <div class="main">
+    <div class="tree">
+      <div class="tnode"><span class="ic">▾</span><span class="dot" style="background:rgba(255,255,255,.5)"></span>第一章 引入</div>
+      <div class="tnode sub"><span class="dot" style="background:rgba(255,255,255,.5)"></span>1.1 背景</div>
+      <div class="tnode par"><span class="dot" style="background:var(--c-concept)"></span>概念·定义</div>
+      <div class="tnode par sel"><span class="dot" style="background:var(--c-analogy)"></span>类比·像练琴</div>
+      <div class="tnode"><span class="ic">▾</span><span class="dot" style="background:rgba(255,255,255,.5)"></span>第二章 核心方法</div>
+      <div class="tnode sub"><span class="dot" style="background:rgba(255,255,255,.5)"></span>2.1 方法</div>
+      <div class="tnode par play"><span class="dot" style="background:var(--c-example)"></span>例子·ImageNet</div>
+      <div class="tnode par selplay"><span class="dot" style="background:var(--c-concept)"></span>概念·反向传播</div>
+      <div class="tnode par"><span class="dot" style="background:var(--c-trans)"></span>过渡</div>
+    </div>
+
+    <div class="center">
+      <div class="mapzone">
+        <div class="mapcanvas">
+          <svg class="mapsvg" width="2000" height="2000"></svg>
+          <div class="mtree">
+            <div class="mbranch">
+              <div class="mnode box"><div class="mfill" style="width:100%"></div><div class="mtx"><span class="mic">▾</span>第一章 引入</div></div>
+              <div class="mkids">
+                <div class="mbranch">
+                  <div class="mnode box"><div class="mfill" style="width:100%"></div><div class="mtx">1.1 背景</div></div>
+                  <div class="mkids">
+                    <div class="mbranch"><div class="mnode t-concept"><div class="mfill" style="width:100%"></div><div class="mtx">概念·定义</div></div></div>
+                    <div class="mbranch"><div class="mnode t-analogy sel"><div class="mfill" style="width:0%"></div><div class="mtx">类比·像练琴</div></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mbranch">
+              <div class="mnode box play"><div class="mfill" style="width:42%"></div><div class="mtx"><span class="mic">▾</span>第二章 核心方法</div></div>
+              <div class="mkids">
+                <div class="mbranch">
+                  <div class="mnode box play"><div class="mfill" style="width:50%"></div><div class="mtx">2.1 方法</div></div>
+                  <div class="mkids">
+                    <div class="mbranch"><div class="mnode t-example play"><div class="mfill" style="width:60%"></div><div class="mtx">例子·ImageNet</div></div></div>
+                    <div class="mbranch"><div class="mnode t-concept selplay"><div class="mfill" style="width:30%"></div><div class="mtx">概念·反向传播</div></div></div>
+                    <div class="mbranch"><div class="mnode t-trans"><div class="mfill" style="width:0%"></div><div class="mtx">过渡</div></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctl">
+        <span class="iconbtn">▶</span>
+        <span class="t">4:42 / 12:15</span>
+        <div class="pg"><i style="width:38%"></i></div>
+        <span class="iconbtn">🔊</span>
+        <span class="iconbtn">⚙</span>
+        <button class="btn">文本展开</button>
+        <button class="btn">导图收起</button>
+        <span class="iconbtn">⤢</span>
+      </div>
+
+      <div class="preview">
+        <div class="ph">预览 · 类比·像练琴</div>
+        <div class="pt">学深度学习有点像练琴，光看谱子没用，得一遍遍上手弹，错了再改、改了再弹，肌肉记忆和理解才会一起长出来。</div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="tabs"><div class="tab on">随记</div><div class="tab">AI 助手</div></div>
+      <div class="sidebody">
+        <div class="note">
+          <div class="meta">来自「例子·ImageNet」· 2 小时前</div>
+          <div class="quote">这一跳让整个学界意识到深度学习的潜力。</div>
+          <div class="body">错误率从 26% 到 15% 这步是关键转折，<a class="link">回到视频 4:42</a>。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sw">
+  <button data-s="learn" class="on" onclick="show('learn')">学习界面</button>
+  <button data-s="list" onclick="show('list')">视频列表</button>
+  <button data-s="map" onclick="show('map')">导图模式</button>
+  <button data-s="fs" class="on" onclick="toggleFs()">正文14</button>
+  <button data-s="fs13" onclick="toggleFs()">正文13</button>
+  <button data-s="empty" onclick="toggleEmpty()">空状态</button>
+</div>
+<div class="legend">
+  <b>排版+令牌 基线</b>
+  字号：18 / 16 / 14 / 13 / 12<br>
+  行距：标题1.3 · 正文1.7 · 次正文1.5<br>
+  字重：400 / 600 / 700<br>
+  间距：4·8·12·16·20·24·32·48<br>
+  圆角：0·4·8·12·胶囊<br>
+  阴影：仅浮层（本图例+切换条）<br>
+  高度：顶栏40·控制栏40·横条80<br>
+  <span style="color:var(--dimmer)">底栏可切：界面 / 正文14↔13</span>
+</div>
+<script>
+var screenMap={'learn':'learn','list':'listpg','map':'mappg'};
+function show(s){
+  Object.keys(screenMap).forEach(function(k){
+    document.getElementById(screenMap[k]).style.display = k===s?'flex':'none';
+  });
+  document.querySelectorAll('.sw button').forEach(function(b){
+    if(['learn','list','map'].indexOf(b.dataset.s)>=0) b.classList.toggle('on', b.dataset.s===s);
+  });
+  if(s==='list'){ resetEmpty(); }
+  if(s==='map'){ setTimeout(drawMapConnectors,0); }
+}
+function drawMapConnectors(){
+  var svg=document.querySelector('#mappg .mapsvg'); if(!svg)return;
+  var canvas=document.querySelector('#mappg .mapcanvas'); if(!canvas)return;
+  var scale=mapState.scale||1;
+  var cRect=canvas.getBoundingClientRect();
+  if(cRect.width===0){return;}
+  function box(el){var r=el.getBoundingClientRect();return{l:(r.left-cRect.left)/scale,t:(r.top-cRect.top)/scale,r:(r.right-cRect.left)/scale,b:(r.bottom-cRect.top)/scale,w:r.width/scale,h:r.height/scale};}
+  var paths='';
+  document.querySelectorAll('#mappg .mbranch').forEach(function(br){
+    var parent=br.children[0]; if(!parent||!parent.classList.contains('mnode'))return;
+    var kids=br.querySelector(':scope > .mkids'); if(!kids)return;
+    var pBox=box(parent),py=pBox.t+pBox.h/2,px=pBox.r;
+    kids.querySelectorAll(':scope > .mbranch').forEach(function(cb){
+      var child=cb.children[0]; if(!child||!child.classList.contains('mnode'))return;
+      var cBox=box(child),cy=cBox.t+cBox.h/2,cLeft=cBox.l;
+      var midx=px+14,r=6,sign=cy>py?1:-1;
+      var d='M '+px+' '+py+' L '+(midx-r)+' '+py+' Q '+midx+' '+py+' '+midx+' '+(py+sign*r)+' L '+midx+' '+(cy-sign*r)+' Q '+midx+' '+cy+' '+(midx+r)+' '+cy+' L '+cLeft+' '+cy;
+      paths+='<path d="'+d+'"/>';
+    });
+  });
+  svg.innerHTML=paths;
+}
+window.addEventListener('resize',drawMapConnectors);
+function resetEmpty(){
+  document.querySelector('.listmain .grid').style.display='grid';
+  var bar=document.querySelector('.listmain .listbar');
+  bar.style.display='flex';
+  bar.children[0].style.display='';
+  bar.children[1].style.display='';
+  bar.children[2].style.marginLeft='';
+  document.querySelector('.listmain .empty').style.display='none';
+  var eb=document.querySelector('.sw button[data-s="empty"]'); if(eb) eb.classList.remove('on');
+}
+function toggleEmpty(){
+  var grid=document.querySelector('.listmain .grid');
+  var bar=document.querySelector('.listmain .listbar');
+  var sortBtn=bar.children[0], search=bar.children[1], importBtn=bar.children[2];
+  var em=document.querySelector('.listmain .empty');
+  var on=em.style.display==='flex';
+  em.style.display=on?'none':'flex';
+  grid.style.display=on?'grid':'none';
+  sortBtn.style.display=on?'':'none';
+  search.style.display=on?'':'none';
+  importBtn.style.marginLeft=on?'':'auto';
+  document.querySelector('.sw button[data-s="empty"]').classList.toggle('on',!on);
+}
+function toggleFs(){
+  var b=document.body; b.classList.toggle('fs13');
+  var on13=b.classList.contains('fs13');
+  document.querySelectorAll('.sw button').forEach(function(b){
+    if(b.dataset.s==='fs') b.classList.toggle('on', !on13);
+    if(b.dataset.s==='fs13') b.classList.toggle('on', on13);
+  });
+}
+var mapState={scale:1,tx:0,ty:0};
+var mapZone=document.querySelector('#mappg .mapzone');
+var mapCanvas=document.querySelector('#mappg .mapcanvas');
+function applyMap(){ if(mapCanvas) mapCanvas.style.transform='translate('+mapState.tx+'px,'+mapState.ty+'px) scale('+mapState.scale+')'; }
+if(mapZone){
+  mapZone.addEventListener('wheel',function(e){
+    e.preventDefault();
+    var f=e.deltaY<0?1.12:1/1.12;
+    mapState.scale=Math.max(0.4,Math.min(2.5,mapState.scale*f));
+    applyMap();
+  },{passive:false});
+  var dragging=false,sx,sy,stx,sty;
+  mapZone.addEventListener('mousedown',function(e){
+    if(e.target.closest('.mnode'))return;
+    dragging=true; sx=e.clientX; sy=e.clientY; stx=mapState.tx; sty=mapState.ty;
+    mapZone.style.cursor='grabbing'; e.preventDefault();
+  });
+  window.addEventListener('mousemove',function(e){
+    if(!dragging)return;
+    mapState.tx=stx+(e.clientX-sx);
+    mapState.ty=sty+(e.clientY-sy);
+    applyMap();
+  });
+  window.addEventListener('mouseup',function(){ if(dragging){dragging=false; mapZone.style.cursor='grab';} });
+}
+document.querySelectorAll('.side').forEach(function(side){
+  var tabs=side.querySelectorAll('.tab');
+  tabs.forEach(function(t){
+    t.addEventListener('click',function(){
+      var key=t.dataset.tab;
+      if(!side.querySelector('[data-panel="'+key+'"]'))return;
+      tabs.forEach(function(x){x.classList.toggle('on',x===t);});
+      side.querySelectorAll('[data-panel]').forEach(function(p){p.style.display=p.dataset.panel===key?'block':'none';});
+      var foot=side.querySelector('.aifoot');
+      if(foot)foot.style.display=(key==='ai')?'flex':'none';
+    });
+  });
+});
+</script>
+</body>
+</html>
