@@ -1,0 +1,16 @@
+// src/architecture/commands.ts
+// ========================================
+// Tauri command 列表（决策92-98，Rust 后端职责）
+// ========================================
+
+export const TAURI_COMMANDS = [
+  'start_import',
+  'cancel_import',
+  'check_ytdlp',
+  'probe_video_info',
+  'generate_thumbnail',
+  'start_asr',
+  'download_whisper_model',
+  'list_whisper_models',
+  'convert_file_src',
+] as const
