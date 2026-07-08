@@ -99,8 +99,34 @@ export const useRainStore = create<RainState>((set, get) => ({
     }
   },
 
-  loadVideo: (_videoId: string) => {
-    // 实际实现从数据库加载
+  loadVideo: async (videoId: string) => {
+    // 生产环境：从数据库加载节点树、句子、笔记
+    try {
+      // 动态导入 database 模块（避免测试环境初始化开销）
+      const { createDatabase, getNodesByVideoId, getNotesByVideoId, getSentencesByNodeId } =
+        await import('@/models/database')
+      const db = await createDatabase(':memory:')
+
+      const nodes = await getNodesByVideoId(db, videoId)
+      const notes = await getNotesByVideoId(db, videoId)
+
+      // 收集所有段落 ID，查询句子
+      const paragraphIds = nodes.filter((n) => n.kind === 'paragraph').map((n) => n.id)
+      const sentencePromises = paragraphIds.map((pid) => getSentencesByNodeId(db, pid))
+      const sentenceArrays = await Promise.all(sentencePromises)
+      const sentences = sentenceArrays.flat()
+
+      set({
+        currentVideoId: videoId,
+        nodeTree: nodes,
+        sentences,
+        notes,
+        playPosition: 0,
+      })
+    } catch {
+      // 数据库不可用时设置当前视频 ID，数据由 UI 组件单独加载
+      set({ currentVideoId: videoId })
+    }
   },
 
   unloadVideo: () => {

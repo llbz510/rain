@@ -1,6 +1,6 @@
 // src/ui/notes.ts
 // ========================================
-// 摘注与随记系统
+// 摘注与随记系统（决策16/18）
 // ========================================
 
 import type { Note } from '@/models/types'
@@ -11,9 +11,12 @@ function generateNoteId(): string {
   return `note_${Date.now()}_${noteCounter}`
 }
 
-// 摘注创建
+// 内存缓存（测试环境或无 DB 时使用）
+const notesCache = new Map<string, Note[]>()
+
+/// 摘注创建（决策16：按钮/` 键创建笔记，sentenceIds = 当前段落全部句子）
 export function createExcerpt(videoId: string, sentenceIds: string[]): Note {
-  return {
+  const note: Note = {
     id: generateNoteId(),
     videoId,
     content: '',
@@ -22,30 +25,39 @@ export function createExcerpt(videoId: string, sentenceIds: string[]): Note {
     createdAt: Date.now(),
     sortOrder: 0,
   }
-}
 
-// 更新笔记内容
-export function updateNoteContent(note: Note, content: string): Note {
-  return {
-    ...note,
-    content,
+  // 加入缓存
+  if (!notesCache.has(videoId)) {
+    notesCache.set(videoId, [])
   }
+  notesCache.get(videoId)!.push(note)
+
+  return note
 }
 
-// 添加句子引用
+/// 更新笔记内容
+export function updateNoteContent(note: Note, content: string): Note {
+  const updated = { ...note, content }
+  updateNoteInCache(updated)
+  return updated
+}
+
+/// 添加句子引用（决策18：笔记引用句子，句子永不删）
 export function addSentenceReference(note: Note, sentenceId: string): Note {
   if (note.sentenceIds.includes(sentenceId)) {
     return note
   }
-  return {
+  const updated = {
     ...note,
     sentenceIds: [...note.sentenceIds, sentenceId],
   }
+  updateNoteInCache(updated)
+  return updated
 }
 
-// AI 回答存入笔记
+/// AI 回答存入笔记（决策10：AI 回答可手动存入随记）
 export function saveAiResponseAsNote(videoId: string, content: string, sentenceIds: string[]): Note {
-  return {
+  const note: Note = {
     id: generateNoteId(),
     videoId,
     content,
@@ -54,10 +66,32 @@ export function saveAiResponseAsNote(videoId: string, content: string, sentenceI
     createdAt: Date.now(),
     sortOrder: 0,
   }
+
+  if (!notesCache.has(videoId)) {
+    notesCache.set(videoId, [])
+  }
+  notesCache.get(videoId)!.push(note)
+
+  return note
 }
 
-// 列出视频的所有笔记
+/// 列出视频的所有笔记（决策17：所有笔记统一在随记面板）
+/// 优先从缓存读取，生产环境可从数据库查询
 export function listNotesForVideo(videoId: string): Note[] {
-  // 实际实现会查数据库，这里返回空数组
-  return []
+  return notesCache.get(videoId) ?? []
+}
+
+/// 清空指定视频的笔记缓存（切换视频时调用）
+export function clearNotesCache(videoId: string): void {
+  notesCache.delete(videoId)
+}
+
+function updateNoteInCache(updated: Note): void {
+  const videoNotes = notesCache.get(updated.videoId)
+  if (videoNotes) {
+    const idx = videoNotes.findIndex((n) => n.id === updated.id)
+    if (idx >= 0) {
+      videoNotes[idx] = updated
+    }
+  }
 }
