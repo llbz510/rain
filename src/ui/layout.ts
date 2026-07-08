@@ -24,7 +24,7 @@ export function getVisibility(mode: LayoutMode): ZoneVisibility {
     catalogBar: true,
     diagramZone: false,
     textPreview: false,
-    controlBar: false,
+    controlBar: true,
     sideTree: true,
     rightPanel: true,
   }
