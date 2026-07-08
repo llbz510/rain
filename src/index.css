@@ -1,0 +1,25 @@
+/* src/index.css — 最小暗色基础（Task 1）
+   Task 2 会扩展完整设计令牌。 */
+
+:root {
+  --color-bg: #1a1a1a;
+  --color-fg: #e5e5e5;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: system-ui, -apple-system, sans-serif;
+}
