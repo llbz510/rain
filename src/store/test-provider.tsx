@@ -30,6 +30,7 @@ interface TestStoreProviderProps {
   language?: string
   currentVideoId?: string | null
   layoutMode?: 'follow' | 'textExpand' | 'mapExpand'
+  currentPage?: 'list' | 'study' | 'settings'
 }
 
 export function TestStoreProvider({
@@ -45,6 +46,7 @@ export function TestStoreProvider({
   language = 'zh',
   currentVideoId,
   layoutMode,
+  currentPage,
 }: TestStoreProviderProps) {
   const partial: Record<string, any> = {}
   if (nodes !== undefined) partial.nodeTree = nodes
@@ -57,6 +59,7 @@ export function TestStoreProvider({
   if (translationOn !== undefined) partial.translationOn = translationOn
   if (currentVideoId !== undefined) partial.currentVideoId = currentVideoId
   if (layoutMode !== undefined) partial.layoutMode = layoutMode
+  if (currentPage !== undefined) partial.currentPage = currentPage
 
   useEffect(() => {
     useRainStore.setState(partial)

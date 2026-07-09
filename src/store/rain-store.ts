@@ -1,10 +1,11 @@
 // src/store/rain-store.ts
 // ========================================
-// Rain Zustand Store（决策99）
+// Rain Zustand Store（决策9）
 // ========================================
 
 import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
+import { addModelToPool, removeModelFromPool, listModels, type ModelPoolEntry, type AddModelInput } from '@/settings/model-pool'
 
 export type LayoutMode = 'follow' | 'textExpand' | 'mapExpand'
 export type SelectionOrigin = 'tree' | 'diagram'
@@ -34,6 +35,9 @@ interface RainState {
   importQueue: any[]
   importDialogOpen: boolean
   isInputFocused: boolean
+  currentPage: 'list' | 'study' | 'settings'
+  modelPool: ModelPoolEntry[]
+  roleAssignment: { asr: string | null; structuring: string | null; assistant: string | null }
 
   // 当前视频缓存
   nodeTree: Node[]
@@ -48,6 +52,10 @@ interface RainState {
   switchLayoutMode: (mode: LayoutMode) => void
   loadVideo: (videoId: string) => void
   unloadVideo: () => void
+  setPage: (page: 'list' | 'study' | 'settings') => void
+  addModel: (input: AddModelInput) => void
+  removeModel: (id: string) => void
+  setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => void
 }
 
 const initialState = {
@@ -64,6 +72,9 @@ const initialState = {
   importQueue: [] as any[],
   importDialogOpen: false,
   isInputFocused: false,
+  currentPage: 'list' as const,
+  modelPool: [] as ModelPoolEntry[],
+  roleAssignment: { asr: null, structuring: null, assistant: null } as { asr: string | null; structuring: string | null; assistant: string | null },
   nodeTree: [] as Node[],
   sentences: [] as Sentence[],
   notes: [] as Note[],
@@ -118,6 +129,7 @@ export const useRainStore = create<RainState>((set, get) => ({
 
       set({
         currentVideoId: videoId,
+        currentPage: 'study',
         nodeTree: nodes,
         sentences,
         notes,
@@ -125,13 +137,14 @@ export const useRainStore = create<RainState>((set, get) => ({
       })
     } catch {
       // 数据库不可用时设置当前视频 ID，数据由 UI 组件单独加载
-      set({ currentVideoId: videoId })
+      set({ currentVideoId: videoId, currentPage: 'study' })
     }
   },
 
   unloadVideo: () => {
     set({
       currentVideoId: null,
+      currentPage: 'list',
       nodeTree: [],
       sentences: [],
       notes: [],
@@ -140,4 +153,21 @@ export const useRainStore = create<RainState>((set, get) => ({
       playPosition: 0,
     })
   },
+
+  setPage: (page) => set({ currentPage: page }),
+
+  addModel: (input) => {
+    addModelToPool(input)
+    set({ modelPool: listModels() })
+  },
+
+  removeModel: (id) => {
+    removeModelFromPool(id)
+    set({ modelPool: listModels() })
+  },
+
+  setRoleModel: (role, modelId) =>
+    set((state) => ({
+      roleAssignment: { ...state.roleAssignment, [role]: modelId },
+    })),
 }))
