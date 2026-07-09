@@ -149,12 +149,99 @@ const emptyStyle: React.CSSProperties = {
   fontSize: 'var(--font-size-lg)',
 }
 
+const overlayStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0,0,0,.55)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 80,
+}
+
+const modalStyle: React.CSSProperties = {
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-2)',
+  width: '420px',
+  maxWidth: '92vw',
+  boxShadow: '0 4px 16px rgba(0,0,0,.4)',
+}
+
+const modalTitleStyle: React.CSSProperties = {
+  fontSize: 'var(--font-size-md)',
+  fontWeight: 600,
+  padding: '12px 16px',
+  borderBottom: '1px solid var(--color-border)',
+}
+
+const modalBodyStyle: React.CSSProperties = {
+  padding: '16px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+}
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontSize: 'var(--font-size-xs)',
+  color: 'var(--color-muted)',
+}
+
+const modalInputStyle: React.CSSProperties = {
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border)',
+  color: 'var(--color-fg)',
+  padding: '4px 8px',
+  borderRadius: 'var(--radius-1)',
+  fontSize: 'var(--font-size-sm)',
+  width: '100%',
+  fontFamily: 'inherit',
+}
+
+const errorStyle: React.CSSProperties = {
+  color: '#f85149',
+  fontSize: 'var(--font-size-xs)',
+}
+
+const modalFootStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  gap: '8px',
+  padding: '12px 16px',
+  borderTop: '1px solid var(--color-border)',
+}
+
+const modalBtnStyle: React.CSSProperties = {
+  border: '1px solid var(--color-border)',
+  background: 'transparent',
+  color: 'var(--color-fg)',
+  padding: '4px 12px',
+  borderRadius: 'var(--radius-1)',
+  fontSize: 'var(--font-size-xs)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
+const modalBtnPrimaryStyle: React.CSSProperties = {
+  border: '1px solid transparent',
+  background: 'rgba(255,255,255,.12)',
+  color: 'var(--color-fg)',
+  padding: '4px 12px',
+  borderRadius: 'var(--radius-1)',
+  fontSize: 'var(--font-size-xs)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
 export function VideoListPage() {
   const [db, setDb] = useState<Database | null>(null)
   const [videos, setVideos] = useState<Video[]>([])
   const [sortBy, setSortBy] = useState<SortBy>('lastStudied')
   const [keyword, setKeyword] = useState('')
   const [importMenuOpen, setImportMenuOpen] = useState(false)
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false)
+  const [importUrl, setImportUrl] = useState('')
+  const [urlError, setUrlError] = useState('')
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
   useEffect(() => {
@@ -251,9 +338,64 @@ export function VideoListPage() {
     }
   }
 
-  const handleUrlImport = () => {
+  const handleUrlImport = async () => {
     setImportMenuOpen(false)
-    console.log('[VideoListPage] online import - will be implemented in Task 6')
+    try {
+      const { isTauri, tauriInvoke } = await import('@/lib/tauri-env')
+      if (!isTauri()) {
+        alert('请在桌面应用中使用在线视频导入')
+        return
+      }
+      const ytdlpResult = await tauriInvoke<{ available: boolean; version: string | null }>(
+        'check_ytdlp_command', {},
+      )
+      if (!ytdlpResult.available) {
+        alert('请先安装 yt-dlp 并加入 PATH')
+        return
+      }
+      setUrlDialogOpen(true)
+      setImportUrl('')
+      setUrlError('')
+    } catch (err) {
+      console.error('[VideoListPage] yt-dlp 检查失败', err)
+    }
+  }
+
+  const handleUrlSubmit = async () => {
+    if (!importUrl.trim()) {
+      setUrlError('请输入 URL')
+      return
+    }
+    try {
+      const { tauriInvoke } = await import('@/lib/tauri-env')
+      const info = await tauriInvoke<{ title: string; duration: number; thumbnail: string }>(
+        'probe_video_info',
+        { filePath: '', sourceUrl: importUrl.trim() },
+      )
+
+      if (!db) return
+      const video: Video = {
+        id: `v_${Date.now()}`,
+        title: info.title,
+        source: 'url',
+        sourceUrl: importUrl.trim(),
+        thumbnail: info.thumbnail,
+        duration: info.duration,
+        language: '',
+        status: 'pending',
+        createdAt: Date.now(),
+        position: 0,
+        lastStudiedAt: Date.now(),
+      }
+      await insertVideo(db, video)
+      const list = keyword.trim()
+        ? await searchVideosByTitle(db, keyword.trim())
+        : await listVideos(db, sortBy)
+      setVideos(list)
+      setUrlDialogOpen(false)
+    } catch (err) {
+      setUrlError(`导入失败: ${err}`)
+    }
   }
 
   const handleSettingsClick = () => {
@@ -319,6 +461,31 @@ export function VideoListPage() {
           </div>
         )}
       </main>
+
+      {urlDialogOpen && (
+        <div style={overlayStyle}>
+          <div style={modalStyle}>
+            <div style={modalTitleStyle}>导入在线视频</div>
+            <div style={modalBodyStyle}>
+              <label style={fieldLabelStyle}>
+                视频 URL（YouTube/Bilibili 等）
+              </label>
+              <input
+                type="text"
+                value={importUrl}
+                onChange={(e) => { setImportUrl(e.target.value); setUrlError('') }}
+                placeholder="https://www.youtube.com/watch?v=..."
+                style={modalInputStyle}
+              />
+              {urlError && <div style={errorStyle}>{urlError}</div>}
+            </div>
+            <div style={modalFootStyle}>
+              <button onClick={() => setUrlDialogOpen(false)} style={modalBtnStyle}>取消</button>
+              <button onClick={handleUrlSubmit} style={modalBtnPrimaryStyle}>导入</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
