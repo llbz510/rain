@@ -4,7 +4,7 @@
 // 完整实现：模型池列表 / 添加模型表单 / 角色选择 / 设置页
 // ========================================
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRainStore } from '@/store/rain-store'
 import { PROVIDER_PRESETS, WHISPER_SIZES } from '@/lib/provider-presets'
 import { isTauri } from '@/lib/tauri-env'
@@ -549,6 +549,41 @@ export function SettingsPage() {
   const setPage = useRainStore((s) => s.setPage)
   const [modalOpen, setModalOpen] = useState(false)
   const [activeNav] = useState<string>('模型管理')
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { isTauri } = await import('@/lib/tauri-env')
+        if (!isTauri()) return
+        const { createDatabase, getSetting } = await import('@/models/database')
+        const { addModelToPool, listModels } = await import('@/settings/model-pool')
+        const db = await createDatabase('rain.db')
+
+        const poolJson = await getSetting(db, 'model_pool')
+        if (poolJson) {
+          const entries = JSON.parse(poolJson)
+          const currentPool = listModels()
+          for (const entry of entries) {
+            if (!currentPool.find((m: any) => m.id === entry.id)) {
+              try { addModelToPool(entry) } catch { /* skip duplicates */ }
+            }
+          }
+          useRainStore.setState({ modelPool: listModels() })
+        }
+
+        const asr = await getSetting(db, 'role_asr')
+        const structuring = await getSetting(db, 'role_structuring')
+        const assistant = await getSetting(db, 'role_assistant')
+        useRainStore.setState({
+          roleAssignment: {
+            asr: asr || null,
+            structuring: structuring || null,
+            assistant: assistant || null,
+          },
+        })
+      } catch { /* browser — ignore */ }
+    })()
+  }, [])
 
   const models: ModelEntry[] = modelPool.map((m) => ({
     id: m.id,

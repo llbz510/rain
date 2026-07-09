@@ -158,16 +158,49 @@ export const useRainStore = create<RainState>((set, get) => ({
 
   addModel: (input) => {
     addModelToPool(input)
-    set({ modelPool: listModels() })
+    const pool = listModels()
+    set({ modelPool: pool })
+    void (async () => {
+      try {
+        const { isTauri } = await import('@/lib/tauri-env')
+        if (!isTauri()) return
+        const { createDatabase, setSetting } = await import('@/models/database')
+        const db = await createDatabase('rain.db')
+        await setSetting(db, 'model_pool', JSON.stringify(pool))
+        if (input.apiKey) {
+          await setSetting(db, `api_key.${input.alias}`, input.apiKey)
+        }
+      } catch { /* browser fallback — ignore */ }
+    })()
   },
 
   removeModel: (id) => {
     removeModelFromPool(id)
-    set({ modelPool: listModels() })
+    const pool = listModels()
+    set({ modelPool: pool })
+    void (async () => {
+      try {
+        const { isTauri } = await import('@/lib/tauri-env')
+        if (!isTauri()) return
+        const { createDatabase, setSetting } = await import('@/models/database')
+        const db = await createDatabase('rain.db')
+        await setSetting(db, 'model_pool', JSON.stringify(pool))
+      } catch { /* browser fallback — ignore */ }
+    })()
   },
 
-  setRoleModel: (role, modelId) =>
+  setRoleModel: (role, modelId) => {
     set((state) => ({
       roleAssignment: { ...state.roleAssignment, [role]: modelId },
-    })),
+    }))
+    void (async () => {
+      try {
+        const { isTauri } = await import('@/lib/tauri-env')
+        if (!isTauri()) return
+        const { createDatabase, setSetting } = await import('@/models/database')
+        const db = await createDatabase('rain.db')
+        await setSetting(db, `role_${role}`, modelId ?? '')
+      } catch { /* browser fallback — ignore */ }
+    })()
+  },
 }))
