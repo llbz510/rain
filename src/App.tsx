@@ -1,23 +1,35 @@
 // src/App.tsx
 // ========================================
-// Rain 根组件 —— 根据 store.currentVideoId 切换页面（Task 5 组装）
-// null → 视频列表页；非 null → 学习界面。
+// Rain 根组件 —— 根据 store.currentPage 切换三个页面
+// list → 视频列表页；study → 学习界面；settings → 设置页
 // 全局快捷键由 ShortcutManager 挂载（决策53）。
 // ========================================
 
 import { useRainStore } from '@/store/rain-store'
 import { VideoListPage } from '@/pages/VideoListPage'
 import { StudyInterface } from '@/pages/StudyInterface'
+import { SettingsPage } from '@/ui/components/settings'
 import { ShortcutManager } from '@/ui/components/shortcut-manager'
 
 export default function App() {
-  const currentVideoId = useRainStore((s) => s.currentVideoId)
+  const currentPage = useRainStore((s) => s.currentPage)
+
+  let page: React.ReactNode
+  switch (currentPage) {
+    case 'settings':
+      page = <SettingsPage />
+      break
+    case 'study':
+      page = <StudyInterface />
+      break
+    default:
+      page = <VideoListPage />
+  }
 
   return (
     <>
-      {/* 全局快捷键监听（1/2/3 模式切换、` 摘注、Delete 删除） */}
       <ShortcutManager />
-      {currentVideoId === null ? <VideoListPage /> : <StudyInterface />}
+      {page}
     </>
   )
 }

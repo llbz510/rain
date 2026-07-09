@@ -83,6 +83,18 @@ const importButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
 }
 
+const settingsButtonStyle: React.CSSProperties = {
+  flex: '0 0 auto',
+  height: '28px',
+  padding: '0 var(--spacing-2)',
+  background: 'transparent',
+  color: 'var(--color-fg)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-1)',
+  fontSize: 'var(--font-size-sm)',
+  cursor: 'pointer',
+}
+
 const mainStyle: React.CSSProperties = {
   flex: '1 1 auto',
   overflowY: 'auto',
@@ -160,6 +172,10 @@ export function VideoListPage() {
     console.log('[VideoListPage] import clicked')
   }
 
+  const handleSettingsClick = () => {
+    useRainStore.getState().setPage('settings')
+  }
+
   const isEmpty = videos.length === 0
 
   return (
@@ -185,6 +201,9 @@ export function VideoListPage() {
         </select>
         <button onClick={handleImportClick} style={importButtonStyle}>
           导入
+        </button>
+        <button onClick={handleSettingsClick} style={settingsButtonStyle}>
+          设置
         </button>
       </header>
 
