@@ -242,6 +242,7 @@ export function VideoListPage() {
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [importUrl, setImportUrl] = useState('')
   const [urlError, setUrlError] = useState('')
+  const [localImportError, setLocalImportError] = useState('')
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
   useEffect(() => {
@@ -295,10 +296,11 @@ export function VideoListPage() {
 
   const handleLocalImport = async () => {
     setImportMenuOpen(false)
+    setLocalImportError('')
     try {
       const { isTauri, tauriInvoke } = await import('@/lib/tauri-env')
       if (!isTauri()) {
-        alert('请在桌面应用中使用本地文件导入')
+        setLocalImportError('请在桌面应用中使用本地文件导入')
         return
       }
       const { open } = await import('@tauri-apps/plugin-dialog')
@@ -437,6 +439,26 @@ export function VideoListPage() {
               <button onClick={handleUrlImport} style={dropdownItemStyle}>
                 在线视频
               </button>
+            </div>
+          )}
+          {localImportError && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                marginTop: '4px',
+                background: 'var(--color-surface)',
+                border: '1px solid #f85149',
+                borderRadius: 'var(--radius-1)',
+                padding: '6px 10px',
+                fontSize: 'var(--font-size-xs)',
+                color: '#f85149',
+                whiteSpace: 'nowrap',
+                zIndex: 20,
+              }}
+            >
+              {localImportError}
             </div>
           )}
         </div>
