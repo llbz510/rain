@@ -227,6 +227,8 @@ export function AddModelForm({ onClose, onSave }: { onClose?: () => void; onSave
   const [alias, setAlias] = useState('')
   const [supportsVision, setSupportsVision] = useState(false)
   const [whisperSize, setWhisperSize] = useState('medium')
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle')
+  const [downloadError, setDownloadError] = useState('')
 
   const isApiType = modelType === 'llm' || modelType === 'asr-api'
   const isWhisper = modelType === 'whisper-local'
@@ -241,8 +243,26 @@ export function AddModelForm({ onClose, onSave }: { onClose?: () => void; onSave
     }
   }
 
-  function handleSave() {
-    const type = modelType as ModelType
+  async function handleDownload() {
+    setDownloadStatus('downloading')
+    setDownloadError('')
+    try {
+      const { tauriInvoke } = await import('@/lib/tauri-env')
+      const { appDataDir } = await import('@tauri-apps/api/path')
+      const dataDir = await appDataDir()
+      const outputDir = `${dataDir}whisper-models`
+      await tauriInvoke<string>('download_whisper_model', {
+        modelSize: whisperSize,
+        outputDir,
+      })
+      setDownloadStatus('done')
+    } catch (err) {
+      setDownloadStatus('error')
+      setDownloadError(String(err))
+    }
+  }
+
+  function handleSave() {    const type = modelType as ModelType
     const finalModelName = isWhisper ? whisperSize : modelName
     const finalProvider = isWhisper ? 'local' : provider
     const finalBaseUrl = isApiType ? (provider === 'custom' ? baseUrl : PROVIDER_PRESETS.find((p) => p.value === provider)?.baseUrl) : undefined
@@ -370,9 +390,23 @@ export function AddModelForm({ onClose, onSave }: { onClose?: () => void; onSave
             <div style={{ fontSize: 12, color: COLORS.dimmer, marginTop: 4 }}>
               首次使用触发下载，显示进度
             </div>
-            <button style={s.btn} disabled={!isTauri()}>
-              下载模型
+            <button
+              style={s.btn}
+              disabled={!isTauri() || downloadStatus === 'downloading'}
+              onClick={isTauri() ? handleDownload : undefined}
+            >
+              {downloadStatus === 'downloading' ? '下载中…' : downloadStatus === 'done' ? '✓ 已下载' : '下载模型'}
             </button>
+            {downloadStatus === 'error' && (
+              <div style={{ fontSize: 12, color: COLORS.fail, marginTop: 4 }}>
+                下载失败：{downloadError}
+              </div>
+            )}
+            {downloadStatus === 'done' && (
+              <div style={{ fontSize: 12, color: COLORS.example, marginTop: 4 }}>
+                模型已下载，可保存添加到模型池
+              </div>
+            )}
           </div>
         )}
 
