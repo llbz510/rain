@@ -9,6 +9,7 @@ import { useRainStore } from '@/store/rain-store'
 import { PROVIDER_PRESETS, WHISPER_SIZES } from '@/lib/provider-presets'
 import { isTauri } from '@/lib/tauri-env'
 import type { ModelType } from '@/settings/model-pool'
+import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
 
 // ── 共享类型 ──────────────────────────────────────
 
@@ -548,7 +549,8 @@ export function SettingsPage() {
   const modelPool = useRainStore((s) => s.modelPool)
   const setPage = useRainStore((s) => s.setPage)
   const [modalOpen, setModalOpen] = useState(false)
-  const [activeNav] = useState<string>('模型管理')
+  const [activeNav, setActiveNav] = useState<string>('模型管理')
+  const [chunkThreshold, setChunkThresholdState] = useState<number>(getChunkThreshold)
 
   useEffect(() => {
     void (async () => {
@@ -638,6 +640,7 @@ export function SettingsPage() {
           {NAV_ITEMS.map((item) => (
             <div
               key={item}
+              onClick={() => setActiveNav(item)}
               style={{
                 padding: '8px 12px',
                 borderRadius: 8,
@@ -655,43 +658,134 @@ export function SettingsPage() {
 
         {/* Main content */}
         <main style={{ overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* 角色选择卡片 */}
-          <section
-            style={{
-              background: COLORS.panel,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 8,
-              padding: 16,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>角色选择</div>
-              <div style={{ flex: 1 }} />
-              <span style={{ fontSize: 12, color: COLORS.dimmer }}>
-                每个角色从下方"模型池"里选一个当前使用
-              </span>
-            </div>
-            <RoleSelector models={models} />
-          </section>
+          {activeNav === '模型管理' && (
+            <>
+              {/* 角色选择卡片 */}
+              <section
+                style={{
+                  background: COLORS.panel,
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 8,
+                  padding: 16,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>角色选择</div>
+                  <div style={{ flex: 1 }} />
+                  <span style={{ fontSize: 12, color: COLORS.dimmer }}>
+                    每个角色从下方"模型池"里选一个当前使用
+                  </span>
+                </div>
+                <RoleSelector models={models} />
+              </section>
 
-          {/* 模型池卡片 */}
-          <section
-            style={{
-              background: COLORS.panel,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 8,
-              padding: 16,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>模型池</div>
-              <div style={{ flex: 1 }} />
-              <button style={s.primaryBtn} onClick={() => setModalOpen(true)}>
-                ＋ 添加模型
-              </button>
-            </div>
-            <ModelPoolList models={models} />
-          </section>
+              {/* 模型池卡片 */}
+              <section
+                style={{
+                  background: COLORS.panel,
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 8,
+                  padding: 16,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>模型池</div>
+                  <div style={{ flex: 1 }} />
+                  <button style={s.primaryBtn} onClick={() => setModalOpen(true)}>
+                    ＋ 添加模型
+                  </button>
+                </div>
+                <ModelPoolList models={models} />
+              </section>
+            </>
+          )}
+
+          {activeNav === '外观' && (
+            <section
+              style={{
+                background: COLORS.panel,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 8,
+                padding: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 200,
+              }}
+            >
+              <div style={{ textAlign: 'center', color: COLORS.dimmer }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>🎨</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.muted, marginBottom: 6 }}>外观设置</div>
+                <div style={{ fontSize: 12 }}>敬请期待</div>
+              </div>
+            </section>
+          )}
+
+          {activeNav === '高级' && (
+            <section
+              style={{
+                background: COLORS.panel,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 8,
+                padding: 16,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 16 }}>高级设置</div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <label style={{ fontSize: 13, flex: 1 }}>
+                    分块阈值
+                    <span style={{ fontSize: 12, color: COLORS.dimmer, marginLeft: 6 }}>
+                      （长视频上下文占比触发分块，默认 33%）
+                    </span>
+                  </label>
+                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 40, textAlign: 'right' }}>
+                    {Math.round(chunkThreshold * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={10}
+                  max={80}
+                  step={1}
+                  value={Math.round(chunkThreshold * 100)}
+                  onChange={(e) => {
+                    const val = Number(e.target.value) / 100
+                    setChunkThresholdState(val)
+                    setChunkThreshold(val)
+                  }}
+                  style={{ width: '100%', accentColor: COLORS.concept }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: COLORS.dimmer }}>
+                  <span>10%（频繁分块）</span>
+                  <span>80%（少分块）</span>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeNav === '关于' && (
+            <section
+              style={{
+                background: COLORS.panel,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 8,
+                padding: 32,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8,
+                minHeight: 200,
+              }}
+            >
+              <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: 2 }}>Rain</div>
+              <div style={{ fontSize: 13, color: COLORS.muted }}>版本 0.1.0</div>
+              <div style={{ fontSize: 12, color: COLORS.dimmer, marginTop: 8, textAlign: 'center', lineHeight: 1.6 }}>
+                个人学习视频精读工具
+              </div>
+            </section>
+          )}
         </main>
       </div>
 
