@@ -11,7 +11,7 @@ use crate::whisper::{self, WhisperModelSize};
 use crate::ytdlp;
 use std::path::Path;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 /// 启动导入（立即返回，后台 tokio task 跑，决策98）
 /// 流程：yt-dlp下载(在线) → ffprobe时长 → 缩略图 → ASR → 事件推送
@@ -195,14 +195,21 @@ fn is_sentence_ending(text: &str) -> bool {
 /// 下载 Whisper 模型（决策94）
 #[tauri::command]
 pub async fn download_whisper_model(
+    app: AppHandle,
     model_size: String,
-    output_dir: String,
 ) -> Result<String, String> {
     let size = WhisperModelSize::from_str(&model_size)
         .ok_or_else(|| format!("Unknown model size: {}", model_size))?;
 
     let filename = size.as_filename();
-    let output_path = format!("{}/{}", output_dir, filename);
+
+    // 用 Tauri 自带的路径解析取 app data dir，无需前端权限
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Cannot resolve app data dir: {}", e))?;
+    let output_dir = data_dir.join("whisper-models");
+    let output_path = output_dir.join(filename);
 
     std::fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Create dir failed: {}", e))?;
@@ -234,12 +241,18 @@ pub async fn download_whisper_model(
     std::fs::write(&output_path, &bytes)
         .map_err(|e| format!("Write file failed: {}", e))?;
 
-    Ok(output_path)
+    Ok(output_path.to_string_lossy().to_string())
 }
 
 /// 列出已下载的 Whisper 模型
 #[tauri::command]
-pub async fn list_whisper_models(model_dir: String) -> Result<Vec<String>, String> {
+pub async fn list_whisper_models(app: AppHandle) -> Result<Vec<String>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Cannot resolve app data dir: {}", e))?;
+    let model_dir = data_dir.join("whisper-models");
+
     let sizes = [
         WhisperModelSize::Tiny,
         WhisperModelSize::Base,
@@ -250,8 +263,8 @@ pub async fn list_whisper_models(model_dir: String) -> Result<Vec<String>, Strin
 
     let mut found = Vec::new();
     for size in &sizes {
-        let path = format!("{}/{}", model_dir, size.as_filename());
-        if Path::new(&path).exists() {
+        let path = model_dir.join(size.as_filename());
+        if path.exists() {
             found.push(size.as_filename().to_string());
         }
     }

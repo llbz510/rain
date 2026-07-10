@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Rain default capabilities",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:path:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "sql:default"
+  ]
+}

@@ -248,12 +248,8 @@ export function AddModelForm({ onClose, onSave }: { onClose?: () => void; onSave
     setDownloadError('')
     try {
       const { tauriInvoke } = await import('@/lib/tauri-env')
-      const { appDataDir } = await import('@tauri-apps/api/path')
-      const dataDir = await appDataDir()
-      const outputDir = `${dataDir}whisper-models`
       await tauriInvoke<string>('download_whisper_model', {
         modelSize: whisperSize,
-        outputDir,
       })
       setDownloadStatus('done')
     } catch (err) {
