@@ -9,6 +9,7 @@
 //   mapExpand  → controlBar + diagramZone + textPreview + sideTree + rightPanel
 // ========================================
 
+import { useState, useCallback } from 'react'
 import { useRainStore } from '@/store/rain-store'
 import { getVisibility } from '@/ui/layout'
 import { SideTree, CatalogBar, DiagramZone } from '@/ui/components/catalog'
@@ -16,6 +17,8 @@ import { VideoZone, VideoControls } from '@/ui/components/video'
 import { TextZone } from '@/ui/components/text-zone'
 import { NotesPanel } from '@/ui/components/notes'
 import { AiAssistant, ChatInput } from '@/ui/components/ai-assistant'
+import { streamAiChat } from '@/llm/client'
+import type { ChatMessage } from '@/llm/types'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -155,6 +158,80 @@ export function StudyInterface() {
   const aiPanelState = useRainStore((s) => s.aiPanelState)
   const playPosition = useRainStore((s) => s.playPosition)
   const unloadVideo = useRainStore((s) => s.unloadVideo)
+  const filePath = useRainStore((s) => s.currentVideoFilePath)
+  const videoTitle = useRainStore((s) => s.currentVideoTitle)
+
+  // AI chat state
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [cleanupFn, setCleanupFn] = useState<(() => void) | null>(null)
+
+  const handleSendMessage = useCallback((text: string) => {
+    const store = useRainStore.getState()
+    const roleAssignment = store.roleAssignment
+    const modelPool = store.modelPool
+    const assistantModel = modelPool.find((m) => m.id === roleAssignment.assistant)
+
+    if (!assistantModel) {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'user', content: text },
+        { role: 'assistant', content: 'Please configure an AI assistant model in Settings first.' },
+      ])
+      return
+    }
+
+    const userMsg = { role: 'user' as const, content: text }
+    setChatMessages((prev) => [...prev, userMsg])
+    setIsStreaming(true)
+
+    // Build context from current sentences
+    const sentences = store.sentences
+    const contextText = sentences.length > 0
+      ? `Context (video transcript):\n${sentences.map((s) => s.text).join(' ')}\n\n`
+      : ''
+
+    const llmMessages: ChatMessage[] = [
+      { role: 'system', content: `You are a video learning assistant. Help the user understand the video content. ${contextText}` },
+      ...chatMessages.map((m) => ({ role: m.role, content: m.content })),
+      { role: 'user', content: text },
+    ]
+
+    const settings = {
+      baseUrl: assistantModel.baseUrl ?? '',
+      apiKey: assistantModel.apiKey ?? '',
+      model: assistantModel.modelName,
+    }
+
+    let currentContent = ''
+    setChatMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+
+    const cleanup = streamAiChat(llmMessages, settings, {
+      onToken: (token) => {
+        currentContent += token
+        setChatMessages((prev) => {
+          const updated = [...prev]
+          updated[updated.length - 1] = { role: 'assistant', content: currentContent }
+          return updated
+        })
+      },
+      onDone: () => {
+        setIsStreaming(false)
+        setCleanupFn(null)
+      },
+      onError: (err) => {
+        setIsStreaming(false)
+        setCleanupFn(null)
+        setChatMessages((prev) => {
+          const updated = [...prev]
+          updated[updated.length - 1] = { role: 'assistant', content: `Error: ${err.message}` }
+          return updated
+        })
+      },
+    })
+
+    setCleanupFn(() => cleanup)
+  }, [chatMessages])
 
   // 显隐完全交给布局状态机，不在此处重新实现逻辑（决策19）
   const visibility = getVisibility(layoutMode)
@@ -183,7 +260,7 @@ export function StudyInterface() {
         <button onClick={() => unloadVideo()} style={backButtonStyle}>
           ← 返回
         </button>
-        <span style={titleStyle}>视频</span>
+        <span style={titleStyle}>{videoTitle || '视频'}</span>
       </header>
 
       {/* 左树：所有模式恒显 */}
@@ -197,9 +274,8 @@ export function StudyInterface() {
       <section style={middleStyle}>
         {visibility.videoZone && (
           <div style={flexFillStyle}>
-            {/* filePath 由 store 缓存的视频对象提供；当前 store 未缓存文件路径，暂传空串 */}
             <VideoZone
-              filePath=""
+              filePath={filePath}
               resumePosition={playPosition}
             />
           </div>
@@ -246,8 +322,8 @@ export function StudyInterface() {
           <div style={tabContentStyle}>
             {aiPanelState === 'ai' ? (
               <>
-                <AiAssistant messages={[]} />
-                <ChatInput />
+                <AiAssistant messages={chatMessages} isStreaming={isStreaming} />
+                <ChatInput onSend={handleSendMessage} />
               </>
             ) : (
               <NotesPanel />

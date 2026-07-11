@@ -7,7 +7,7 @@
 // jsdom 下 listVideos 返回空 → 显示空状态（getEmptyStateMessage）
 // ========================================
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
   createDatabase,
   listVideos,
@@ -15,6 +15,7 @@ import {
   insertVideo,
   type Database,
 } from '@/models/database'
+import { getDb } from '@/models/db-singleton'
 import { VideoCard } from '@/ui/components/video-list'
 import { getEmptyStateMessage } from '@/ui/video-list'
 import { useRainStore } from '@/store/rain-store'
@@ -243,11 +244,12 @@ export function VideoListPage() {
   const [importUrl, setImportUrl] = useState('')
   const [urlError, setUrlError] = useState('')
   const [localImportError, setLocalImportError] = useState('')
+  const [processingVideoId, setProcessingVideoId] = useState<string | null>(null)
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
   useEffect(() => {
     let cancelled = false
-    createDatabase(':memory:')
+    getDb()
       .then((d) => {
         if (!cancelled) setDb(d)
       })
@@ -285,10 +287,46 @@ export function VideoListPage() {
     void useRainStore.getState().loadVideo(videoId)
   }
 
-  // 点非 ready 卡 → 打开导入框（暂为占位）
-  const handleOpenImport = (videoId: string) => {
-    console.log('[VideoListPage] open import dialog for', videoId)
-  }
+  // 点非 ready 卡 → 触发处理管线
+  const handleOpenImport = useCallback(async (videoId: string) => {
+    if (!db || processingVideoId) return
+    setProcessingVideoId(videoId)
+
+    try {
+      const { runPipeline } = await import('@/pipeline/pipeline-orchestrator')
+      const { getVideoById } = await import('@/models/database')
+      const video = await getVideoById(db, videoId)
+      if (!video) return
+
+      const store = useRainStore.getState()
+      const structuringModelId = store.roleAssignment.structuring
+      const model = store.modelPool.find((m) => m.id === structuringModelId)
+
+      const llmSettings = model
+        ? { baseUrl: model.baseUrl ?? '', apiKey: model.apiKey ?? '', model: model.modelName }
+        : { baseUrl: '', apiKey: '', model: '' }
+
+      await runPipeline(video, llmSettings, {
+        onProgress: (stage, percent) => {
+          console.log(`[Pipeline] ${stage}: ${percent}%`)
+        },
+        onComplete: async () => {
+          setProcessingVideoId(null)
+          const list = keyword.trim()
+            ? await searchVideosByTitle(db, keyword.trim())
+            : await listVideos(db, sortBy)
+          setVideos(list)
+        },
+        onError: (err) => {
+          setProcessingVideoId(null)
+          console.error('[Pipeline] Error:', err)
+        },
+      }, db)
+    } catch (err) {
+      setProcessingVideoId(null)
+      console.error('[VideoListPage] pipeline error', err)
+    }
+  }, [db, processingVideoId, keyword, sortBy])
 
   const handleImportClick = () => {
     setImportMenuOpen((prev) => !prev)
@@ -347,6 +385,9 @@ export function VideoListPage() {
         ? await searchVideosByTitle(db, keyword.trim())
         : await listVideos(db, sortBy)
       setVideos(list)
+
+      // Trigger pipeline processing
+      void handleOpenImport(videoId)
     } catch (err) {
       console.error('[VideoListPage] 本地文件导入失败', err)
     }
@@ -407,6 +448,9 @@ export function VideoListPage() {
         : await listVideos(db, sortBy)
       setVideos(list)
       setUrlDialogOpen(false)
+
+      // Trigger pipeline processing
+      void handleOpenImport(video.id)
     } catch (err) {
       setUrlError(`导入失败: ${err}`)
     }

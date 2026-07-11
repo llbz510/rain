@@ -43,6 +43,8 @@ interface RainState {
   nodeTree: Node[]
   sentences: Sentence[]
   notes: Note[]
+  currentVideoFilePath: string
+  currentVideoTitle: string
 
   // Actions
   reset: () => void
@@ -78,6 +80,8 @@ const initialState = {
   nodeTree: [] as Node[],
   sentences: [] as Sentence[],
   notes: [] as Note[],
+  currentVideoFilePath: '',
+  currentVideoTitle: '',
 }
 
 export const useRainStore = create<RainState>((set, get) => ({
@@ -111,17 +115,16 @@ export const useRainStore = create<RainState>((set, get) => ({
   },
 
   loadVideo: async (videoId: string) => {
-    // 生产环境：从数据库加载节点树、句子、笔记
     try {
-      // 动态导入 database 模块（避免测试环境初始化开销）
-      const { createDatabase, getNodesByVideoId, getNotesByVideoId, getSentencesByNodeId } =
+      const { getDb } = await import('@/models/db-singleton')
+      const { getNodesByVideoId, getNotesByVideoId, getSentencesByNodeId, getVideoById } =
         await import('@/models/database')
-      const db = await createDatabase(':memory:')
+      const db = await getDb()
 
+      const video = await getVideoById(db, videoId)
       const nodes = await getNodesByVideoId(db, videoId)
       const notes = await getNotesByVideoId(db, videoId)
 
-      // 收集所有段落 ID，查询句子
       const paragraphIds = nodes.filter((n) => n.kind === 'paragraph').map((n) => n.id)
       const sentencePromises = paragraphIds.map((pid) => getSentencesByNodeId(db, pid))
       const sentenceArrays = await Promise.all(sentencePromises)
@@ -133,10 +136,11 @@ export const useRainStore = create<RainState>((set, get) => ({
         nodeTree: nodes,
         sentences,
         notes,
-        playPosition: 0,
+        playPosition: video?.position ?? 0,
+        currentVideoFilePath: video?.filePath ?? '',
+        currentVideoTitle: video?.title ?? '',
       })
     } catch {
-      // 数据库不可用时设置当前视频 ID，数据由 UI 组件单独加载
       set({ currentVideoId: videoId, currentPage: 'study' })
     }
   },
@@ -151,6 +155,8 @@ export const useRainStore = create<RainState>((set, get) => ({
       selectedNodeId: null,
       selectionOrigin: null,
       playPosition: 0,
+      currentVideoFilePath: '',
+      currentVideoTitle: '',
     })
   },
 
@@ -164,8 +170,9 @@ export const useRainStore = create<RainState>((set, get) => ({
       try {
         const { isTauri } = await import('@/lib/tauri-env')
         if (!isTauri()) return
-        const { createDatabase, setSetting } = await import('@/models/database')
-        const db = await createDatabase('rain.db')
+        const { getDb } = await import('@/models/db-singleton')
+        const { setSetting } = await import('@/models/database')
+        const db = await getDb()
         await setSetting(db, 'model_pool', JSON.stringify(pool))
         if (input.apiKey) {
           await setSetting(db, `api_key.${input.alias}`, input.apiKey)
@@ -182,8 +189,9 @@ export const useRainStore = create<RainState>((set, get) => ({
       try {
         const { isTauri } = await import('@/lib/tauri-env')
         if (!isTauri()) return
-        const { createDatabase, setSetting } = await import('@/models/database')
-        const db = await createDatabase('rain.db')
+        const { getDb } = await import('@/models/db-singleton')
+        const { setSetting } = await import('@/models/database')
+        const db = await getDb()
         await setSetting(db, 'model_pool', JSON.stringify(pool))
       } catch { /* browser fallback — ignore */ }
     })()
@@ -197,8 +205,9 @@ export const useRainStore = create<RainState>((set, get) => ({
       try {
         const { isTauri } = await import('@/lib/tauri-env')
         if (!isTauri()) return
-        const { createDatabase, setSetting } = await import('@/models/database')
-        const db = await createDatabase('rain.db')
+        const { getDb } = await import('@/models/db-singleton')
+        const { setSetting } = await import('@/models/database')
+        const db = await getDb()
         await setSetting(db, `role_${role}`, modelId ?? '')
       } catch { /* browser fallback — ignore */ }
     })()
