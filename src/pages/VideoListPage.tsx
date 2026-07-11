@@ -316,13 +316,25 @@ export function VideoListPage() {
         { filePath, sourceUrl: null },
       )
 
+      const videoId = `v_${Date.now()}`
+      let thumbnailPath = ''
+      try {
+        const thumbOutput = filePath.replace(/\.[^.]+$/, '_thumb.jpg')
+        thumbnailPath = await tauriInvoke<string>(
+          'generate_thumbnail',
+          { filePath, outputPath: thumbOutput, timestamp: 1.0 },
+        )
+      } catch (err) {
+        console.warn('[VideoListPage] 缩略图生成失败，继续导入', err)
+      }
+
       if (!db) return
       const video: Video = {
-        id: `v_${Date.now()}`,
+        id: videoId,
         title: info.title,
         source: 'local',
         filePath,
-        thumbnail: info.thumbnail,
+        thumbnail: thumbnailPath || info.thumbnail,
         duration: info.duration,
         language: '',
         status: 'pending',
