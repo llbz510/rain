@@ -5,6 +5,7 @@ pub mod asr;
 pub mod events;
 pub mod scheduler;
 pub mod commands;
+pub mod runtime;
 
 use std::sync::Arc;
 
