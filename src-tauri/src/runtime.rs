@@ -38,8 +38,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capability_exposes_one_valid_backend() {
-        let backend = runtime_capability().whisper_backend;
-        assert!(backend == "cuda" || backend == "cpu");
+    fn capability_reports_compiled_backend_and_cpu_fallback() {
+        let capability = runtime_capability();
+
+        #[cfg(feature = "cuda-whisper")]
+        assert_eq!(capability.whisper_backend, "cuda");
+
+        #[cfg(not(feature = "cuda-whisper"))]
+        assert_eq!(capability.whisper_backend, "cpu");
+
+        assert!(capability.cpu_fallback_available);
     }
 }
