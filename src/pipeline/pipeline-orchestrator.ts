@@ -10,6 +10,7 @@ import {
   type PipelineInvoke,
 } from '@/pipeline/asr-runner'
 import {
+  getSentencesByVideoId,
   getVideoById,
   mergeImportAtomically,
   saveAsrAtomically,
@@ -36,6 +37,25 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
+async function resumePersistedImport(
+  video: Video,
+  db: Database,
+  transition: typeof transitionVideoImportState,
+): Promise<Video> {
+  if (video.status === 'pending' || video.status === 'processing') return video
+  if ((video.status !== 'failed' && video.status !== 'cancelled') || !video.stage) {
+    throw new Error(`Video "${video.id}" cannot be retried from its persisted state`)
+  }
+  const resumeStage = video.stage === 'merging' ? 'stage2' : video.stage
+  await transition(
+    db,
+    video.id,
+    { status: video.status, stage: video.stage },
+    { status: 'processing', stage: resumeStage },
+  )
+  return { ...video, status: 'processing', stage: resumeStage, errorMessage: undefined }
+}
+
 export async function runPipeline(
   video: Video,
   llmSettings: LlmSettings,
@@ -50,21 +70,34 @@ export async function runPipeline(
   const merge = dependencies.merge ?? mergeImportAtomically
 
   try {
-    callbacks.onProgress('asr', 0)
-    const rawSentences = await runAsrStage({
-      video,
-      asrModel,
-      db,
-      invoke: dependencies.invoke,
-      saveAsr: dependencies.saveAsr,
-      transition,
-    })
-    callbacks.onProgress('asr', 100)
+    const workingVideo = await resumePersistedImport(video, db, transition)
+    currentStage = workingVideo.stage ?? 'asr'
+    let rawSentences: Sentence[]
+    if (currentStage === 'asr') {
+      callbacks.onProgress('asr', 0)
+      rawSentences = await runAsrStage({
+        video: workingVideo,
+        asrModel,
+        db,
+        invoke: dependencies.invoke,
+        saveAsr: dependencies.saveAsr,
+        transition,
+        signal: dependencies.signal,
+      })
+      callbacks.onProgress('asr', 100)
+      currentStage = 'stage2'
+    } else if (currentStage === 'stage2') {
+      rawSentences = await getSentencesByVideoId(db, workingVideo.id)
+      if (rawSentences.length === 0) {
+        throw new Error(`Cannot resume Stage2 for video "${workingVideo.id}" without persisted ASR sentences`)
+      }
+    } else {
+      throw new Error(`Video "${workingVideo.id}" cannot resume from merging without a validated Stage2 result`)
+    }
 
-    currentStage = 'stage2'
     callbacks.onProgress('stage2', 0)
     const stage2Result = await runStage2Stage({
-      video,
+      video: workingVideo,
       sentences: rawSentences,
       settings: llmSettings,
       db,

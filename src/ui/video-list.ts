@@ -21,6 +21,29 @@ export interface CardDisplay {
   statusBadge?: StatusBadge
 }
 
+export interface ImportStatusDisplay {
+  stageLabel: string
+  percent: number
+  errorMessage?: string
+  action?: 'cancel' | 'retry'
+}
+
+export function getImportStatus(video: Video, progressPercent?: number): ImportStatusDisplay | null {
+  if (video.status === 'ready') return null
+  const stage = video.stage ?? 'pending'
+  const stages: Record<string, { label: string; percent: number }> = {
+    pending: { label: '等待开始', percent: 0 },
+    asr: { label: 'Whisper 转写', percent: 10 },
+    stage2: { label: '整理章节', percent: 67 },
+    merging: { label: '保存学习结构', percent: 90 },
+  }
+  const detail = { ...stages[stage], percent: progressPercent ?? stages[stage].percent }
+  if (video.status === 'processing') return { stageLabel: detail.label, percent: detail.percent, action: 'cancel' }
+  if (video.status === 'failed' || video.status === 'cancelled') {
+    return { stageLabel: detail.label, percent: detail.percent, errorMessage: video.errorMessage, action: 'retry' }
+  }
+  return { stageLabel: detail.label, percent: detail.percent }
+}
 export function getCardAction(video: Video): string {
   if (video.status === 'ready') {
     return 'openVideo'

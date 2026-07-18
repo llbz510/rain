@@ -10,6 +10,8 @@ import { PROVIDER_PRESETS, WHISPER_SIZES } from '@/lib/provider-presets'
 import { isTauri } from '@/lib/tauri-env'
 import type { ModelType } from '@/settings/model-pool'
 import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
+import { testQwenConnection, type QwenConnectionResult } from '@/llm/qwen-health'
+import type { LlmSettings } from '@/llm/types'
 
 // ── 共享类型 ──────────────────────────────────────
 
@@ -18,6 +20,26 @@ interface ModelEntry {
   alias: string
   type: string
   supportsVision: boolean
+  canTest?: boolean
+}
+
+export interface SavedQwenConnection {
+  baseUrl?: string
+  modelName: string
+  apiKey?: string
+}
+
+export type QwenConnectionChecker = (settings: LlmSettings) => Promise<QwenConnectionResult>
+
+export function testSavedQwenConnection(
+  model: SavedQwenConnection,
+  checker: QwenConnectionChecker = testQwenConnection,
+): Promise<QwenConnectionResult> {
+  return checker({
+    baseUrl: model.baseUrl ?? '',
+    model: model.modelName,
+    apiKey: model.apiKey ?? '',
+  })
 }
 
 // ── 样式常量 ──────────────────────────────────────
@@ -147,16 +169,38 @@ const s = {
 // ModelPoolList
 // ══════════════════════════════════════════════════
 
-interface ModelPoolListProps {
-  models: ModelEntry[]
+export interface ConnectionTestResult {
+  ok: boolean
+  latencyMs?: number
+  message: string
 }
 
-export function ModelPoolList({ models }: ModelPoolListProps) {
+interface ModelPoolListProps {
+  models: ModelEntry[]
+  onTestConnection?: (modelId: string) => Promise<ConnectionTestResult>
+}
+
+export function ModelPoolList({ models, onTestConnection }: ModelPoolListProps) {
   const removeModel = useRainStore((s) => s.removeModel)
+  const [connectionStatus, setConnectionStatus] = useState<{ modelId: string; message: string } | null>(null)
+  const [testingModelId, setTestingModelId] = useState<string | null>(null)
+
+  const handleTestConnection = async (model: ModelEntry) => {
+    if (!onTestConnection || testingModelId) return
+    setTestingModelId(model.id)
+    setConnectionStatus(null)
+    try {
+      const result = await onTestConnection(model.id)
+      setConnectionStatus({ modelId: model.id, message: result.message })
+    } catch {
+      setConnectionStatus({ modelId: model.id, message: '连接测试失败，请检查 Qwen 配置。' })
+    } finally {
+      setTestingModelId(null)
+    }
+  }
 
   return (
     <div data-testid="model-pool-list">
-      {/* 表头 */}
       <div
         style={{
           display: 'grid',
@@ -173,8 +217,6 @@ export function ModelPoolList({ models }: ModelPoolListProps) {
         <div>供应商 · 模型名</div>
         <div style={{ textAlign: 'right' }}>操作</div>
       </div>
-
-      {/* 模型列表 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {models.map((m) => (
           <div
@@ -195,24 +237,26 @@ export function ModelPoolList({ models }: ModelPoolListProps) {
               <span style={s.tag(m.type)}>{TAG_LABELS[m.type] ?? m.type}</span>
               {m.supportsVision && <span style={s.tag('vision')}>vision</span>}
             </div>
-            <div style={{ color: COLORS.muted, fontSize: 12 }}>
-              {/* ModelEntry doesn't have provider/modelName, show type as fallback */}
-              {m.type}
-            </div>
+            <div style={{ color: COLORS.muted, fontSize: 12 }}>{m.type}</div>
             <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-              <button style={s.miniBtn}>测试</button>
-              <button style={s.dangerBtn} onClick={() => removeModel(m.id)}>
-                删除
-              </button>
+              {onTestConnection && m.canTest && (
+                <button aria-label={`测试 ${m.alias}`} disabled={testingModelId !== null} onClick={() => void handleTestConnection(m)} style={s.miniBtn}>
+                  {testingModelId === m.id ? '测试中…' : `测试 ${m.alias}`}
+                </button>
+              )}
+              {!m.canTest && <button aria-label="测试（仅 Qwen）" disabled style={s.miniBtn}>测试（仅 Qwen）</button>}              <button style={s.dangerBtn} onClick={() => removeModel(m.id)}>删除</button>
             </div>
+            {connectionStatus?.modelId === m.id && (
+              <div role="status" style={{ gridColumn: '1 / -1', color: connectionStatus.message.includes('成功') ? COLORS.example : COLORS.fail }}>
+                {connectionStatus.message}
+              </div>
+            )}
           </div>
         ))}
       </div>
     </div>
   )
 }
-
-// ══════════════════════════════════════════════════
 // AddModelForm
 // ══════════════════════════════════════════════════
 
@@ -622,7 +666,14 @@ export function SettingsPage() {
     alias: m.alias,
     type: m.type,
     supportsVision: m.supportsVision,
+    canTest: m.type === 'llm' && m.baseUrl === 'https://dashscope.aliyuncs.com/compatible-mode/v1' && m.modelName === 'qwen3.5-omni-flash',
   }))
+
+  const handleTestConnection = async (modelId: string): Promise<ConnectionTestResult> => {
+    const model = modelPool.find((entry) => entry.id === modelId)
+    if (!model) return { ok: false, message: '未找到已保存的 Qwen 配置。' }
+    return testSavedQwenConnection(model)
+  }
 
   return (
     <div
@@ -725,7 +776,7 @@ export function SettingsPage() {
                     ＋ 添加模型
                   </button>
                 </div>
-                <ModelPoolList models={models} />
+                <ModelPoolList models={models} onTestConnection={handleTestConnection} />
               </section>
             </>
           )}

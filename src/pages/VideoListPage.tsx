@@ -7,7 +7,7 @@
 // jsdom 下 listVideos 返回空 → 显示空状态（getEmptyStateMessage）
 // ========================================
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   createDatabase,
   listVideos,
@@ -20,6 +20,7 @@ import { VideoCard } from '@/ui/components/video-list'
 import { getEmptyStateMessage } from '@/ui/video-list'
 import { useRainStore } from '@/store/rain-store'
 import type { Video } from '@/models/types'
+import { listenProgress, unlistenProgress } from '@/pipeline/progress-listener'
 
 type SortBy = 'lastStudied' | 'createdAt' | 'title'
 
@@ -245,6 +246,8 @@ export function VideoListPage() {
   const [urlError, setUrlError] = useState('')
   const [localImportError, setLocalImportError] = useState('')
   const [processingVideoId, setProcessingVideoId] = useState<string | null>(null)
+  const importControllers = useRef<Map<string, AbortController>>(new Map())
+  const [pipelineProgress, setPipelineProgress] = useState<Record<string, { stage: 'asr' | 'stage2' | 'merging'; percent: number }>>({})
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
   useEffect(() => {
@@ -283,68 +286,80 @@ export function VideoListPage() {
   }, [db, sortBy, keyword])
 
   // 点 ready 卡 → 进入学习界面（store 接管 currentVideoId 切页）
+  useEffect(() => {
+    void listenProgress((payload) => {
+      if (!importControllers.current.has(payload.videoId)) return
+      const stage = payload.stage === 'asr' || payload.stage === 'stage2' || payload.stage === 'merging'
+        ? payload.stage
+        : payload.stage.startsWith('asr') ? 'asr' : payload.stage.startsWith('merge') ? 'merging' : 'stage2'
+      setPipelineProgress((current) => ({ ...current, [payload.videoId]: { stage, percent: payload.percent } }))
+    })
+    return () => unlistenProgress()
+  }, [])
   const handleOpen = (videoId: string) => {
     void useRainStore.getState().loadVideo(videoId)
   }
 
   // 点非 ready 卡 → 触发处理管线
-  const handleOpenImport = useCallback(async (videoId: string) => {
-    if (!db || processingVideoId) return
-    setProcessingVideoId(videoId)
+  const refreshVideos = useCallback(async () => {
+    if (!db) return
+    const list = keyword.trim() ? await searchVideosByTitle(db, keyword.trim()) : await listVideos(db, sortBy)
+    setVideos(list)
+  }, [db, keyword, sortBy])
 
+  const handleOpenImport = useCallback(async (videoId: string) => {
+    let attemptedVideo: Video | null = null
+    if (!db || importControllers.current.has(videoId)) return
     try {
       const { runPipeline } = await import('@/pipeline/pipeline-orchestrator')
       const { getVideoById } = await import('@/models/database')
       const video = await getVideoById(db, videoId)
       if (!video) return
-
+      attemptedVideo = video
       const store = useRainStore.getState()
       await store.loadRuntimeSettings()
-      const configuredStore = useRainStore.getState()
-      if (!configuredStore.settingsReady) {
-        throw new Error(configuredStore.settingsError ?? 'Runtime settings are unavailable')
-      }
-      const asrModelId = configuredStore.roleAssignment.asr
-      const asrModel = configuredStore.modelPool.find((entry) => entry.id === asrModelId)
-      if (!asrModel) {
-        throw new Error('Select a saved local Whisper model for the ASR role before importing')
-      }
-
-      const structuringModelId = configuredStore.roleAssignment.structuring
-      const model = configuredStore.modelPool.find((entry) => entry.id === structuringModelId)
-      if (!model) {
-        throw new Error('Select a saved structuring model before importing')
-      }
-      const llmSettings = {
-        baseUrl: model.baseUrl ?? '',
-        apiKey: model.apiKey ?? '',
-        model: model.modelName,
-      }
-      await runPipeline(video, llmSettings, {
+      const configured = useRainStore.getState()
+      if (!configured.settingsReady) throw new Error(configured.settingsError ?? 'Runtime settings are unavailable')
+      const asrModel = configured.modelPool.find((entry) => entry.id === configured.roleAssignment.asr)
+      const model = configured.modelPool.find((entry) => entry.id === configured.roleAssignment.structuring)
+      if (!asrModel || !model) throw new Error('Select saved Whisper and Qwen models before importing')
+      const controller = new AbortController()
+      importControllers.current.set(videoId, controller)
+      setProcessingVideoId(videoId)
+      setPipelineProgress((current) => ({ ...current, [videoId]: { stage: video.stage ?? 'asr', percent: 0 } }))
+      await runPipeline(video, { baseUrl: model.baseUrl ?? '', apiKey: model.apiKey ?? '', model: model.modelName }, {
         onProgress: (stage, percent) => {
-          console.log(`[Pipeline] ${stage}: ${percent}%`)
-        },
-        onComplete: async () => {
-          setProcessingVideoId(null)
-          const list = keyword.trim()
-            ? await searchVideosByTitle(db, keyword.trim())
-            : await listVideos(db, sortBy)
-          setVideos(list)
-        },
-        onError: (err) => {
-          setProcessingVideoId(null)
-          console.error('[Pipeline] Error:', err)
-        },
-      }, db, {
-        type: asrModel.type,
-        modelName: asrModel.modelName,
-      })
+          if (stage === 'asr' || stage === 'stage2' || stage === 'merging') setPipelineProgress((current) => ({ ...current, [videoId]: { stage, percent } }))
+        }, onComplete: () => undefined, onError: () => undefined,
+      }, db, { type: asrModel.type, modelName: asrModel.modelName }, { signal: controller.signal })
     } catch (err) {
-      setProcessingVideoId(null)
+      const message = err instanceof Error ? err.message : String(err)
+      if (attemptedVideo) {
+        try {
+          const { getVideoById, transitionVideoImportState } = await import('@/models/database')
+          const persisted = await getVideoById(db, attemptedVideo.id)
+          if (persisted && persisted.status !== 'ready' && persisted.status !== 'failed' && persisted.status !== 'cancelled') {
+            await transitionVideoImportState(db, persisted.id, { status: persisted.status, stage: persisted.stage ?? null }, {
+              status: 'failed', stage: persisted.stage ?? 'asr', errorMessage: message,
+            })
+          }
+        } catch { /* retain the primary error */ }
+      }
       console.error('[VideoListPage] pipeline error', err)
+    } finally {
+      importControllers.current.delete(videoId)
+      setProcessingVideoId((current) => current === videoId ? null : current)
+      setPipelineProgress((current) => { const { [videoId]: _removed, ...remaining } = current; return remaining })
+      void refreshVideos()
     }
-  }, [db, processingVideoId, keyword, sortBy])
+  }, [db, refreshVideos])
 
+  const handleCancelImport = useCallback((videoId: string) => {
+    const controller = importControllers.current.get(videoId)
+    if (!controller) return
+    controller.abort()
+    void import('@/lib/tauri-env').then(({ tauriInvoke, isTauri }) => isTauri() ? tauriInvoke<void>('cancel_import', { videoId }) : undefined).catch(() => undefined)
+  }, [])
   const handleImportClick = () => {
     setImportMenuOpen((prev) => !prev)
   }
@@ -509,9 +524,6 @@ export function VideoListPage() {
               <button onClick={handleLocalImport} style={dropdownItemStyle}>
                 本地文件
               </button>
-              <button onClick={handleUrlImport} style={dropdownItemStyle}>
-                在线视频
-              </button>
             </div>
           )}
           {localImportError && (
@@ -548,9 +560,12 @@ export function VideoListPage() {
             {videos.map((v) => (
               <VideoCard
                 key={v.id}
-                video={v}
+                video={pipelineProgress[v.id] ? { ...v, status: 'processing', stage: pipelineProgress[v.id].stage } : v}
                 onOpen={handleOpen}
                 onOpenImport={handleOpenImport}
+                importProgressPercent={pipelineProgress[v.id]?.percent}
+                onCancelImport={handleCancelImport}
+                onRetryImport={handleOpenImport}
               />
             ))}
           </div>

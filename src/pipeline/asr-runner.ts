@@ -29,10 +29,21 @@ export interface RunAsrStageInput {
   invoke?: PipelineInvoke
   saveAsr?: typeof saveAsrAtomically
   transition?: typeof transitionVideoImportState
+  signal?: AbortSignal
 }
 
 function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error))
+  if (error instanceof Error) return error
+  if (error && typeof error === 'object' && 'message' in error) {
+    const normalized = new Error(String((error as { message: unknown }).message))
+    if ('name' in error && typeof (error as { name?: unknown }).name === 'string') normalized.name = (error as { name: string }).name
+    return normalized
+  }
+  return new Error(String(error))
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('ASR cancelled', 'AbortError')
 }
 
 export function isCancellationError(error: unknown): boolean {
@@ -128,20 +139,26 @@ function currentImportStage(video: Video): ImportStage {
 }
 
 export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> {
-  const { video, asrModel, db } = input
+  const { video, asrModel, db, signal } = input
   const invoke = input.invoke ?? (tauriInvoke as PipelineInvoke)
   const saveAsr = input.saveAsr ?? saveAsrAtomically
   const transition = input.transition ?? transitionVideoImportState
 
-  assertTransition(currentImportStage(video), 'asr')
-  await transition(
-    db,
-    video.id,
-    { status: 'pending', stage: null },
-    { status: 'processing', stage: 'asr' },
-  )
+  const stage = currentImportStage(video)
+  if (stage === 'pending') {
+    assertTransition(stage, 'asr')
+    await transition(
+      db,
+      video.id,
+      { status: 'pending', stage: null },
+      { status: 'processing', stage: 'asr' },
+    )
+  } else if (stage !== 'asr') {
+    throw new Error(`Invalid import transition: ${stage} -> asr`)
+  }
 
   try {
+    throwIfAborted(signal)
     if (video.source !== 'local' || !video.filePath?.trim()) {
       throw new Error('Whisper ASR requires a real local file path')
     }
@@ -149,17 +166,20 @@ export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> 
       throw new Error('Only a saved whisper-local ASR model is supported for local imports')
     }
 
+    throwIfAborted(signal)
     const listed = await invoke('list_whisper_models')
     if (!Array.isArray(listed) || listed.some((entry) => typeof entry !== 'string' || !entry.trim())) {
       throw new Error('Cannot resolve installed Whisper models: list_whisper_models returned invalid data')
     }
     const modelPath = resolveInstalledModelPath(asrModel.modelName, listed as string[])
+    throwIfAborted(signal)
     const result = await invoke('start_asr', {
       videoId: video.id,
       filePath: video.filePath,
       tier: 'whisper',
       modelPath,
     })
+    throwIfAborted(signal)
     const sentences = validateWhisperResult(result)
     const language = detectLanguageFromSentences(sentences)
     await saveAsr(video.id, language, sentences, db)
