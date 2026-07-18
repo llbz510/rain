@@ -3,6 +3,7 @@ import { getDb, resetDb } from '@/models/db-singleton'
 import { getSetting, setSetting } from '@/models/database'
 import {
   createRuntimeSettingsInitializer,
+  executeRuntimeSettingsMigration,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@/settings/model-pool'
@@ -49,6 +50,31 @@ describe('runtime model settings', () => {
     expect(await getSetting(db, 'api_key.legacy-qwen')).toBe('dummy-embedded-key')
     expect(await getSetting(db, 'api_key.Legacy Qwen')).toBeNull()
     expect(await getSetting(db, 'model_pool')).toBe(JSON.stringify([{ id: 'legacy-qwen', alias: 'Legacy Qwen', model: 'qwen-legacy' }]))
+  })
+  it('does not sanitize or delete aliases when canonical key migration fails', async () => {
+    const writes: string[] = []
+    await expect(executeRuntimeSettingsMigration({
+      canonicalKeys: [{ id: 'legacy-qwen', key: 'dummy-key' }],
+      sanitizedModels: [{ id: 'legacy-qwen', alias: 'Legacy Qwen', model: 'qwen-legacy' }],
+      aliasesToDelete: ['Legacy Qwen'],
+    }, {
+      set: async (key) => { writes.push(`set:${key}`); throw new Error('disk full') },
+      delete: async (key) => { writes.push(`delete:${key}`) },
+    })).rejects.toThrow('disk full')
+    expect(writes).toEqual(['set:api_key.legacy-qwen'])
+  })
+
+  it('keeps canonical keys when a legacy alias equals another model ID', async () => {
+    const db = await getDb()
+    await setSetting(db, 'model_pool', JSON.stringify([
+      { id: 'model-a', alias: 'model-b', modelName: 'a-legacy', apiKey: 'dummy-a' },
+      { id: 'model-b', alias: 'B', modelName: 'b-legacy', apiKey: 'dummy-b' },
+    ]))
+
+    await loadRuntimeSettings()
+
+    expect(await getSetting(db, 'api_key.model-a')).toBe('dummy-a')
+    expect(await getSetting(db, 'api_key.model-b')).toBe('dummy-b')
   })
   it('prunes an API key when its model is removed', async () => {
     await saveRuntimeSettings({

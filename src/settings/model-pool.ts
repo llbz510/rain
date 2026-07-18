@@ -225,6 +225,30 @@ function parseStoredModels(modelJson: string): ParsedStoredModel[] | null {
   }
 }
 
+
+export interface RuntimeSettingsMigrationPlan {
+  canonicalKeys: Array<{ id: string; key: string }>
+  sanitizedModels: Array<Omit<RuntimeModel, 'apiKey'>>
+  aliasesToDelete: string[]
+}
+
+export interface RuntimeSettingsMigrationPersistence {
+  set: (key: string, value: string) => Promise<void>
+  delete: (key: string) => Promise<void>
+}
+
+export async function executeRuntimeSettingsMigration(
+  plan: RuntimeSettingsMigrationPlan,
+  persistence: RuntimeSettingsMigrationPersistence,
+): Promise<void> {
+  for (const { id, key } of plan.canonicalKeys) {
+    await persistence.set(`api_key.${id}`, key)
+  }
+  await persistence.set('model_pool', JSON.stringify(plan.sanitizedModels))
+  for (const alias of plan.aliasesToDelete) {
+    await persistence.delete(`api_key.${alias}`)
+  }
+}
 export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
   const db = await getDb()
   const modelJson = await getSetting(db, 'model_pool')
@@ -242,15 +266,23 @@ export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
   }))
 
   if (parsedModels && models.some(({ migrate }) => migrate)) {
+    const canonicalIds = new Set(models.map(({ model }) => model.id))
     const sanitizedModels = models.map(({ model }) => {
       const { apiKey: _apiKey, ...sanitized } = model
       return sanitized
     })
-    await setSetting(db, 'model_pool', JSON.stringify(sanitizedModels))
-    await Promise.all(models.map(async ({ model }) => {
-      if (model.apiKey) await setSetting(db, `api_key.${model.id}`, model.apiKey)
-      if (model.alias !== model.id) await deleteSetting(db, `api_key.${model.alias}`)
-    }))
+    const migrationPlan: RuntimeSettingsMigrationPlan = {
+      canonicalKeys: models.flatMap(({ model }) => model.apiKey ? [{ id: model.id, key: model.apiKey }] : []),
+      sanitizedModels,
+      aliasesToDelete: models
+        .filter(({ migrate }) => migrate)
+        .map(({ model }) => model.alias)
+        .filter(alias => !canonicalIds.has(alias)),
+    }
+    await executeRuntimeSettingsMigration(migrationPlan, {
+      set: (key, value) => setSetting(db, key, value),
+      delete: (key) => deleteSetting(db, key),
+    })
   }
 
   const roles = {} as RuntimeSettings['roles']
