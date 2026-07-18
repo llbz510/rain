@@ -185,31 +185,81 @@ export async function saveRuntimeSettings(settings: RuntimeSettings): Promise<vo
     setSetting(db, `role_${role}`, settings.roles[role] ?? '')
   ))
 }
+interface ParsedStoredModel {
+  model: RuntimeModel
+  embeddedApiKey?: string
+  legacy: boolean
+}
+
+function parseStoredModels(modelJson: string): ParsedStoredModel[] | null {
+  try {
+    const parsed: unknown = JSON.parse(modelJson)
+    if (!Array.isArray(parsed)) return null
+    const models: ParsedStoredModel[] = []
+    for (const value of parsed) {
+      if (!value || typeof value !== 'object') return null
+      const entry = value as Record<string, unknown>
+      const id = typeof entry.id === 'string' ? entry.id : null
+      const alias = typeof entry.alias === 'string' ? entry.alias : null
+      const model = typeof entry.model === 'string'
+        ? entry.model
+        : typeof entry.modelName === 'string' ? entry.modelName : null
+      if (!id || !alias || !model) return null
+      models.push({
+        model: {
+          id,
+          alias,
+          model,
+          baseUrl: typeof entry.baseUrl === 'string' ? entry.baseUrl : undefined,
+          type: entry.type as ModelType | undefined,
+          provider: typeof entry.provider === 'string' ? entry.provider : undefined,
+          supportsVision: typeof entry.supportsVision === 'boolean' ? entry.supportsVision : undefined,
+        },
+        embeddedApiKey: typeof entry.apiKey === 'string' ? entry.apiKey : undefined,
+        legacy: typeof entry.modelName === 'string' || Object.prototype.hasOwnProperty.call(entry, 'apiKey'),
+      })
+    }
+    return models
+  } catch {
+    return null
+  }
+}
+
 export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
   const db = await getDb()
   const modelJson = await getSetting(db, 'model_pool')
-  let storedModels: RuntimeModel[] | null = null
-  if (modelJson) {
-    try {
-      const parsed = JSON.parse(modelJson)
-      if (Array.isArray(parsed)) storedModels = parsed
-    } catch {
-      storedModels = null
+  const parsedModels = modelJson ? parseStoredModels(modelJson) : null
+  const loadedModels: ParsedStoredModel[] = parsedModels ?? DEFAULT_RUNTIME_SETTINGS.models.map(model => ({ model, embeddedApiKey: undefined, legacy: false }))
+  const models = await Promise.all(loadedModels.map(async ({ model, embeddedApiKey, legacy }) => {
+    const canonicalKey = await getSetting(db, `api_key.${model.id}`)
+    const legacyKey = canonicalKey === null && embeddedApiKey === undefined
+      ? await getSetting(db, `api_key.${model.alias}`)
+      : null
+    return {
+      model: { ...model, apiKey: canonicalKey ?? embeddedApiKey ?? legacyKey ?? undefined },
+      migrate: Boolean(parsedModels) && (legacy || legacyKey !== null || embeddedApiKey !== undefined),
     }
+  }))
+
+  if (parsedModels && models.some(({ migrate }) => migrate)) {
+    const sanitizedModels = models.map(({ model }) => {
+      const { apiKey: _apiKey, ...sanitized } = model
+      return sanitized
+    })
+    await setSetting(db, 'model_pool', JSON.stringify(sanitizedModels))
+    await Promise.all(models.map(async ({ model }) => {
+      if (model.apiKey) await setSetting(db, `api_key.${model.id}`, model.apiKey)
+      if (model.alias !== model.id) await deleteSetting(db, `api_key.${model.alias}`)
+    }))
   }
 
-  const models = await Promise.all((storedModels ?? DEFAULT_RUNTIME_SETTINGS.models).map(async (model) => ({
-    ...model,
-    apiKey: (await getSetting(db, `api_key.${model.id}`)) ?? undefined,
-  })))
   const roles = {} as RuntimeSettings['roles']
   for (const role of ['asr', 'structuring', 'assistant'] as const) {
     const savedRole = await getSetting(db, `role_${role}`)
     roles[role] = savedRole === null ? DEFAULT_RUNTIME_SETTINGS.roles[role] : savedRole || null
   }
-  return { models, roles }
+  return { models: models.map(({ model }) => model), roles }
 }
-
 export function applyRuntimeSettings(settings: RuntimeSettings): ModelPoolEntry[] {
   replaceModelPool(settings.models.map(toPoolEntry))
   return listModels()

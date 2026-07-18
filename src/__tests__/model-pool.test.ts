@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { getDb, resetDb } from '@/models/db-singleton'
-import { getSetting } from '@/models/database'
+import { getSetting, setSetting } from '@/models/database'
 import {
   createRuntimeSettingsInitializer,
   loadRuntimeSettings,
@@ -34,6 +34,22 @@ describe('runtime model settings', () => {
     expect(await getSetting(db, 'model_pool')).not.toContain('dummy-model-key')
   })
 
+  it('migrates a legacy model record without retaining secret copies', async () => {
+    const db = await getDb()
+    await setSetting(db, 'model_pool', JSON.stringify([{
+      id: 'legacy-qwen', alias: 'Legacy Qwen', modelName: 'qwen-legacy', apiKey: 'dummy-embedded-key',
+    }]))
+    await setSetting(db, 'api_key.Legacy Qwen', 'dummy-alias-key')
+    await setSetting(db, 'role_structuring', 'legacy-qwen')
+
+    const settings = await loadRuntimeSettings()
+
+    expect(settings.models).toMatchObject([{ id: 'legacy-qwen', model: 'qwen-legacy', apiKey: 'dummy-embedded-key' }])
+    expect(settings.roles.structuring).toBe('legacy-qwen')
+    expect(await getSetting(db, 'api_key.legacy-qwen')).toBe('dummy-embedded-key')
+    expect(await getSetting(db, 'api_key.Legacy Qwen')).toBeNull()
+    expect(await getSetting(db, 'model_pool')).toBe(JSON.stringify([{ id: 'legacy-qwen', alias: 'Legacy Qwen', model: 'qwen-legacy' }]))
+  })
   it('prunes an API key when its model is removed', async () => {
     await saveRuntimeSettings({
       models: [{ id: 'model-a', alias: 'A', model: 'model-a', apiKey: 'dummy-removed-key' }],
