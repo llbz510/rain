@@ -254,11 +254,11 @@ export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
   const modelJson = await getSetting(db, 'model_pool')
   const parsedModels = modelJson ? parseStoredModels(modelJson) : null
   const loadedModels: ParsedStoredModel[] = parsedModels ?? DEFAULT_RUNTIME_SETTINGS.models.map(model => ({ model, embeddedApiKey: undefined, legacy: false }))
+  const canonicalIds = new Set(loadedModels.map(({ model }) => model.id))
   const models = await Promise.all(loadedModels.map(async ({ model, embeddedApiKey, legacy }) => {
     const canonicalKey = await getSetting(db, `api_key.${model.id}`)
-    const legacyKey = canonicalKey === null && embeddedApiKey === undefined
-      ? await getSetting(db, `api_key.${model.alias}`)
-      : null
+    const eligibleAlias = !canonicalIds.has(model.alias)
+    const legacyKey = eligibleAlias ? await getSetting(db, `api_key.${model.alias}`) : null
     return {
       model: { ...model, apiKey: canonicalKey ?? embeddedApiKey ?? legacyKey ?? undefined },
       migrate: Boolean(parsedModels) && (legacy || legacyKey !== null || embeddedApiKey !== undefined),

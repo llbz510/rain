@@ -76,6 +76,23 @@ describe('runtime model settings', () => {
     expect(await getSetting(db, 'api_key.model-a')).toBe('dummy-a')
     expect(await getSetting(db, 'api_key.model-b')).toBe('dummy-b')
   })
+  it('cleans a leftover legacy alias key after a prior migration write succeeded', async () => {
+    const db = await getDb()
+    await setSetting(db, 'model_pool', JSON.stringify([
+      { id: 'qwen-main', alias: 'Legacy Qwen', model: 'qwen-current' },
+    ]))
+    await setSetting(db, 'api_key.qwen-main', 'dummy-canonical-key')
+    await setSetting(db, 'api_key.Legacy Qwen', 'dummy-leftover-alias-key')
+
+    const settings = await loadRuntimeSettings()
+
+    expect(settings.models[0].apiKey).toBe('dummy-canonical-key')
+    expect(await getSetting(db, 'api_key.qwen-main')).toBe('dummy-canonical-key')
+    expect(await getSetting(db, 'api_key.Legacy Qwen')).toBeNull()
+    expect(await getSetting(db, 'model_pool')).toBe(JSON.stringify([
+      { id: 'qwen-main', alias: 'Legacy Qwen', model: 'qwen-current' },
+    ]))
+  })
   it('prunes an API key when its model is removed', async () => {
     await saveRuntimeSettings({
       models: [{ id: 'model-a', alias: 'A', model: 'model-a', apiKey: 'dummy-removed-key' }],
