@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::Deserialize;
 use sqlx::{Acquire, SqliteConnection};
 
@@ -71,11 +73,44 @@ pub async fn merge_import_on_connection(
     assignments: &[SentenceAssignment],
 ) -> Result<(), sqlx::Error> {
     let mut transaction = connection.begin().await?;
+    let submitted_node_ids: HashSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
+    if submitted_node_ids.len() != nodes.len() {
+        transaction.rollback().await?;
+        return Err(sqlx::Error::RowNotFound);
+    }
     for node in nodes {
-        if node.video_id != video_id {
+        if node.video_id != video_id
+            || node
+                .parent_id
+                .as_deref()
+                .is_some_and(|parent_id| !submitted_node_ids.contains(parent_id))
+        {
             transaction.rollback().await?;
             return Err(sqlx::Error::RowNotFound);
         }
+    }
+    let placeholder_ids: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM sentence WHERE node_id = ? ORDER BY id")
+            .bind(video_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+    let assignment_ids: HashSet<&str> = assignments
+        .iter()
+        .map(|assignment| assignment.id.as_str())
+        .collect();
+    if assignment_ids.len() != assignments.len()
+        || assignment_ids.len() != placeholder_ids.len()
+        || placeholder_ids
+            .iter()
+            .any(|sentence_id| !assignment_ids.contains(sentence_id.as_str()))
+        || assignments
+            .iter()
+            .any(|assignment| !submitted_node_ids.contains(assignment.node_id.as_str()))
+    {
+        transaction.rollback().await?;
+        return Err(sqlx::Error::RowNotFound);
+    }
+    for node in nodes {
         let insert = sqlx::query("INSERT INTO node (id, video_id, parent_id, kind, title, type, start_time, end_time, text, translation, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&node.id)
             .bind(&node.video_id)
@@ -243,6 +278,127 @@ mod tests {
         assert_eq!(video.get::<String, _>("stage"), "merging");
     }
 
+    #[tokio::test]
+    async fn atomic_merge_rejects_missing_submitted_parent_and_rolls_back() {
+        let mut connection = SqliteConnection::connect(":memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE video (id TEXT PRIMARY KEY, status TEXT, stage TEXT, error_message TEXT)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE node (id TEXT PRIMARY KEY, video_id TEXT NOT NULL, parent_id TEXT, kind TEXT NOT NULL, title TEXT NOT NULL, type TEXT, start_time REAL, end_time REAL, text TEXT, translation TEXT, sort_order INTEGER)").execute(&mut connection).await.unwrap();
+        sqlx::query("CREATE TABLE sentence (id TEXT PRIMARY KEY, node_id TEXT NOT NULL, sort_order INTEGER)").execute(&mut connection).await.unwrap();
+        sqlx::query("INSERT INTO video (id, status, stage) VALUES ('v1', 'processing', 'merging')")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sentence (id, node_id, sort_order) VALUES ('s1', 'v1', 0)")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        let nodes = vec![PersistedNode {
+            id: "paragraph".into(),
+            video_id: "v1".into(),
+            parent_id: Some("missing".into()),
+            kind: "paragraph".into(),
+            title: "P".into(),
+            node_type: Some("concept".into()),
+            start_time: 0.0,
+            end_time: 1.0,
+            text: None,
+            translation: None,
+            sort_order: 0,
+        }];
+        let assignments = vec![SentenceAssignment {
+            id: "s1".into(),
+            node_id: "paragraph".into(),
+            sort_order: 0,
+        }];
+        assert!(
+            merge_import_on_connection(&mut connection, "v1", &nodes, &assignments)
+                .await
+                .is_err()
+        );
+        let node_count: i64 = sqlx::query("SELECT COUNT(*) AS count FROM node")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap()
+            .get("count");
+        let video = sqlx::query("SELECT status, stage FROM video WHERE id = 'v1'")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(node_count, 0);
+        assert_eq!(video.get::<String, _>("status"), "processing");
+        assert_eq!(video.get::<String, _>("stage"), "merging");
+    }
+
+    #[tokio::test]
+    async fn atomic_merge_rejects_non_exhaustive_or_duplicate_assignments() {
+        for assignments in [
+            vec![SentenceAssignment {
+                id: "s1".into(),
+                node_id: "paragraph".into(),
+                sort_order: 0,
+            }],
+            vec![
+                SentenceAssignment {
+                    id: "s1".into(),
+                    node_id: "paragraph".into(),
+                    sort_order: 0,
+                },
+                SentenceAssignment {
+                    id: "s1".into(),
+                    node_id: "paragraph".into(),
+                    sort_order: 1,
+                },
+            ],
+        ] {
+            let mut connection = SqliteConnection::connect(":memory:").await.unwrap();
+            sqlx::query("CREATE TABLE video (id TEXT PRIMARY KEY, status TEXT, stage TEXT, error_message TEXT)").execute(&mut connection).await.unwrap();
+            sqlx::query("CREATE TABLE node (id TEXT PRIMARY KEY, video_id TEXT NOT NULL, parent_id TEXT, kind TEXT NOT NULL, title TEXT NOT NULL, type TEXT, start_time REAL, end_time REAL, text TEXT, translation TEXT, sort_order INTEGER)").execute(&mut connection).await.unwrap();
+            sqlx::query("CREATE TABLE sentence (id TEXT PRIMARY KEY, node_id TEXT NOT NULL, sort_order INTEGER)").execute(&mut connection).await.unwrap();
+            sqlx::query(
+                "INSERT INTO video (id, status, stage) VALUES ('v1', 'processing', 'merging')",
+            )
+            .execute(&mut connection)
+            .await
+            .unwrap();
+            sqlx::query("INSERT INTO sentence (id, node_id, sort_order) VALUES ('s1', 'v1', 0), ('s2', 'v1', 1)").execute(&mut connection).await.unwrap();
+            let nodes = vec![PersistedNode {
+                id: "paragraph".into(),
+                video_id: "v1".into(),
+                parent_id: None,
+                kind: "paragraph".into(),
+                title: "P".into(),
+                node_type: Some("concept".into()),
+                start_time: 0.0,
+                end_time: 2.0,
+                text: None,
+                translation: None,
+                sort_order: 0,
+            }];
+            assert!(
+                merge_import_on_connection(&mut connection, "v1", &nodes, &assignments)
+                    .await
+                    .is_err()
+            );
+            let node_count: i64 = sqlx::query("SELECT COUNT(*) AS count FROM node")
+                .fetch_one(&mut connection)
+                .await
+                .unwrap()
+                .get("count");
+            let assigned_count: i64 =
+                sqlx::query("SELECT COUNT(*) AS count FROM sentence WHERE node_id != 'v1'")
+                    .fetch_one(&mut connection)
+                    .await
+                    .unwrap()
+                    .get("count");
+            assert_eq!(node_count, 0);
+            assert_eq!(assigned_count, 0);
+        }
+    }
     #[tokio::test]
     async fn persisted_transition_cas_preserves_a_ready_row() {
         use crate::import_state_persistence::{transition_import_state_on_connection, ImportState};

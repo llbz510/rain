@@ -754,7 +754,9 @@ export async function determineRecoveryAction(db: Database, videoId: string): Pr
 
 
 export async function saveImportCheckpoint(db: Database, checkpoint: ImportCheckpoint): Promise<void> {
-  const completedBlocksJson = JSON.stringify(checkpoint.completedBlocks)
+  const completedBlocksJson = checkpoint.completedBlockOutputs
+    ? JSON.stringify({ version: 2, blocks: checkpoint.completedBlockOutputs })
+    : JSON.stringify(checkpoint.completedBlocks)
   if (isTauriDb(db)) {
     await db.exec(
       'INSERT INTO import_checkpoint (video_id, stage, completed_blocks_json, error_message, updated_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(video_id) DO UPDATE SET stage = excluded.stage, completed_blocks_json = excluded.completed_blocks_json, error_message = excluded.error_message, updated_at = excluded.updated_at',
@@ -786,9 +788,22 @@ export async function getImportCheckpoint(db: Database, videoId: string): Promis
   }
   if (!row) return null
   let completedBlocks: string[] = []
+  let completedBlockOutputs: unknown[] | undefined
   try {
-    const parsed = JSON.parse(row.completed_blocks_json)
-    if (Array.isArray(parsed)) completedBlocks = parsed
+    const parsed: unknown = JSON.parse(row.completed_blocks_json)
+    if (Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')) {
+      completedBlocks = parsed
+    } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const encoded = parsed as { version?: unknown; blocks?: unknown }
+      if (encoded.version === 2 && Array.isArray(encoded.blocks)) {
+        completedBlockOutputs = encoded.blocks
+        completedBlocks = encoded.blocks.flatMap((value) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+          const blockId = (value as { blockId?: unknown }).blockId
+          return typeof blockId === 'string' ? [blockId] : []
+        })
+      }
+    }
   } catch {
     completedBlocks = []
   }
@@ -796,6 +811,7 @@ export async function getImportCheckpoint(db: Database, videoId: string): Promis
     videoId: row.video_id,
     stage: row.stage,
     completedBlocks,
+    completedBlockOutputs,
     errorMessage: row.error_message ?? undefined,
     updatedAt: row.updated_at,
   }
@@ -931,24 +947,36 @@ export async function mergeImportAtomically(
     if (!video || video.status !== 'processing' || video.stage !== 'merging') {
       throw new Error(`Persisted import state changed for video "${videoId}"`)
     }
+    const submittedNodeIds = new Set(nodes.map((node) => node.id))
+    if (submittedNodeIds.size !== nodes.length) throw new Error('Submitted node graph contains duplicate node IDs')
+    for (const node of nodes) {
+      if (node.videoId !== videoId) throw new Error(`Cannot insert import node "${node.id}"`)
+      if (node.parentId !== null && !submittedNodeIds.has(node.parentId)) {
+        throw new Error(`Submitted node "${node.id}" has missing parent "${node.parentId}"`)
+      }
+    }
+    const placeholderIds = sentenceRows
+      .filter((row) => row.node_id === videoId)
+      .map((row) => String(row.id))
+    const assignmentIds = assignments.map((assignment) => assignment.id)
+    const uniqueAssignmentIds = new Set(assignmentIds)
+    if (assignmentIds.length !== placeholderIds.length || uniqueAssignmentIds.size !== assignmentIds.length
+      || placeholderIds.some((id) => !uniqueAssignmentIds.has(id))) {
+      throw new Error('Sentence assignments must exhaust placeholder ASR sentences exactly once')
+    }
+    if (assignments.some((assignment) => !submittedNodeIds.has(assignment.nodeId))) {
+      throw new Error('Sentence assignment targets a node outside the submitted graph')
+    }
+
     const allNodeIds = new Set(nodeRows.map((row) => row.id))
     for (const node of nodes) {
-      if (node.videoId !== videoId || allNodeIds.has(node.id)) {
-        throw new Error(`Cannot insert import node "${node.id}"`)
-      }
+      if (allNodeIds.has(node.id)) throw new Error(`Cannot insert import node "${node.id}"`)
       allNodeIds.add(node.id)
       nodeRows.push(nodeToRow(node))
     }
-    const ownedNodeIds = new Set(
-      nodeRows.filter((row) => row.video_id === videoId).map((row) => row.id),
-    )
     for (const assignment of assignments) {
-      if (!ownedNodeIds.has(assignment.nodeId)) {
-        throw new Error(`Cannot assign ASR sentence "${assignment.id}" to node "${assignment.nodeId}"`)
-      }
       const row = sentenceRows.find((candidate) =>
-        candidate.id === assignment.id
-        && (candidate.node_id === videoId || ownedNodeIds.has(candidate.node_id)))
+        candidate.id === assignment.id && candidate.node_id === videoId)
       if (!row) {
         throw new Error(`Cannot assign ASR sentence "${assignment.id}" to node "${assignment.nodeId}"`)
       }

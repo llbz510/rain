@@ -7,6 +7,56 @@
 
 import type { LlmSettings, ChatMessage, StreamCallbacks, Stage2Result } from './types'
 
+const MAX_ERROR_BODY_BYTES = 4096
+
+export class LlmHttpError extends Error {
+  constructor(public readonly status: number, message: string, public readonly retryable: boolean) {
+    super(message)
+    this.name = 'LlmHttpError'
+  }
+}
+
+export function redactSecret(value: string, secrets: readonly string[] = []): string {
+  let redacted = value
+  for (const secret of secrets) {
+    if (secret) redacted = redacted.split(secret).join('[REDACTED]')
+  }
+  redacted = redacted.replace(/\bBearer\s+[^\s;,]+/gi, 'Bearer [REDACTED]')
+  return redacted.replace(/\bsk-[A-Za-z0-9._-]+\b/g, '[REDACTED]')
+}
+
+async function readBoundedErrorBody(response: Response): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let total = 0
+  let value = ''
+  try {
+    while (total < MAX_ERROR_BODY_BYTES) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      const remaining = MAX_ERROR_BODY_BYTES - total
+      const bytes = chunk.value.subarray(0, remaining)
+      value += decoder.decode(bytes, { stream: true })
+      total += bytes.byteLength
+      if (chunk.value.byteLength > remaining) break
+    }
+    value += decoder.decode()
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+  return value
+}
+
+async function httpError(label: string, response: Response, settings: LlmSettings): Promise<LlmHttpError> {
+  const body = redactSecret(await readBoundedErrorBody(response), [settings.apiKey])
+  const detail = body.trim() ? `: ${body.trim()}` : ''
+  const message = redactSecret(`${label} failed: HTTP ${response.status} ${response.statusText}${detail}`, [settings.apiKey])
+  const retryable = response.status === 408 || response.status === 429 || response.status >= 500
+  return new LlmHttpError(response.status, message, retryable)
+}
+
 // ===== 辅助函数 =====
 
 // 构造 OpenAI 兼容请求头（Authorization: Bearer <key> + Content-Type）
@@ -124,6 +174,7 @@ export async function callStage2(
   prompt: string,
   sentences: string,
   settings: LlmSettings,
+  signal?: AbortSignal,
 ): Promise<Stage2Result> {
   const messages: ChatMessage[] = [
     { role: 'system', content: prompt },
@@ -134,10 +185,11 @@ export async function callStage2(
     method: 'POST',
     headers: buildOpenAiHeaders(settings),
     body: JSON.stringify(buildRequestBody(settings, messages, { jsonMode: true })),
+    signal,
   })
 
   if (!response.ok) {
-    throw new Error(`Stage2 call failed: HTTP ${response.status} ${response.statusText}`)
+    throw await httpError('Stage2 call', response, settings)
   }
 
   const data = await response.json()
@@ -158,8 +210,10 @@ export async function callStage2(
 export async function callMerge(
   metadataContext: string,
   settings: LlmSettings,
+  signal?: AbortSignal,
 ): Promise<any> {
   const messages: ChatMessage[] = [
+    { role: 'system', content: 'Return the merged compact outline as JSON metadata only.' },
     { role: 'user', content: metadataContext },
   ]
 
@@ -167,10 +221,11 @@ export async function callMerge(
     method: 'POST',
     headers: buildOpenAiHeaders(settings),
     body: JSON.stringify(buildRequestBody(settings, messages, { jsonMode: true })),
+    signal,
   })
 
   if (!response.ok) {
-    throw new Error(`Merge call failed: HTTP ${response.status} ${response.statusText}`)
+    throw await httpError('Merge call', response, settings)
   }
 
   const data = await response.json()
@@ -224,7 +279,7 @@ export function streamAiChat(
         signal,
       })
       if (!response.ok) {
-        throw new Error(`AI chat failed: HTTP ${response.status} ${response.statusText}`)
+        throw await httpError('AI chat', response, settings)
       }
       await readSseStream(response, innerCallbacks)
     } catch (err) {

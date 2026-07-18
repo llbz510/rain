@@ -112,6 +112,8 @@ export interface ImportCheckpoint {
   videoId: string
   stage: 'asr' | 'stage2' | 'merging'
   completedBlocks: string[]
+  /** Version-2 validated Stage2 outputs. Old checkpoints contain only completedBlocks IDs. */
+  completedBlockOutputs?: unknown[]
   errorMessage?: string
   updatedAt: number
 }

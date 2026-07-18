@@ -10,6 +10,7 @@ import type { Node, Video } from '@/models/types'
 import { assertTransition } from '@/pipeline/import-state'
 import { runAsrStage } from '@/pipeline/asr-runner'
 import { runPipeline } from '@/pipeline/pipeline-orchestrator'
+import { buildStage2Blocks } from '@/pipeline/stage2-runner'
 
 const video: Video = {
   id: 'video-asr',
@@ -31,9 +32,9 @@ const asrModel = {
 }
 
 const llmSettings = {
-  baseUrl: 'https://example.invalid/v1',
+  baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   apiKey: 'test-key',
-  model: 'qwen-test',
+  model: 'qwen3.5-omni-flash',
 }
 
 const asrPayload = [
@@ -41,29 +42,30 @@ const asrPayload = [
   { id: 'real_s_2', text: 'Second sentence.', start_time: 1.5, end_time: 3 },
 ]
 
-const validStage2 = {
-  chapters: [{
-    title: 'Chapter',
-    start: 0,
-    end: 3,
-    sections: [{
-      title: 'Section',
-      start: 0,
-      end: 3,
-      paragraphs: [{
-        title: 'Paragraph',
-        type: 'concept' as const,
-        start: 0,
-        end: 3,
-        sentences: [
-          { id: 'real_s_1', text: 'First sentence.', start: 0, end: 1.5 },
-          { id: 'real_s_2', text: 'Second sentence.', start: 1.5, end: 3 },
-        ],
-      }],
-    }],
-  }],
+function validStage2For(videoId: string, payload: typeof asrPayload) {
+  const normalized = payload.map((sentence, sortOrder) => ({
+    id: sentence.id,
+    nodeId: videoId,
+    text: sentence.text,
+    startTime: sentence.start_time,
+    endTime: sentence.end_time,
+    sortOrder,
+  }))
+  const block = buildStage2Blocks(videoId, normalized)[0]
+  const chapterId = `${block.blockId}:node:chapter`
+  const sectionId = `${block.blockId}:node:section`
+  return {
+    blockId: block.blockId,
+    nodes: [
+      { id: chapterId, parentId: null, kind: 'chapter' as const, title: 'Chapter', startSentenceId: normalized[0].id, endSentenceId: normalized.at(-1)!.id },
+      { id: sectionId, parentId: chapterId, kind: 'section' as const, title: 'Section', startSentenceId: normalized[0].id, endSentenceId: normalized.at(-1)!.id },
+      { id: `${block.blockId}:node:paragraph`, parentId: sectionId, kind: 'paragraph' as const, title: 'Paragraph', type: 'concept' as const, startSentenceId: normalized[0].id, endSentenceId: normalized.at(-1)!.id },
+    ],
+    coveredSentenceIds: normalized.map((sentence) => sentence.id),
+  }
 }
 
+const validStage2 = validStage2For(video.id, asrPayload)
 function callbacks() {
   return {
     onProgress: vi.fn(),
@@ -399,7 +401,7 @@ describe('fail-closed ASR pipeline', () => {
     await expect(runPipeline(video, llmSettings, callbacks(), db, asrModel, {
       invoke: successfulInvoke(),
       callStage2: vi.fn().mockResolvedValue({ chapters: [{ title: '', start: 1, end: 0, sections: [] }] }),
-    })).rejects.toThrow('Stage2 validation failed')
+    })).rejects.toThrow('Qwen returned invalid structured output after 3 attempts')
 
     expect(await getVideoById(db, video.id)).toMatchObject({ status: 'failed', stage: 'stage2' })
   })
@@ -417,21 +419,7 @@ describe('fail-closed ASR pipeline', () => {
       { id: 'other_s_1', text: 'Other first.', start_time: 0, end_time: 1 },
       { id: 'other_s_2', text: 'Other second.', start_time: 1, end_time: 2 },
     ]
-    const secondStage2 = {
-      chapters: [{
-        title: 'Other chapter', start: 0, end: 2,
-        sections: [{
-          title: 'Other section', start: 0, end: 2,
-          paragraphs: [{
-            title: 'Other paragraph', type: 'concept' as const, start: 0, end: 2,
-            sentences: [
-              { id: 'other_s_1', text: 'Other first.', start: 0, end: 1 },
-              { id: 'other_s_2', text: 'Other second.', start: 1, end: 2 },
-            ],
-          }],
-        }],
-      }],
-    }
+    const secondStage2 = validStage2For(secondVideo.id, secondPayload)
     const secondInvoke = vi.fn(async (command: string) => {
       if (command === 'list_whisper_models') return ['ggml-large-v3.bin']
       if (command === 'start_asr') return secondPayload
@@ -467,8 +455,8 @@ describe('fail-closed ASR pipeline', () => {
 
     expect(await getVideoById(db, video.id)).toMatchObject({ status: 'ready' })
     expect(await getSentencesByVideoId(db, video.id)).toEqual([
-      expect.objectContaining({ id: 'real_s_1', nodeId: 'video:video-asr:paragraph:2', sortOrder: 0 }),
-      expect.objectContaining({ id: 'real_s_2', nodeId: 'video:video-asr:paragraph:2', sortOrder: 1 }),
+      expect.objectContaining({ id: 'real_s_1', nodeId: validStage2.nodes[2].id, sortOrder: 0 }),
+      expect.objectContaining({ id: 'real_s_2', nodeId: validStage2.nodes[2].id, sortOrder: 1 }),
     ])
     expect(handlers.onComplete).toHaveBeenCalledTimes(1)
     expect(handlers.onError).not.toHaveBeenCalled()

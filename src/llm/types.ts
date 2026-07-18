@@ -22,6 +22,4 @@ export interface StreamCallbacks {
   signal?: AbortSignal                 // 取消信号（决策83）
 }
 
-export interface Stage2Result {
-  chapters: any[]  // 解析后的 JSON，结构同 Stage2Output
-}
+export type Stage2Result = import('@/pipeline/stage2-contract').Stage2BlockOutput

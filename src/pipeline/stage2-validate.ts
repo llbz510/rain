@@ -112,3 +112,9 @@ export function buildTextFromStage2Sentences(
     return sentences.map(s => s.text).join(' ')
   }
 }
+
+export {
+  validateExactSentenceCoverage,
+  validateStage2BlockOutput,
+} from '@/pipeline/stage2-contract'
+export type { Stage2BlockOutput, Stage2NodeRef } from '@/pipeline/stage2-contract'
