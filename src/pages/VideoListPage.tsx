@@ -299,8 +299,13 @@ export function VideoListPage() {
       if (!video) return
 
       const store = useRainStore.getState()
-      const structuringModelId = store.roleAssignment.structuring
-      const model = store.modelPool.find((m) => m.id === structuringModelId)
+      await store.loadRuntimeSettings()
+      const configuredStore = useRainStore.getState()
+      if (!configuredStore.settingsReady) {
+        throw new Error(configuredStore.settingsError ?? 'Runtime settings are unavailable')
+      }
+      const structuringModelId = configuredStore.roleAssignment.structuring
+      const model = configuredStore.modelPool.find((m) => m.id === structuringModelId)
 
       const llmSettings = model
         ? { baseUrl: model.baseUrl ?? '', apiKey: model.apiKey ?? '', model: model.modelName }

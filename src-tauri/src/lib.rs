@@ -2,6 +2,7 @@ pub mod ytdlp;
 pub mod whisper;
 pub mod ffmpeg;
 pub mod asr;
+pub mod asr_persistence;
 pub mod events;
 pub mod scheduler;
 pub mod commands;
@@ -22,6 +23,7 @@ pub fn run() {
             commands::probe_video_info,
             commands::generate_thumbnail,
             commands::start_asr,
+            commands::save_asr_atomically,
             commands::download_whisper_model,
             commands::list_whisper_models,
             // convert_file_src 用纯函数，前端直接调用

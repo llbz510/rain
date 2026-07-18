@@ -792,21 +792,8 @@ export async function saveAsrAtomically(videoId: string, language: string, sente
   }
   const asrSentences = sentences.map(sentence => sentence.nodeId ? sentence : { ...sentence, nodeId: videoId })
   if (isTauriDb(db)) {
-    await db.exec('BEGIN')
-    try {
-      for (const sentence of asrSentences) {
-        const row = sentenceToRow(sentence)
-        await db.exec(
-          'INSERT INTO sentence (id, node_id, text, start_time, end_time, sort_order) VALUES ($1, $2, $3, $4, $5, $6)',
-          [row.id, row.node_id, row.text, row.start_time, row.end_time, row.sort_order]
-        )
-      }
-      await db.exec('UPDATE video SET language = $1, status = $2, stage = $3 WHERE id = $4', [language, 'processing', 'stage2', videoId])
-      await db.exec('COMMIT')
-    } catch (error) {
-      await db.exec('ROLLBACK')
-      throw error
-    }
+    const { tauriInvoke } = await import('@/lib/tauri-env')
+    await tauriInvoke<void>('save_asr_atomically', { videoId, language, sentences: asrSentences })
     return
   }
 
@@ -816,8 +803,10 @@ export async function saveAsrAtomically(videoId: string, language: string, sente
   const sentenceBackup = sentenceRows.map(row => ({ ...row }))
   const videoBackup = videoRows.map(row => ({ ...row }))
   try {
-    assertSentenceIdsAvailable(sentenceRows, asrSentences)
-    for (const sentence of asrSentences) sentenceRows.push(sentenceToRow(sentence))
+    for (const sentence of asrSentences) {
+      assertSentenceIdsAvailable(sentenceRows, [sentence])
+      sentenceRows.push(sentenceToRow(sentence))
+    }
     const video = videoRows.find(row => row.id === videoId)
     if (!video) throw new Error(`Video not found: ${videoId}`)
     video.language = language

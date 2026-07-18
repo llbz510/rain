@@ -46,6 +46,30 @@ export interface RuntimeSettings {
 const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 const QWEN_MODEL = 'qwen3.5-omni-flash'
 
+
+export type RuntimeSettingsInitialization =
+  | { ok: true; ready: true; settings: RuntimeSettings }
+  | { ok: false; ready: false; error: string }
+
+export function createRuntimeSettingsInitializer(
+  loader: () => Promise<RuntimeSettings>,
+): { initialize: () => Promise<RuntimeSettingsInitialization>; retry: () => Promise<RuntimeSettingsInitialization>; state: () => RuntimeSettingsInitialization | null } {
+  let promise: Promise<RuntimeSettingsInitialization> | null = null
+  let current: RuntimeSettingsInitialization | null = null
+  const initialize = () => {
+    if (!promise) {
+      promise = loader()
+        .then((settings) => (current = { ok: true, ready: true, settings }))
+        .catch((error) => (current = { ok: false, ready: false, error: error instanceof Error ? error.message : String(error) }))
+    }
+    return promise
+  }
+  return {
+    initialize,
+    retry: () => { promise = null; return initialize() },
+    state: () => current,
+  }
+}
 const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
   models: [
     {
@@ -140,20 +164,27 @@ export function getModelsForRole(role: ModelRole): ModelPoolEntry[] {
 
 export async function saveRuntimeSettings(settings: RuntimeSettings): Promise<void> {
   const db = await getDb()
-  const models = settings.models.map(({ apiKey: _apiKey, ...model }) => model)
-  await setSetting(db, 'model_pool', JSON.stringify(models))
-  await Promise.all(settings.models.map(async (model) => {
-    if (model.apiKey) {
-      await setSetting(db, `api_key.${model.id}`, model.apiKey)
-    } else {
-      await deleteSetting(db, `api_key.${model.id}`)
+  const priorJson = await getSetting(db, 'model_pool')
+  const priorIds = priorJson ? (() => {
+    try {
+      const parsed = JSON.parse(priorJson)
+      return Array.isArray(parsed) ? parsed.map((model) => model?.id).filter((id): id is string => typeof id === 'string') : []
+    } catch {
+      return []
     }
+  })() : []
+  const models = settings.models.map(({ apiKey: _apiKey, ...model }) => model)
+  const modelIds = new Set(settings.models.map(model => model.id))
+  await setSetting(db, 'model_pool', JSON.stringify(models))
+  await Promise.all(priorIds.filter(id => !modelIds.has(id)).map(id => deleteSetting(db, `api_key.${id}`)))
+  await Promise.all(settings.models.map(async (model) => {
+    if (model.apiKey) await setSetting(db, `api_key.${model.id}`, model.apiKey)
+    else await deleteSetting(db, `api_key.${model.id}`)
   }))
   await Promise.all((Object.keys(settings.roles) as ModelRole[]).map((role) =>
     setSetting(db, `role_${role}`, settings.roles[role] ?? '')
   ))
 }
-
 export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
   const db = await getDb()
   const modelJson = await getSetting(db, 'model_pool')

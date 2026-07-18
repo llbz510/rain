@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
-import { addModelToPool, applyRuntimeSettings, listModels, loadRuntimeSettings as loadPersistedRuntimeSettings, removeModelFromPool, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
+import { addModelToPool, applyRuntimeSettings, createRuntimeSettingsInitializer, listModels, loadRuntimeSettings as loadPersistedRuntimeSettings, removeModelFromPool, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
 
 export type LayoutMode = 'follow' | 'textExpand' | 'mapExpand'
 export type SelectionOrigin = 'tree' | 'diagram'
@@ -39,6 +39,7 @@ interface RainState {
   modelPool: ModelPoolEntry[]
   roleAssignment: { asr: string | null; structuring: string | null; assistant: string | null }
   settingsReady: boolean
+  settingsError: string | null
 
   // 当前视频缓存
   nodeTree: Node[]
@@ -57,6 +58,7 @@ interface RainState {
   unloadVideo: () => void
   setPage: (page: 'list' | 'study' | 'settings') => void
   loadRuntimeSettings: () => Promise<void>
+  retryRuntimeSettings: () => Promise<void>
   addModel: (input: AddModelInput) => void
   removeModel: (id: string) => void
   setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => void
@@ -80,12 +82,15 @@ const initialState = {
   modelPool: [] as ModelPoolEntry[],
   roleAssignment: { asr: null, structuring: null, assistant: null } as { asr: string | null; structuring: string | null; assistant: string | null },
   settingsReady: false,
+  settingsError: null as string | null,
   nodeTree: [] as Node[],
   sentences: [] as Sentence[],
   notes: [] as Note[],
   currentVideoFilePath: '',
   currentVideoTitle: '',
 }
+
+const runtimeSettingsInitializer = createRuntimeSettingsInitializer(loadPersistedRuntimeSettings)
 
 export const useRainStore = create<RainState>((set, get) => ({
   ...initialState,
@@ -166,11 +171,20 @@ export const useRainStore = create<RainState>((set, get) => ({
   setPage: (page) => set({ currentPage: page }),
 
   loadRuntimeSettings: async () => {
-    try {
-      const settings = await loadPersistedRuntimeSettings()
-      set({ modelPool: applyRuntimeSettings(settings), roleAssignment: settings.roles })
-    } finally {
-      set({ settingsReady: true })
+    const result = await runtimeSettingsInitializer.initialize()
+    if (result.ok) {
+      set({ modelPool: applyRuntimeSettings(result.settings), roleAssignment: result.settings.roles, settingsReady: true, settingsError: null })
+    } else {
+      set({ settingsReady: false, settingsError: result.error })
+    }
+  },
+
+  retryRuntimeSettings: async () => {
+    const result = await runtimeSettingsInitializer.retry()
+    if (result.ok) {
+      set({ modelPool: applyRuntimeSettings(result.settings), roleAssignment: result.settings.roles, settingsReady: true, settingsError: null })
+    } else {
+      set({ settingsReady: false, settingsError: result.error })
     }
   },
 

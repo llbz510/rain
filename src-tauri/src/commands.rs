@@ -4,6 +4,7 @@
 // ========================================
 
 use crate::asr;
+use crate::asr_persistence::{self, PersistedSentence};
 use crate::events::{self, ProgressPayload};
 use crate::ffmpeg;
 use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
@@ -138,6 +139,31 @@ pub async fn start_asr(
     response
 }
 
+#[tauri::command]
+pub async fn save_asr_atomically(
+    app: AppHandle,
+    video_id: String,
+    language: String,
+    sentences: Vec<PersistedSentence>,
+) -> Result<(), String> {
+    use sqlx::{Connection, SqliteConnection};
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
+    let database_path = config_dir.join("rain.db");
+    let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
+        .await
+        .map_err(|error| format!("Open Rain database: {error}"))?;
+    asr_persistence::save_asr_atomically_on_connection(
+        &mut connection,
+        &video_id,
+        &language,
+        &sentences,
+    )
+    .await
+    .map_err(|error| format!("Persist ASR atomically: {error}"))
+}
 fn validate_asr_tier(tier: &str) -> Result<(), String> {
     if tier == "whisper" {
         Ok(())

@@ -2994,6 +2994,7 @@ dependencies = [
  "same-file",
  "serde",
  "serde_json",
+ "sqlx",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
