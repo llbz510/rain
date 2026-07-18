@@ -12,6 +12,7 @@ pub const IMPORT_FAILED_EVENT: &str = "import_failed";
 pub const IMPORT_CANCELLED_EVENT: &str = "import_cancelled";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProgressPayload {
     pub video_id: String,
     pub stage: String,
@@ -61,14 +62,10 @@ pub fn emit_import_complete(app: &AppHandle, video_id: String) -> Result<(), Str
         .map_err(|e| e.to_string())
 }
 
-pub fn emit_import_failed(
-    app: &AppHandle,
-    video_id: String,
-    error: String,
-) -> Result<(), String> {
+pub fn emit_import_failed(app: &AppHandle, video_id: String, error: String) -> Result<(), String> {
     app.emit(
         IMPORT_FAILED_EVENT,
-        serde_json::json!({ "video_id": video_id, "error": error }),
+        serde_json::json!({ "videoId": video_id, "error": error }),
     )
     .map_err(|e| e.to_string())
 }
@@ -76,4 +73,18 @@ pub fn emit_import_failed(
 pub fn emit_import_cancelled(app: &AppHandle, video_id: String) -> Result<(), String> {
     app.emit(IMPORT_CANCELLED_EVENT, video_id)
         .map_err(|e| e.to_string())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_payload_serializes_for_the_typescript_contract() {
+        let value = serde_json::to_value(ProgressPayload::new("v1", "asr_extraction", 10)).unwrap();
+
+        assert_eq!(value["videoId"], "v1");
+        assert_eq!(value["blockCurrent"], 0);
+        assert!(value.get("video_id").is_none());
+        assert!(value.get("block_current").is_none());
+    }
 }

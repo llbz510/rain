@@ -6,7 +6,7 @@
 use crate::asr;
 use crate::events::{self, ProgressPayload};
 use crate::ffmpeg;
-use crate::scheduler::ImportScheduler;
+use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
 use crate::whisper::{self, WhisperModelSize};
 use crate::ytdlp;
 use std::path::Path;
@@ -33,9 +33,9 @@ pub async fn start_import(
 #[tauri::command]
 pub async fn cancel_import(
     scheduler: State<'_, Arc<ImportScheduler>>,
-    _video_id: String,
+    video_id: String,
 ) -> Result<(), String> {
-    scheduler.cancel().await;
+    scheduler.cancel_if_current(&video_id).await;
     Ok(())
 }
 
@@ -78,8 +78,10 @@ pub async fn generate_thumbnail(
     output_path: String,
     timestamp: f64,
 ) -> Result<String, String> {
-    ffmpeg::extract_thumbnail(&file_path, &output_path, timestamp)
-        .map_err(|e| format!("{:?}", e))
+    tokio::task::spawn_blocking(move || ffmpeg::extract_frame(&file_path, &output_path, timestamp))
+        .await
+        .map_err(|error| format!("Thumbnail task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 /// 启动 ASR（决策32/94/85）
@@ -87,65 +89,164 @@ pub async fn generate_thumbnail(
 #[tauri::command]
 pub async fn start_asr(
     app: AppHandle,
+    scheduler: State<'_, Arc<ImportScheduler>>,
     video_id: String,
     file_path: String,
     tier: String,
     model_path: Option<String>,
 ) -> Result<Vec<asr::Sentence>, String> {
-    let _ = events::emit_progress(
-        &app,
-        ProgressPayload::new(&video_id, "asr", 10),
-    );
+    if let Err(error) = validate_asr_tier(&tier) {
+        let _ = events::emit_import_failed(&app, video_id, error.clone());
+        return Err(error);
+    }
 
-    let sentences = match tier.as_str() {
-        "subtitle" => {
-            // 字幕档：从 yt-dlp 字幕轨解析
-            // 前端传入字幕文本，Rust 解析
-            Vec::new()
-        }
-        "api" => {
-            // API 档：前端直连 LLM/ASR provider（决策92）
-            Vec::new()
-        }
-        "whisper" => {
-            let model = model_path.ok_or("model_path required for whisper tier")?;
-            let _ = events::emit_progress(
-                &app,
-                ProgressPayload::new(&video_id, "asr", 30),
-            );
+    let model = model_path.unwrap_or_default();
+    if let Err(error) = whisper::validate_asr_request(&file_path, &model) {
+        let _ = events::emit_import_failed(&app, video_id, error.clone());
+        return Err(error);
+    }
 
-            // whisper-rs 推理 → 词级时间戳 → 句级标准化
-            let _ = events::emit_progress(
-                &app,
-                ProgressPayload::new(&video_id, "asr", 80),
-            );
+    let task = scheduler.start_video_task(video_id.clone()).await;
+    let token = task.token();
+    let result = run_whisper_asr(&app, &video_id, &file_path, &model, token.clone()).await;
 
-            let result = whisper::transcribe(&model, &file_path, true)
-                .map_err(|e| format!("{:?}", e))?;
-
-            // 词级 → 句级（通过 asr 模块标准化）
-            whisper_result_to_sentences(&result)
-        }
-        _ => return Err(format!("Unknown ASR tier: {}", tier)),
+    let response = match result {
+        Ok(sentences) => match scheduler.finish_success(&token).await {
+            TaskFinish::Completed => {
+                let _ = events::emit_progress(&app, ProgressPayload::new(&video_id, "asr", 100));
+                Ok(sentences)
+            }
+            TaskFinish::Cancelled => {
+                let _ = events::emit_import_cancelled(&app, video_id);
+                Err("ASR cancelled".to_string())
+            }
+            TaskFinish::Stale | TaskFinish::Failed => Err("ASR task was superseded".to_string()),
+        },
+        Err(error) => match scheduler.finish_failure(&token, error.clone()).await {
+            TaskFinish::Failed => {
+                let _ = events::emit_import_failed(&app, video_id, error.clone());
+                Err(error)
+            }
+            TaskFinish::Cancelled => {
+                let _ = events::emit_import_cancelled(&app, video_id);
+                Err("ASR cancelled".to_string())
+            }
+            TaskFinish::Stale | TaskFinish::Completed => Err("ASR task was superseded".to_string()),
+        },
     };
+    drop(task);
+    response
+}
 
-    let _ = events::emit_progress(
-        &app,
-        ProgressPayload::new(&video_id, "asr", 100),
-    );
+fn validate_asr_tier(tier: &str) -> Result<(), String> {
+    if tier == "whisper" {
+        Ok(())
+    } else {
+        Err(format!(
+            "ASR tier '{tier}' is not supported; configure local Whisper"
+        ))
+    }
+}
+async fn run_whisper_asr(
+    app: &AppHandle,
+    video_id: &str,
+    file_path: &str,
+    model_path: &str,
+    token: CancellationToken,
+) -> Result<Vec<asr::Sentence>, String> {
+    ensure_asr_not_cancelled(&token)?;
+    let _ = events::emit_progress(app, ProgressPayload::new(video_id, "asr_extraction", 10));
 
-    let _ = events::emit_import_complete(&app, video_id.clone());
+    let temp_wav = whisper::temporary_wav_path(file_path);
+    if let Some(parent) = temp_wav.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Create ASR temp dir failed: {error}"))?;
+    }
+    let _temp_guard = whisper::TemporaryWavGuard::new(temp_wav.clone());
+    let temp_wav_string = temp_wav
+        .to_str()
+        .ok_or_else(|| "Temporary WAV path is not valid UTF-8".to_string())?
+        .to_string();
 
+    let input = file_path.to_string();
+    let output = temp_wav_string.clone();
+    let conversion_token = token.clone();
+    tokio::task::spawn_blocking(move || {
+        whisper::convert_to_wav_cancellable(&input, &output, Some(&conversion_token))
+    })
+    .await
+    .map_err(|error| format!("ASR extraction task failed: {error}"))?
+    .map_err(|error| error.to_string())?;
+
+    ensure_asr_not_cancelled(&token)?;
+    let _ = events::emit_progress(app, ProgressPayload::new(video_id, "asr_transcription", 35));
+
+    let model = model_path.to_string();
+    let wav = temp_wav_string;
+    let inference_token = token.clone();
+    let whisper_result = tokio::task::spawn_blocking(move || {
+        whisper::transcribe_wav(&model, &wav, true, Some(inference_token))
+    })
+    .await
+    .map_err(|error| format!("Whisper task failed: {error}"))?
+    .map_err(|error| error.to_string())?;
+
+    ensure_asr_not_cancelled(&token)?;
+    let _ = events::emit_progress(app, ProgressPayload::new(video_id, "asr_finalization", 90));
+
+    let sentences = whisper_result_to_sentences(&whisper_result);
+    validate_whisper_sentences(&sentences)?;
     Ok(sentences)
 }
 
-/// WhisperResult → Sentence[]（词级时间戳按标点分组为句级）
+fn ensure_asr_not_cancelled(token: &CancellationToken) -> Result<(), String> {
+    if token.is_cancelled() {
+        Err("ASR cancelled".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_whisper_sentences(sentences: &[asr::Sentence]) -> Result<(), String> {
+    if sentences.is_empty() {
+        return Err("Whisper ASR returned no sentences".to_string());
+    }
+
+    let mut previous = None;
+    for (index, sentence) in sentences.iter().enumerate() {
+        if sentence.text.trim().is_empty() {
+            return Err(format!("Whisper sentence {index} has empty text"));
+        }
+        if !sentence.start_time.is_finite()
+            || !sentence.end_time.is_finite()
+            || sentence.start_time < 0.0
+            || sentence.end_time <= sentence.start_time
+        {
+            return Err(format!("Whisper sentence {index} has invalid timestamps"));
+        }
+        if let Some((previous_start, previous_end)) = previous {
+            if sentence.start_time < previous_start || sentence.end_time < previous_end {
+                return Err(format!(
+                    "Whisper sentence timestamps are not monotonic at index {index}"
+                ));
+            }
+            if sentence.start_time < previous_end {
+                return Err(format!(
+                    "Whisper sentence timestamps overlap at index {index}"
+                ));
+            }
+        }
+        previous = Some((sentence.start_time, sentence.end_time));
+    }
+
+    Ok(())
+}
+/// Convert a complete Whisper result to sentence records.
 fn whisper_result_to_sentences(result: &whisper::WhisperResult) -> Vec<asr::Sentence> {
     let mut sentences = Vec::new();
     let mut current_text = String::new();
     let mut current_start = 0.0f64;
     let mut current_end = 0.0f64;
-    let mut idx = 0;
 
     for segment in &result.segments {
         for word in &segment.word_level {
@@ -159,12 +260,11 @@ fn whisper_result_to_sentences(result: &whisper::WhisperResult) -> Vec<asr::Sent
                 let trimmed = current_text.trim().to_string();
                 if !trimmed.is_empty() {
                     sentences.push(asr::Sentence {
-                        id: format!("whisper_{}", idx),
+                        id: format!("whisper-{}", uuid::Uuid::new_v4()),
                         text: trimmed,
                         start_time: current_start,
                         end_time: current_end,
                     });
-                    idx += 1;
                 }
                 current_text.clear();
             }
@@ -173,7 +273,7 @@ fn whisper_result_to_sentences(result: &whisper::WhisperResult) -> Vec<asr::Sent
 
     if !current_text.trim().is_empty() {
         sentences.push(asr::Sentence {
-            id: format!("whisper_{}", idx),
+            id: format!("whisper-{}", uuid::Uuid::new_v4()),
             text: current_text.trim().to_string(),
             start_time: current_start,
             end_time: current_end,
@@ -194,10 +294,7 @@ fn is_sentence_ending(text: &str) -> bool {
 
 /// 下载 Whisper 模型（决策94）
 #[tauri::command]
-pub async fn download_whisper_model(
-    app: AppHandle,
-    model_size: String,
-) -> Result<String, String> {
+pub async fn download_whisper_model(app: AppHandle, model_size: String) -> Result<String, String> {
     let size = WhisperModelSize::from_str(&model_size)
         .ok_or_else(|| format!("Unknown model size: {}", model_size))?;
 
@@ -211,8 +308,7 @@ pub async fn download_whisper_model(
     let output_dir = data_dir.join("whisper-models");
     let output_path = output_dir.join(filename);
 
-    std::fs::create_dir_all(&output_dir)
-        .map_err(|e| format!("Create dir failed: {}", e))?;
+    std::fs::create_dir_all(&output_dir).map_err(|e| format!("Create dir failed: {}", e))?;
 
     let url = format!(
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
@@ -238,8 +334,7 @@ pub async fn download_whisper_model(
         .await
         .map_err(|e| format!("Read response failed: {}", e))?;
 
-    std::fs::write(&output_path, &bytes)
-        .map_err(|e| format!("Write file failed: {}", e))?;
+    std::fs::write(&output_path, &bytes).map_err(|e| format!("Write file failed: {}", e))?;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -297,5 +392,124 @@ mod tests {
         let result = convert_file_src("C:\\videos\\test.mp4");
         assert!(result.starts_with("asset://"));
         assert!(result.contains("C:/videos/test.mp4"));
+    }
+    #[test]
+    fn cancelled_asr_token_is_rejected() {
+        let token = crate::scheduler::CancellationToken::new();
+        token.cancel();
+        assert_eq!(
+            ensure_asr_not_cancelled(&token).unwrap_err(),
+            "ASR cancelled"
+        );
+    }
+    #[test]
+    fn unsupported_asr_tiers_fail_closed() {
+        assert!(validate_asr_tier("whisper").is_ok());
+        assert_eq!(
+            validate_asr_tier("subtitle").unwrap_err(),
+            "ASR tier 'subtitle' is not supported; configure local Whisper"
+        );
+        assert!(validate_asr_tier("api").is_err());
+    }
+    #[test]
+    fn empty_whisper_output_fails_closed() {
+        assert_eq!(
+            validate_whisper_sentences(&[]).unwrap_err(),
+            "Whisper ASR returned no sentences"
+        );
+    }
+    #[test]
+    fn whisper_output_rejects_empty_text() {
+        let sentences = vec![asr::Sentence {
+            id: "s1".to_string(),
+            text: "   ".to_string(),
+            start_time: 0.0,
+            end_time: 1.0,
+        }];
+
+        assert_eq!(
+            validate_whisper_sentences(&sentences).unwrap_err(),
+            "Whisper sentence 0 has empty text"
+        );
+    }
+
+    #[test]
+    fn whisper_output_rejects_non_monotonic_timestamps() {
+        let sentences = vec![
+            asr::Sentence {
+                id: "s1".to_string(),
+                text: "first".to_string(),
+                start_time: 1.0,
+                end_time: 2.0,
+            },
+            asr::Sentence {
+                id: "s2".to_string(),
+                text: "second".to_string(),
+                start_time: 0.5,
+                end_time: 3.0,
+            },
+        ];
+
+        assert_eq!(
+            validate_whisper_sentences(&sentences).unwrap_err(),
+            "Whisper sentence timestamps are not monotonic at index 1"
+        );
+    }
+    #[test]
+    fn whisper_output_rejects_invalid_timestamps() {
+        let sentences = vec![asr::Sentence {
+            id: "s1".to_string(),
+            text: "invalid".to_string(),
+            start_time: f64::NAN,
+            end_time: 1.0,
+        }];
+
+        assert_eq!(
+            validate_whisper_sentences(&sentences).unwrap_err(),
+            "Whisper sentence 0 has invalid timestamps"
+        );
+    }
+    #[test]
+    fn sentence_ids_are_globally_unique() {
+        let result = whisper::WhisperResult {
+            segments: vec![whisper::WhisperSegment {
+                text: "你好。".to_string(),
+                start_time: 0.0,
+                end_time: 1.0,
+                word_level: vec![whisper::WordTimestamp {
+                    word: "你好。".to_string(),
+                    start: 0.0,
+                    end: 1.0,
+                }],
+            }],
+            detected_language: "zh".to_string(),
+        };
+
+        let first = whisper_result_to_sentences(&result);
+        let second = whisper_result_to_sentences(&result);
+
+        assert_ne!(first[0].id, second[0].id);
+    }
+    #[test]
+    fn whisper_output_rejects_overlapping_sentences() {
+        let sentences = vec![
+            asr::Sentence {
+                id: "s1".to_string(),
+                text: "first".to_string(),
+                start_time: 1.0,
+                end_time: 2.0,
+            },
+            asr::Sentence {
+                id: "s2".to_string(),
+                text: "second".to_string(),
+                start_time: 1.5,
+                end_time: 3.0,
+            },
+        ];
+
+        assert_eq!(
+            validate_whisper_sentences(&sentences).unwrap_err(),
+            "Whisper sentence timestamps overlap at index 1"
+        );
     }
 }
