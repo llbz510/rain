@@ -4,6 +4,7 @@ import {
   getSentencesByVideoId,
   getVideoById,
   insertVideo,
+  saveAsrAtomically,
 } from '@/models/database'
 import type { Node, Video } from '@/models/types'
 import { assertTransition } from '@/pipeline/import-state'
@@ -116,7 +117,41 @@ describe('fail-closed ASR pipeline', () => {
     resetDb()
     vi.restoreAllMocks()
   })
+  it('rejects a stale direct MemoryDatabase ASR commit and preserves ready state', async () => {
+    resetDb()
+    const db = await getDb()
+    await insertVideo(db, { ...video, language: 'en', status: 'ready', stage: undefined })
 
+    await expect(saveAsrAtomically(video.id, 'zh', [{
+      id: 'stale-memory-sentence',
+      nodeId: '',
+      text: 'Must not be committed.',
+      startTime: 0,
+      endTime: 1,
+      sortOrder: 0,
+    }], db)).rejects.toThrow('Persisted import state changed')
+
+    expect(await getSentencesByVideoId(db, video.id)).toEqual([])
+    expect(await getVideoById(db, video.id)).toMatchObject({
+      language: 'en',
+      status: 'ready',
+      stage: undefined,
+    })
+  })
+
+  it('rejects a stale pending snapshot after the persisted row became ready', async () => {
+    const db = await getDb()
+    const persistedReady = { ...video, id: 'stale-ready', status: 'ready' as const }
+    const stalePending = { ...persistedReady, status: 'pending' as const }
+    await insertVideo(db, persistedReady)
+    const invoke = successfulInvoke()
+
+    await expect(runAsrStage({ video: stalePending, asrModel, db, invoke })).rejects.toThrow(
+      'Persisted import state changed',
+    )
+    expect(invoke).not.toHaveBeenCalled()
+    expect(await getVideoById(db, persistedReady.id)).toMatchObject({ status: 'ready' })
+  })
   it('refuses to re-enter ASR from a terminal video state', async () => {
     const db = await getDb()
     const terminalVideo = { ...video, id: 'ready-video', status: 'ready' as const }
@@ -284,6 +319,62 @@ describe('fail-closed ASR pipeline', () => {
     expect(stage2).not.toHaveBeenCalled()
   })
 
+  it('preserves an ASR persistence error when terminal-state persistence also fails', async () => {
+    const db = await getDb()
+    const original = new Error('ASR commit failed')
+    const transition = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error('state database unavailable'))
+    const handlers = callbacks()
+
+    await expect(runPipeline(video, llmSettings, handlers, db, asrModel, {
+      invoke: successfulInvoke(),
+      callStage2: vi.fn(),
+      saveAsr: vi.fn().mockRejectedValue(original),
+      transition,
+    })).rejects.toBe(original)
+    expect(handlers.onError).toHaveBeenCalledTimes(1)
+    expect(handlers.onError).toHaveBeenCalledWith(original)
+    expect(transition).toHaveBeenCalled()
+  })
+
+  it('preserves a Stage2 error when failure-state persistence rejects', async () => {
+    const db = await getDb()
+    const original = new Error('Stage2 original failure')
+    const transition = vi.fn()
+      .mockImplementationOnce(async (...args: unknown[]) => {
+        const { transitionVideoImportState } = await import('@/models/database')
+        return transitionVideoImportState(...args as Parameters<typeof transitionVideoImportState>)
+      })
+      .mockRejectedValue(new Error('cannot persist failed state'))
+    const handlers = callbacks()
+
+    await expect(runPipeline(video, llmSettings, handlers, db, asrModel, {
+      invoke: successfulInvoke(),
+      callStage2: vi.fn().mockRejectedValue(original),
+      transition,
+    })).rejects.toBe(original)
+    expect(handlers.onError).toHaveBeenCalledTimes(1)
+    expect(handlers.onError).toHaveBeenCalledWith(original)
+    expect(await getVideoById(db, video.id)).toMatchObject({ status: 'processing', stage: 'stage2' })
+  })
+
+  it('does not let an onError callback exception replace the pipeline error', async () => {
+    const db = await getDb()
+    const original = new Error('Whisper primary failure')
+    const handlers = callbacks()
+    handlers.onError.mockImplementation(() => { throw new Error('callback failure') })
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'list_whisper_models') return ['ggml-large-v3.bin']
+      throw original
+    })
+
+    await expect(runPipeline(video, llmSettings, handlers, db, asrModel, {
+      invoke,
+      callStage2: vi.fn(),
+    })).rejects.toBe(original)
+    expect(handlers.onError).toHaveBeenCalledTimes(1)
+  })
   it('fails and rethrows Stage2 call errors without a default structure', async () => {
     const db = await getDb()
     const handlers = callbacks()

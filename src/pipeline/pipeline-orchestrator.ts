@@ -10,10 +10,10 @@ import {
   type PipelineInvoke,
 } from '@/pipeline/asr-runner'
 import {
-  assignAsrSentencesToNodes,
   getVideoById,
-  insertNodes,
-  updateVideoImportState,
+  mergeImportAtomically,
+  saveAsrAtomically,
+  transitionVideoImportState,
   type Database,
 } from '@/models/database'
 
@@ -26,6 +26,9 @@ export interface PipelineCallbacks {
 export interface PipelineDependencies {
   invoke?: PipelineInvoke
   callStage2?: typeof callStage2
+  saveAsr?: typeof saveAsrAtomically
+  transition?: typeof transitionVideoImportState
+  merge?: typeof mergeImportAtomically
 }
 
 const STAGE2_SYSTEM_PROMPT = `You are a video lecture structuring assistant. Given a transcript (list of sentences with timestamps), you must output a JSON object that organizes the content into a hierarchical structure.
@@ -82,6 +85,8 @@ export async function runPipeline(
 ): Promise<void> {
   let currentStage: Extract<ImportStage, 'asr' | 'stage2' | 'merging'> = 'asr'
   let completed: { video: Video; nodes: Node[]; sentences: Sentence[] } | null = null
+  const transition = dependencies.transition ?? transitionVideoImportState
+  const merge = dependencies.merge ?? mergeImportAtomically
 
   try {
     callbacks.onProgress('asr', 0)
@@ -90,6 +95,8 @@ export async function runPipeline(
       asrModel,
       db,
       invoke: dependencies.invoke,
+      saveAsr: dependencies.saveAsr,
+      transition,
     })
     callbacks.onProgress('asr', 100)
 
@@ -108,28 +115,41 @@ export async function runPipeline(
     callbacks.onProgress('stage2', 100)
 
     assertTransition('stage2', 'merging')
+    await transition(
+      db,
+      video.id,
+      { status: 'processing', stage: 'stage2' },
+      { status: 'processing', stage: 'merging' },
+    )
     currentStage = 'merging'
-    await updateVideoImportState(db, video.id, 'processing', 'merging')
     callbacks.onProgress('merging', 0)
     const { nodes, sentences } = convertStage2ToEntities(stage2Output, video.id, rawSentences)
-    await insertNodes(db, nodes)
-    await assignAsrSentencesToNodes(db, video.id, sentences)
+    await merge(db, video.id, nodes, sentences)
     callbacks.onProgress('merging', 100)
 
     assertTransition('merging', 'ready')
-    await updateVideoImportState(db, video.id, 'ready', null)
     const updatedVideo = await getVideoById(db, video.id)
     if (!updatedVideo) throw new Error(`Video not found after pipeline completion: ${video.id}`)
     completed = { video: updatedVideo, nodes, sentences }
   } catch (cause) {
     const error = asError(cause)
-    const currentVideo = await getVideoById(db, video.id)
-    if (currentVideo?.status === 'processing') {
-      const terminal = isCancellationError(error) ? 'cancelled' : 'failed'
+    const terminal = isCancellationError(error) ? 'cancelled' : 'failed'
+    try {
       assertTransition(currentStage, terminal)
-      await updateVideoImportState(db, video.id, terminal, currentStage, error.message)
+      await transition(
+        db,
+        video.id,
+        { status: 'processing', stage: currentStage },
+        { status: terminal, stage: currentStage, errorMessage: error.message },
+      )
+    } catch {
+      // Persistence failure must not replace the primary pipeline error.
     }
-    callbacks.onError(error)
+    try {
+      callbacks.onError(error)
+    } catch {
+      // Callback failure must not replace the primary pipeline error.
+    }
     throw error
   }
 

@@ -519,30 +519,39 @@ export async function updateVideoStatus(db: Database, id: string, status: string
   memDb._setTable('video', table)
 }
 
-export async function updateVideoImportState(
+export interface VideoImportState {
+  status: VideoStatus
+  stage: Video['stage'] | null
+  errorMessage?: string | null
+}
+
+export async function transitionVideoImportState(
   db: Database,
   id: string,
-  status: VideoStatus,
-  stage: Video['stage'] | null,
-  errorMessage: string | null = null,
+  expected: VideoImportState,
+  next: VideoImportState,
 ): Promise<void> {
   if (isTauriDb(db)) {
-    await db.exec(
-      'UPDATE video SET status = $1, stage = $2, error_message = $3 WHERE id = $4',
-      [status, stage, errorMessage, id],
-    )
+    const { tauriInvoke } = await import('@/lib/tauri-env')
+    await tauriInvoke<void>('transition_video_import_state', {
+      videoId: id,
+      expected,
+      next,
+    })
     return
   }
   const memDb = db as unknown as MemoryDatabase
   const table = memDb._getTable('video')
   const row = table.find((candidate) => candidate.id === id)
-  if (!row) throw new Error(`Video not found: ${id}`)
-  row.status = status
-  row.stage = stage
-  row.error_message = errorMessage
+  const actualStage = row?.stage ?? null
+  if (!row || row.status !== expected.status || actualStage !== expected.stage) {
+    throw new Error(`Persisted import state changed for video "${id}"`)
+  }
+  row.status = next.status
+  row.stage = next.stage
+  row.error_message = next.errorMessage ?? null
   memDb._setTable('video', table)
 }
-
 export async function listVideos(db: Database, sortBy: string = 'lastStudied'): Promise<Video[]> {
   if (isTauriDb(db)) {
     let sql = 'SELECT * FROM video'
@@ -808,9 +817,13 @@ export async function getSentencesByVideoId(db: Database, videoId: string): Prom
     .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
-export async function saveAsrAtomically(videoId: string, language: string, sentences: Sentence[]): Promise<void> {
-  const { getDb } = await import('./db-singleton')
-  const db = await getDb()
+export async function saveAsrAtomically(
+  videoId: string,
+  language: string,
+  sentences: Sentence[],
+  database?: Database,
+): Promise<void> {
+  const db = database ?? await (await import('./db-singleton')).getDb()
   if (!await getVideoById(db, videoId)) {
     throw new Error(`Video not found: ${videoId}`)
   }
@@ -827,12 +840,15 @@ export async function saveAsrAtomically(videoId: string, language: string, sente
   const sentenceBackup = sentenceRows.map(row => ({ ...row }))
   const videoBackup = videoRows.map(row => ({ ...row }))
   try {
+    const video = videoRows.find(row => row.id === videoId)
+    if (!video) throw new Error(`Video not found: ${videoId}`)
+    if (video.status !== 'processing' || video.stage !== 'asr') {
+      throw new Error(`Persisted import state changed for video "${videoId}"`)
+    }
     for (const sentence of asrSentences) {
       assertSentenceIdsAvailable(sentenceRows, [sentence])
       sentenceRows.push(sentenceToRow(sentence))
     }
-    const video = videoRows.find(row => row.id === videoId)
-    if (!video) throw new Error(`Video not found: ${videoId}`)
     video.language = language
     video.status = 'processing'
     video.stage = 'stage2'
@@ -886,6 +902,72 @@ export async function assignAsrSentencesToNodes(
   }
 }
 
+export async function mergeImportAtomically(
+  db: Database,
+  videoId: string,
+  nodes: Node[],
+  sentences: Sentence[],
+): Promise<void> {
+  const assignments = sentences.map((sentence) => ({
+    id: sentence.id,
+    nodeId: sentence.nodeId,
+    sortOrder: sentence.sortOrder,
+  }))
+  if (isTauriDb(db)) {
+    const { tauriInvoke } = await import('@/lib/tauri-env')
+    await tauriInvoke<void>('merge_import_atomically', { videoId, nodes, assignments })
+    return
+  }
+
+  const memDb = db as unknown as MemoryDatabase
+  const nodeRows = memDb._getTable('node')
+  const sentenceRows = memDb._getTable('sentence')
+  const videoRows = memDb._getTable('video')
+  const nodeBackup = nodeRows.map((row) => ({ ...row }))
+  const sentenceBackup = sentenceRows.map((row) => ({ ...row }))
+  const videoBackup = videoRows.map((row) => ({ ...row }))
+  try {
+    const video = videoRows.find((row) => row.id === videoId)
+    if (!video || video.status !== 'processing' || video.stage !== 'merging') {
+      throw new Error(`Persisted import state changed for video "${videoId}"`)
+    }
+    const allNodeIds = new Set(nodeRows.map((row) => row.id))
+    for (const node of nodes) {
+      if (node.videoId !== videoId || allNodeIds.has(node.id)) {
+        throw new Error(`Cannot insert import node "${node.id}"`)
+      }
+      allNodeIds.add(node.id)
+      nodeRows.push(nodeToRow(node))
+    }
+    const ownedNodeIds = new Set(
+      nodeRows.filter((row) => row.video_id === videoId).map((row) => row.id),
+    )
+    for (const assignment of assignments) {
+      if (!ownedNodeIds.has(assignment.nodeId)) {
+        throw new Error(`Cannot assign ASR sentence "${assignment.id}" to node "${assignment.nodeId}"`)
+      }
+      const row = sentenceRows.find((candidate) =>
+        candidate.id === assignment.id
+        && (candidate.node_id === videoId || ownedNodeIds.has(candidate.node_id)))
+      if (!row) {
+        throw new Error(`Cannot assign ASR sentence "${assignment.id}" to node "${assignment.nodeId}"`)
+      }
+      row.node_id = assignment.nodeId
+      row.sort_order = assignment.sortOrder
+    }
+    video.status = 'ready'
+    video.stage = null
+    video.error_message = null
+    memDb._setTable('node', nodeRows)
+    memDb._setTable('sentence', sentenceRows)
+    memDb._setTable('video', videoRows)
+  } catch (error) {
+    memDb._setTable('node', nodeBackup)
+    memDb._setTable('sentence', sentenceBackup)
+    memDb._setTable('video', videoBackup)
+    throw error
+  }
+}
 export async function atomicInsertSentences(db: Database, sentences: Sentence[]): Promise<void> {
   if (isTauriDb(db)) {
     // 原子插入：用 BEGIN/COMMIT/ROLLBACK 事务保证全部成功或全部失败

@@ -1,5 +1,5 @@
 import type { Database } from '@/models/database'
-import { saveAsrAtomically, updateVideoImportState } from '@/models/database'
+import { saveAsrAtomically, transitionVideoImportState } from '@/models/database'
 import type { Sentence, Video } from '@/models/types'
 import { detectLanguageFromSentences } from '@/pipeline/asr-normalize'
 import { assertTransition, type ImportStage } from '@/pipeline/import-state'
@@ -27,6 +27,8 @@ export interface RunAsrStageInput {
   asrModel: AsrModelConfig
   db: Database
   invoke?: PipelineInvoke
+  saveAsr?: typeof saveAsrAtomically
+  transition?: typeof transitionVideoImportState
 }
 
 function asError(error: unknown): Error {
@@ -128,9 +130,16 @@ function currentImportStage(video: Video): ImportStage {
 export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> {
   const { video, asrModel, db } = input
   const invoke = input.invoke ?? (tauriInvoke as PipelineInvoke)
+  const saveAsr = input.saveAsr ?? saveAsrAtomically
+  const transition = input.transition ?? transitionVideoImportState
 
   assertTransition(currentImportStage(video), 'asr')
-  await updateVideoImportState(db, video.id, 'processing', 'asr')
+  await transition(
+    db,
+    video.id,
+    { status: 'pending', stage: null },
+    { status: 'processing', stage: 'asr' },
+  )
 
   try {
     if (video.source !== 'local' || !video.filePath?.trim()) {
@@ -153,14 +162,23 @@ export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> 
     })
     const sentences = validateWhisperResult(result)
     const language = detectLanguageFromSentences(sentences)
-    await saveAsrAtomically(video.id, language, sentences)
+    await saveAsr(video.id, language, sentences, db)
     assertTransition('asr', 'stage2')
     return sentences
   } catch (cause) {
     const error = asError(cause)
     const terminal = isCancellationError(error) ? 'cancelled' : 'failed'
     assertTransition('asr', terminal)
-    await updateVideoImportState(db, video.id, terminal, 'asr', error.message)
+    try {
+      await transition(
+        db,
+        video.id,
+        { status: 'processing', stage: 'asr' },
+        { status: terminal, stage: 'asr', errorMessage: error.message },
+      )
+    } catch {
+      // Persistence failure must not replace the primary ASR error.
+    }
     throw error
   }
 }

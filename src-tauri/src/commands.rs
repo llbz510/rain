@@ -7,8 +7,9 @@ use crate::asr;
 use crate::asr_persistence::{self, PersistedSentence};
 use crate::events::{self, ProgressPayload};
 use crate::ffmpeg;
+use crate::import_state_persistence::{self, ImportState};
 use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
-use crate::structure_persistence::{self, SentenceAssignment};
+use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
 use crate::whisper::{self, WhisperModelSize};
 use crate::ytdlp;
 use std::path::Path;
@@ -187,6 +188,57 @@ pub async fn assign_asr_sentences_atomically(
     )
     .await
     .map_err(|error| format!("Assign ASR sentences atomically: {error}"))
+}
+#[tauri::command]
+pub async fn transition_video_import_state(
+    app: AppHandle,
+    video_id: String,
+    expected: ImportState,
+    next: ImportState,
+) -> Result<(), String> {
+    use sqlx::{Connection, SqliteConnection};
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
+    let database_path = config_dir.join("rain.db");
+    let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
+        .await
+        .map_err(|error| format!("Open Rain database: {error}"))?;
+    import_state_persistence::transition_import_state_on_connection(
+        &mut connection,
+        &video_id,
+        &expected,
+        &next,
+    )
+    .await
+    .map_err(|error| format!("Transition import state: {error}"))
+}
+
+#[tauri::command]
+pub async fn merge_import_atomically(
+    app: AppHandle,
+    video_id: String,
+    nodes: Vec<PersistedNode>,
+    assignments: Vec<SentenceAssignment>,
+) -> Result<(), String> {
+    use sqlx::{Connection, SqliteConnection};
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
+    let database_path = config_dir.join("rain.db");
+    let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
+        .await
+        .map_err(|error| format!("Open Rain database: {error}"))?;
+    structure_persistence::merge_import_on_connection(
+        &mut connection,
+        &video_id,
+        &nodes,
+        &assignments,
+    )
+    .await
+    .map_err(|error| format!("Merge import atomically: {error}"))
 }
 fn validate_asr_tier(tier: &str) -> Result<(), String> {
     if tier == "whisper" {

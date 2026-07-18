@@ -11,6 +11,8 @@ export const TAURI_COMMANDS = [
   'generate_thumbnail',
   'start_asr',
   'assign_asr_sentences_atomically',
+  'transition_video_import_state',
+  'merge_import_atomically',
   'download_whisper_model',
   'list_whisper_models',
   'convert_file_src',

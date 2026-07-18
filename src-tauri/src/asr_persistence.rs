@@ -30,7 +30,7 @@ pub async fn save_asr_atomically_on_connection(
             .execute(&mut *transaction)
             .await?;
     }
-    let update = sqlx::query("UPDATE video SET language = ?, status = ?, stage = ? WHERE id = ?")
+    let update = sqlx::query("UPDATE video SET language = ?, status = ?, stage = ? WHERE id = ? AND status = 'processing' AND stage = 'asr'")
         .bind(language)
         .bind("processing")
         .bind("stage2")
@@ -38,6 +38,7 @@ pub async fn save_asr_atomically_on_connection(
         .execute(&mut *transaction)
         .await?;
     if update.rows_affected() != 1 {
+        transaction.rollback().await?;
         return Err(sqlx::Error::RowNotFound);
     }
     transaction.commit().await
@@ -100,5 +101,51 @@ mod tests {
         assert_eq!(video.get::<String, _>("language"), "en");
         assert_eq!(video.get::<String, _>("status"), "failed");
         assert_eq!(video.get::<String, _>("stage"), "asr");
+    }
+
+    #[tokio::test]
+    async fn stale_asr_commit_rolls_back_sentences_and_preserves_ready() {
+        let mut connection = SqliteConnection::connect(":memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE video (id TEXT PRIMARY KEY, language TEXT, status TEXT, stage TEXT)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE sentence (id TEXT PRIMARY KEY, node_id TEXT NOT NULL, text TEXT NOT NULL, start_time REAL, end_time REAL, sort_order INTEGER)")
+            .execute(&mut connection).await.unwrap();
+        sqlx::query(
+            "INSERT INTO video (id, language, status, stage) VALUES ('v1', 'en', 'ready', NULL)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        let rows = vec![PersistedSentence {
+            id: "stale".into(),
+            node_id: "v1".into(),
+            text: "stale".into(),
+            start_time: 0.0,
+            end_time: 1.0,
+            sort_order: 0,
+        }];
+
+        assert!(
+            save_asr_atomically_on_connection(&mut connection, "v1", "zh", &rows)
+                .await
+                .is_err()
+        );
+        let count: i64 = sqlx::query("SELECT COUNT(*) AS count FROM sentence")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap()
+            .get("count");
+        let video = sqlx::query("SELECT language, status, stage FROM video WHERE id = 'v1'")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(video.get::<String, _>("language"), "en");
+        assert_eq!(video.get::<String, _>("status"), "ready");
+        assert_eq!(video.get::<Option<String>, _>("stage"), None);
     }
 }
