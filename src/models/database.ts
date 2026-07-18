@@ -6,7 +6,7 @@
 // 公开 API（Database 接口 + 所有导出函数签名）两种后端完全一致。
 // ========================================
 
-import type { Video, Node, Sentence, Note } from './types'
+import type { Video, Node, Sentence, Note, ImportCheckpoint } from './types'
 // 仅类型引用：编译期擦除，不在 jsdom 下触发模块加载。
 // 运行时通过 createDatabase 内的动态 import() 加载。
 import type TauriSqlPlugin from '@tauri-apps/plugin-sql'
@@ -55,6 +55,7 @@ class MemoryDatabase implements Database {
     ])
     this.tables.set('note_sentence', ['note_id', 'sentence_id'])
     this.tables.set('setting', ['key', 'value'])
+    this.tables.set('import_checkpoint', ['video_id', 'stage', 'completed_blocks_json', 'error_message', 'updated_at'])
 
     for (const tableName of this.tables.keys()) {
       this.data.set(tableName, [])
@@ -156,6 +157,13 @@ const SCHEMA_SQL: string[] = [
   `CREATE TABLE IF NOT EXISTS setting (
     key TEXT PRIMARY KEY,
     value TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS import_checkpoint (
+    video_id TEXT PRIMARY KEY,
+    stage TEXT NOT NULL,
+    completed_blocks_json TEXT NOT NULL,
+    error_message TEXT,
+    updated_at INTEGER NOT NULL
   )`,
 ]
 
@@ -399,6 +407,16 @@ export async function getNodesByVideoId(db: Database, videoId: string): Promise<
     .map(rowToNode)
 }
 
+function assertSentenceIdsAvailable(table: TableRow[], sentences: Sentence[]): void {
+  const ids = new Set(table.map(row => row.id))
+  for (const sentence of sentences) {
+    if (ids.has(sentence.id)) {
+      throw new Error(`Sentence already exists: ${sentence.id}`)
+    }
+    ids.add(sentence.id)
+  }
+}
+
 export async function insertSentences(db: Database, sentences: Sentence[]): Promise<void> {
   if (isTauriDb(db)) {
     for (const sentence of sentences) {
@@ -627,9 +645,10 @@ export async function deleteVideoWithCascade(db: Database, videoId: string): Pro
   if (isTauriDb(db)) {
     // 级联删除顺序：先删依赖关联，再删主体
     await db.exec('DELETE FROM note_sentence WHERE note_id IN (SELECT id FROM note WHERE video_id = $1)', [videoId])
-    await db.exec('DELETE FROM sentence WHERE node_id IN (SELECT id FROM node WHERE video_id = $1)', [videoId])
+    await db.exec('DELETE FROM sentence WHERE node_id = $1 OR node_id IN (SELECT id FROM node WHERE video_id = $1)', [videoId])
     await db.exec('DELETE FROM note WHERE video_id = $1', [videoId])
     await db.exec('DELETE FROM node WHERE video_id = $1', [videoId])
+    await db.exec('DELETE FROM import_checkpoint WHERE video_id = $1', [videoId])
     await db.exec('DELETE FROM video WHERE id = $1', [videoId])
     return
   }
@@ -640,7 +659,7 @@ export async function deleteVideoWithCascade(db: Database, videoId: string): Pro
   const nodeIds = nodeRows.map(r => r.id)
 
   // 获取这些 nodes 关联的 sentences
-  const sentenceRows = memDb._getTable('sentence').filter(r => nodeIds.includes(r.node_id))
+  const sentenceRows = memDb._getTable('sentence').filter(r => r.node_id === videoId || nodeIds.includes(r.node_id))
   const sentenceIds = sentenceRows.map(r => r.id)
 
   // 获取视频关联的 notes
@@ -671,12 +690,15 @@ export async function deleteVideoWithCascade(db: Database, videoId: string): Pro
   memDb._setTable('video', memDb._getTable('video').filter(
     r => r.id !== videoId
   ))
+  memDb._setTable('import_checkpoint', memDb._getTable('import_checkpoint').filter(
+    r => r.video_id !== videoId
+  ))
 }
 
 export async function determineRecoveryAction(db: Database, videoId: string): Promise<'skip_asr' | 'rerun_asr'> {
   if (isTauriDb(db)) {
     const rows = await db.query<{ cnt: number }>(
-      'SELECT COUNT(*) as cnt FROM sentence WHERE node_id IN (SELECT id FROM node WHERE video_id = $1)',
+      'SELECT COUNT(*) as cnt FROM sentence WHERE node_id = $1 OR node_id IN (SELECT id FROM node WHERE video_id = $1)',
       [videoId]
     )
     return rows[0]?.cnt > 0 ? 'skip_asr' : 'rerun_asr'
@@ -688,7 +710,7 @@ export async function determineRecoveryAction(db: Database, videoId: string): Pr
   const nodeIds = nodeRows.map(r => r.id)
 
   // 检查是否有 sentences
-  const sentenceRows = memDb._getTable('sentence').filter(r => nodeIds.includes(r.node_id))
+  const sentenceRows = memDb._getTable('sentence').filter(r => r.node_id === videoId || nodeIds.includes(r.node_id))
 
   if (sentenceRows.length > 0) {
     return 'skip_asr'
@@ -697,6 +719,118 @@ export async function determineRecoveryAction(db: Database, videoId: string): Pr
   }
 }
 
+
+export async function saveImportCheckpoint(db: Database, checkpoint: ImportCheckpoint): Promise<void> {
+  const completedBlocksJson = JSON.stringify(checkpoint.completedBlocks)
+  if (isTauriDb(db)) {
+    await db.exec(
+      'INSERT INTO import_checkpoint (video_id, stage, completed_blocks_json, error_message, updated_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(video_id) DO UPDATE SET stage = excluded.stage, completed_blocks_json = excluded.completed_blocks_json, error_message = excluded.error_message, updated_at = excluded.updated_at',
+      [checkpoint.videoId, checkpoint.stage, completedBlocksJson, checkpoint.errorMessage ?? null, checkpoint.updatedAt]
+    )
+    return
+  }
+  const memDb = db as unknown as MemoryDatabase
+  const table = memDb._getTable('import_checkpoint')
+  const row = {
+    video_id: checkpoint.videoId,
+    stage: checkpoint.stage,
+    completed_blocks_json: completedBlocksJson,
+    error_message: checkpoint.errorMessage ?? null,
+    updated_at: checkpoint.updatedAt,
+  }
+  const existingIndex = table.findIndex(item => item.video_id === checkpoint.videoId)
+  if (existingIndex >= 0) table[existingIndex] = row
+  else table.push(row)
+  memDb._setTable('import_checkpoint', table)
+}
+
+export async function getImportCheckpoint(db: Database, videoId: string): Promise<ImportCheckpoint | null> {
+  let row: TableRow | undefined
+  if (isTauriDb(db)) {
+    row = (await db.query<TableRow>('SELECT * FROM import_checkpoint WHERE video_id = $1', [videoId]))[0]
+  } else {
+    row = (db as unknown as MemoryDatabase)._getTable('import_checkpoint').find(item => item.video_id === videoId)
+  }
+  if (!row) return null
+  let completedBlocks: string[] = []
+  try {
+    const parsed = JSON.parse(row.completed_blocks_json)
+    if (Array.isArray(parsed)) completedBlocks = parsed
+  } catch {
+    completedBlocks = []
+  }
+  return {
+    videoId: row.video_id,
+    stage: row.stage,
+    completedBlocks,
+    errorMessage: row.error_message ?? undefined,
+    updatedAt: row.updated_at,
+  }
+}
+
+export async function getSentencesByVideoId(db: Database, videoId: string): Promise<Sentence[]> {
+  if (isTauriDb(db)) {
+    const rows = await db.query<TableRow>(
+      'SELECT sentence.* FROM sentence LEFT JOIN node ON sentence.node_id = node.id WHERE sentence.node_id = $1 OR node.video_id = $1 ORDER BY sentence.sort_order ASC',
+      [videoId]
+    )
+    return rows.map(rowToSentence)
+  }
+  const memDb = db as unknown as MemoryDatabase
+  const nodeIds = new Set(memDb._getTable('node').filter(row => row.video_id === videoId).map(row => row.id))
+  return memDb._getTable('sentence')
+    .filter(row => row.node_id === videoId || nodeIds.has(row.node_id))
+    .map(rowToSentence)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+export async function saveAsrAtomically(videoId: string, language: string, sentences: Sentence[]): Promise<void> {
+  const { getDb } = await import('./db-singleton')
+  const db = await getDb()
+  if (!await getVideoById(db, videoId)) {
+    throw new Error(`Video not found: ${videoId}`)
+  }
+  const asrSentences = sentences.map(sentence => sentence.nodeId ? sentence : { ...sentence, nodeId: videoId })
+  if (isTauriDb(db)) {
+    await db.exec('BEGIN')
+    try {
+      for (const sentence of asrSentences) {
+        const row = sentenceToRow(sentence)
+        await db.exec(
+          'INSERT INTO sentence (id, node_id, text, start_time, end_time, sort_order) VALUES ($1, $2, $3, $4, $5, $6)',
+          [row.id, row.node_id, row.text, row.start_time, row.end_time, row.sort_order]
+        )
+      }
+      await db.exec('UPDATE video SET language = $1, status = $2, stage = $3 WHERE id = $4', [language, 'processing', 'stage2', videoId])
+      await db.exec('COMMIT')
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
+    return
+  }
+
+  const memDb = db as unknown as MemoryDatabase
+  const sentenceRows = memDb._getTable('sentence')
+  const videoRows = memDb._getTable('video')
+  const sentenceBackup = sentenceRows.map(row => ({ ...row }))
+  const videoBackup = videoRows.map(row => ({ ...row }))
+  try {
+    assertSentenceIdsAvailable(sentenceRows, asrSentences)
+    for (const sentence of asrSentences) sentenceRows.push(sentenceToRow(sentence))
+    const video = videoRows.find(row => row.id === videoId)
+    if (!video) throw new Error(`Video not found: ${videoId}`)
+    video.language = language
+    video.status = 'processing'
+    video.stage = 'stage2'
+    memDb._setTable('sentence', sentenceRows)
+    memDb._setTable('video', videoRows)
+  } catch (error) {
+    memDb._setTable('sentence', sentenceBackup)
+    memDb._setTable('video', videoBackup)
+    throw error
+  }
+}
 export async function atomicInsertSentences(db: Database, sentences: Sentence[]): Promise<void> {
   if (isTauriDb(db)) {
     // 原子插入：用 BEGIN/COMMIT/ROLLBACK 事务保证全部成功或全部失败
@@ -719,9 +853,10 @@ export async function atomicInsertSentences(db: Database, sentences: Sentence[])
   // 原子插入：全部成功或全部失败
   const memDb = db as unknown as MemoryDatabase
   const table = memDb._getTable('sentence')
-  const backup = [...table]
+  const backup = table.map(row => ({ ...row }))
 
   try {
+    assertSentenceIdsAvailable(table, sentences)
     for (const sentence of sentences) {
       table.push(sentenceToRow(sentence))
     }

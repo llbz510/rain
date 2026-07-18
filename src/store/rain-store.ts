@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
-import { addModelToPool, removeModelFromPool, listModels, type ModelPoolEntry, type AddModelInput } from '@/settings/model-pool'
+import { addModelToPool, applyRuntimeSettings, listModels, loadRuntimeSettings as loadPersistedRuntimeSettings, removeModelFromPool, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
 
 export type LayoutMode = 'follow' | 'textExpand' | 'mapExpand'
 export type SelectionOrigin = 'tree' | 'diagram'
@@ -38,6 +38,7 @@ interface RainState {
   currentPage: 'list' | 'study' | 'settings'
   modelPool: ModelPoolEntry[]
   roleAssignment: { asr: string | null; structuring: string | null; assistant: string | null }
+  settingsReady: boolean
 
   // 当前视频缓存
   nodeTree: Node[]
@@ -55,6 +56,7 @@ interface RainState {
   loadVideo: (videoId: string) => void
   unloadVideo: () => void
   setPage: (page: 'list' | 'study' | 'settings') => void
+  loadRuntimeSettings: () => Promise<void>
   addModel: (input: AddModelInput) => void
   removeModel: (id: string) => void
   setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => void
@@ -77,6 +79,7 @@ const initialState = {
   currentPage: 'list' as const,
   modelPool: [] as ModelPoolEntry[],
   roleAssignment: { asr: null, structuring: null, assistant: null } as { asr: string | null; structuring: string | null; assistant: string | null },
+  settingsReady: false,
   nodeTree: [] as Node[],
   sentences: [] as Sentence[],
   notes: [] as Note[],
@@ -162,54 +165,34 @@ export const useRainStore = create<RainState>((set, get) => ({
 
   setPage: (page) => set({ currentPage: page }),
 
+  loadRuntimeSettings: async () => {
+    try {
+      const settings = await loadPersistedRuntimeSettings()
+      set({ modelPool: applyRuntimeSettings(settings), roleAssignment: settings.roles })
+    } finally {
+      set({ settingsReady: true })
+    }
+  },
+
   addModel: (input) => {
     addModelToPool(input)
-    const pool = listModels()
-    set({ modelPool: pool })
-    void (async () => {
-      try {
-        const { isTauri } = await import('@/lib/tauri-env')
-        if (!isTauri()) return
-        const { getDb } = await import('@/models/db-singleton')
-        const { setSetting } = await import('@/models/database')
-        const db = await getDb()
-        await setSetting(db, 'model_pool', JSON.stringify(pool))
-        if (input.apiKey) {
-          await setSetting(db, `api_key.${input.alias}`, input.apiKey)
-        }
-      } catch { /* browser fallback — ignore */ }
-    })()
+    const modelPool = listModels()
+    set({ modelPool })
+    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment)).catch(() => {})
   },
 
   removeModel: (id) => {
     removeModelFromPool(id)
-    const pool = listModels()
-    set({ modelPool: pool })
-    void (async () => {
-      try {
-        const { isTauri } = await import('@/lib/tauri-env')
-        if (!isTauri()) return
-        const { getDb } = await import('@/models/db-singleton')
-        const { setSetting } = await import('@/models/database')
-        const db = await getDb()
-        await setSetting(db, 'model_pool', JSON.stringify(pool))
-      } catch { /* browser fallback — ignore */ }
-    })()
+    const modelPool = listModels()
+    set({ modelPool })
+    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment)).catch(() => {})
   },
 
   setRoleModel: (role, modelId) => {
-    set((state) => ({
-      roleAssignment: { ...state.roleAssignment, [role]: modelId },
-    }))
-    void (async () => {
-      try {
-        const { isTauri } = await import('@/lib/tauri-env')
-        if (!isTauri()) return
-        const { getDb } = await import('@/models/db-singleton')
-        const { setSetting } = await import('@/models/database')
-        const db = await getDb()
-        await setSetting(db, `role_${role}`, modelId ?? '')
-      } catch { /* browser fallback — ignore */ }
-    })()
+    const roleAssignment = { ...get().roleAssignment, [role]: modelId }
+    set({ roleAssignment })
+    void saveRuntimeSettings(runtimeSettingsFromPool(roleAssignment)).catch(() => {})
   },
 }))
+
+void useRainStore.getState().loadRuntimeSettings()

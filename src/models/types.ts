@@ -107,3 +107,11 @@ export interface Stage2Chapter {
 export interface Stage2Output {
   chapters: Stage2Chapter[]
 }
+
+export interface ImportCheckpoint {
+  videoId: string
+  stage: 'asr' | 'stage2' | 'merging'
+  completedBlocks: string[]
+  errorMessage?: string
+  updatedAt: number
+}
