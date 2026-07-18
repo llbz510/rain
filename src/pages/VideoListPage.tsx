@@ -304,13 +304,22 @@ export function VideoListPage() {
       if (!configuredStore.settingsReady) {
         throw new Error(configuredStore.settingsError ?? 'Runtime settings are unavailable')
       }
+      const asrModelId = configuredStore.roleAssignment.asr
+      const asrModel = configuredStore.modelPool.find((entry) => entry.id === asrModelId)
+      if (!asrModel) {
+        throw new Error('Select a saved local Whisper model for the ASR role before importing')
+      }
+
       const structuringModelId = configuredStore.roleAssignment.structuring
-      const model = configuredStore.modelPool.find((m) => m.id === structuringModelId)
-
-      const llmSettings = model
-        ? { baseUrl: model.baseUrl ?? '', apiKey: model.apiKey ?? '', model: model.modelName }
-        : { baseUrl: '', apiKey: '', model: '' }
-
+      const model = configuredStore.modelPool.find((entry) => entry.id === structuringModelId)
+      if (!model) {
+        throw new Error('Select a saved structuring model before importing')
+      }
+      const llmSettings = {
+        baseUrl: model.baseUrl ?? '',
+        apiKey: model.apiKey ?? '',
+        model: model.modelName,
+      }
       await runPipeline(video, llmSettings, {
         onProgress: (stage, percent) => {
           console.log(`[Pipeline] ${stage}: ${percent}%`)
@@ -326,7 +335,10 @@ export function VideoListPage() {
           setProcessingVideoId(null)
           console.error('[Pipeline] Error:', err)
         },
-      }, db)
+      }, db, {
+        type: asrModel.type,
+        modelName: asrModel.modelName,
+      })
     } catch (err) {
       setProcessingVideoId(null)
       console.error('[VideoListPage] pipeline error', err)

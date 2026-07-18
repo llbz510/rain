@@ -10,6 +10,7 @@ export const TAURI_COMMANDS = [
   'probe_video_info',
   'generate_thumbnail',
   'start_asr',
+  'assign_asr_sentences_atomically',
   'download_whisper_model',
   'list_whisper_models',
   'convert_file_src',

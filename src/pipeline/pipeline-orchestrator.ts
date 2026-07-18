@@ -1,17 +1,19 @@
-// src/pipeline/pipeline-orchestrator.ts
 import type { Video, Node, Sentence, Stage2Output } from '@/models/types'
 import type { LlmSettings } from '@/llm/types'
 import { callStage2 } from '@/llm/client'
-import { normalizeWhisperToSentences } from '@/pipeline/asr-normalize'
 import { validateStage2Output } from '@/pipeline/stage2-validate'
-import { shouldChunk, chunkSentences, buildChunkContext } from '@/pipeline/long-video'
-import { isTauri, tauriInvoke } from '@/lib/tauri-env'
+import { assertTransition, type ImportStage } from '@/pipeline/import-state'
 import {
-  createDatabase,
-  insertNodes,
-  insertSentences,
-  updateVideoStatus,
+  isCancellationError,
+  runAsrStage,
+  type AsrModelConfig,
+  type PipelineInvoke,
+} from '@/pipeline/asr-runner'
+import {
+  assignAsrSentencesToNodes,
   getVideoById,
+  insertNodes,
+  updateVideoImportState,
   type Database,
 } from '@/models/database'
 
@@ -19,6 +21,11 @@ export interface PipelineCallbacks {
   onProgress: (stage: string, percent: number) => void
   onComplete: (video: Video, nodes: Node[], sentences: Sentence[]) => void
   onError: (error: Error) => void
+}
+
+export interface PipelineDependencies {
+  invoke?: PipelineInvoke
+  callStage2?: typeof callStage2
 }
 
 const STAGE2_SYSTEM_PROMPT = `You are a video lecture structuring assistant. Given a transcript (list of sentences with timestamps), you must output a JSON object that organizes the content into a hierarchical structure.
@@ -61,132 +68,77 @@ Rules:
 - Keep original text unchanged
 - Default to 3 levels: chapter > section > paragraph`
 
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
 export async function runPipeline(
   video: Video,
   llmSettings: LlmSettings,
   callbacks: PipelineCallbacks,
   db: Database,
+  asrModel: AsrModelConfig,
+  dependencies: PipelineDependencies = {},
 ): Promise<void> {
+  let currentStage: Extract<ImportStage, 'asr' | 'stage2' | 'merging'> = 'asr'
+  let completed: { video: Video; nodes: Node[]; sentences: Sentence[] } | null = null
+
   try {
     callbacks.onProgress('asr', 0)
-
-    // Step 1: ASR
-    let rawSentences: Sentence[] = []
-
-    if (isTauri() && video.filePath) {
-      callbacks.onProgress('asr', 10)
-      await updateVideoStatus(db, video.id, 'processing')
-
-      try {
-        const asrResult = await tauriInvoke<Array<{ id: string; text: string; start_time: number; end_time: number }>>(
-          'start_asr',
-          { videoId: video.id, filePath: video.filePath, tier: 'whisper', modelPath: null },
-        )
-
-        rawSentences = asrResult.map((s, i) => ({
-          id: s.id,
-          nodeId: '',
-          text: s.text,
-          startTime: s.start_time,
-          endTime: s.end_time,
-          sortOrder: i,
-        }))
-      } catch {
-        // Whisper not available — use mock sentences for demo
-        rawSentences = generateDemoSentences(video.duration)
-      }
-    } else {
-      // Non-Tauri or no file path — generate demo sentences
-      rawSentences = generateDemoSentences(video.duration)
-    }
-
+    const rawSentences = await runAsrStage({
+      video,
+      asrModel,
+      db,
+      invoke: dependencies.invoke,
+    })
     callbacks.onProgress('asr', 100)
 
-    // Step 2: Stage2 structuring via LLM
+    currentStage = 'stage2'
     callbacks.onProgress('stage2', 0)
-
     const sentencesText = rawSentences
-      .map((s) => `[${s.id}] (${s.startTime.toFixed(1)}s-${s.endTime.toFixed(1)}s) ${s.text}`)
+      .map((sentence) => `[${sentence.id}] (${sentence.startTime.toFixed(1)}s-${sentence.endTime.toFixed(1)}s) ${sentence.text}`)
       .join('\n')
-
-    let stage2Output: Stage2Output
-
-    try {
-      const result = await callStage2(STAGE2_SYSTEM_PROMPT, sentencesText, llmSettings)
-      const errors = validateStage2Output(result)
-      if (errors.length > 0) {
-        console.warn('[Pipeline] Stage2 validation warnings:', errors)
-      }
-      stage2Output = result as unknown as Stage2Output
-    } catch {
-      // LLM not available — create a default structure
-      stage2Output = buildDefaultStructure(rawSentences, video.duration)
+    const stage2Caller = dependencies.callStage2 ?? callStage2
+    const result = await stage2Caller(STAGE2_SYSTEM_PROMPT, sentencesText, llmSettings)
+    const validationErrors = validateStage2Output(result)
+    if (validationErrors.length > 0) {
+      throw new Error(`Stage2 validation failed: ${validationErrors.join('; ')}`)
     }
-
+    const stage2Output = result as unknown as Stage2Output
     callbacks.onProgress('stage2', 100)
 
-    // Step 3: Convert Stage2Output to Node[] + Sentence[]
+    assertTransition('stage2', 'merging')
+    currentStage = 'merging'
+    await updateVideoImportState(db, video.id, 'processing', 'merging')
+    callbacks.onProgress('merging', 0)
     const { nodes, sentences } = convertStage2ToEntities(stage2Output, video.id, rawSentences)
-
-    // Step 4: Persist to database
     await insertNodes(db, nodes)
-    await insertSentences(db, sentences)
-    await updateVideoStatus(db, video.id, 'ready')
+    await assignAsrSentencesToNodes(db, video.id, sentences)
+    callbacks.onProgress('merging', 100)
 
+    assertTransition('merging', 'ready')
+    await updateVideoImportState(db, video.id, 'ready', null)
     const updatedVideo = await getVideoById(db, video.id)
-    callbacks.onComplete(updatedVideo ?? { ...video, status: 'ready' }, nodes, sentences)
-  } catch (err) {
-    await updateVideoStatus(db, video.id, 'failed').catch(() => {})
-    callbacks.onError(err instanceof Error ? err : new Error(String(err)))
+    if (!updatedVideo) throw new Error(`Video not found after pipeline completion: ${video.id}`)
+    completed = { video: updatedVideo, nodes, sentences }
+  } catch (cause) {
+    const error = asError(cause)
+    const currentVideo = await getVideoById(db, video.id)
+    if (currentVideo?.status === 'processing') {
+      const terminal = isCancellationError(error) ? 'cancelled' : 'failed'
+      assertTransition(currentStage, terminal)
+      await updateVideoImportState(db, video.id, terminal, currentStage, error.message)
+    }
+    callbacks.onError(error)
+    throw error
   }
+
+  callbacks.onComplete(completed.video, completed.nodes, completed.sentences)
 }
 
-function generateDemoSentences(duration: number): Sentence[] {
-  const count = Math.max(3, Math.floor(duration / 10))
-  const segmentDuration = duration / count
-  return Array.from({ length: count }, (_, i) => ({
-    id: `demo_s_${i}`,
-    nodeId: '',
-    text: `This is sentence ${i + 1} of the video transcript.`,
-    startTime: i * segmentDuration,
-    endTime: (i + 1) * segmentDuration,
-    sortOrder: i,
-  }))
+function nodeId(videoId: string, kind: Node['kind'], index: number): string {
+  return `video:${encodeURIComponent(videoId)}:${kind}:${index}`
 }
-
-function buildDefaultStructure(sentences: Sentence[], duration: number): Stage2Output {
-  return {
-    chapters: [
-      {
-        title: 'Chapter 1',
-        start: 0,
-        end: duration,
-        sections: [
-          {
-            title: 'Section 1',
-            start: 0,
-            end: duration,
-            paragraphs: [
-              {
-                title: 'Content',
-                type: 'concept',
-                start: 0,
-                end: duration,
-                sentences: sentences.map((s) => ({
-                  id: s.id,
-                  text: s.text,
-                  start: s.startTime,
-                  end: s.endTime,
-                })),
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  }
-}
-
 function convertStage2ToEntities(
   output: Stage2Output,
   videoId: string,
@@ -194,10 +146,12 @@ function convertStage2ToEntities(
 ): { nodes: Node[]; sentences: Sentence[] } {
   const nodes: Node[] = []
   const sentences: Sentence[] = []
+  const originalById = new Map(rawSentences.map((sentence) => [sentence.id, sentence]))
+  const assignedIds = new Set<string>()
   let sortOrder = 0
 
   for (const chapter of output.chapters) {
-    const chapterId = `ch_${sortOrder}`
+    const chapterId = nodeId(videoId, 'chapter', sortOrder)
     nodes.push({
       id: chapterId,
       videoId,
@@ -212,7 +166,7 @@ function convertStage2ToEntities(
     })
 
     for (const section of chapter.sections) {
-      const sectionId = `sec_${sortOrder}`
+      const sectionId = nodeId(videoId, 'section', sortOrder)
       nodes.push({
         id: sectionId,
         videoId,
@@ -227,7 +181,7 @@ function convertStage2ToEntities(
       })
 
       for (const paragraph of section.paragraphs) {
-        const paragraphId = `para_${sortOrder}`
+        const paragraphId = nodeId(videoId, 'paragraph', sortOrder)
         nodes.push({
           id: paragraphId,
           videoId,
@@ -242,19 +196,30 @@ function convertStage2ToEntities(
           translation: paragraph.translation,
         })
 
-        for (const s of paragraph.sentences) {
-          const original = rawSentences.find((rs) => rs.id === s.id)
+        for (const sentence of paragraph.sentences) {
+          const original = originalById.get(sentence.id)
+          if (!original) {
+            throw new Error(`Stage2 validation failed: unknown sentence ID "${sentence.id}"`)
+          }
+          if (assignedIds.has(sentence.id)) {
+            throw new Error(`Stage2 validation failed: sentence "${sentence.id}" was assigned more than once`)
+          }
+          assignedIds.add(sentence.id)
           sentences.push({
-            id: s.id,
+            ...original,
             nodeId: paragraphId,
-            text: s.text,
-            startTime: s.start,
-            endTime: s.end,
             sortOrder: sentences.length,
           })
         }
       }
     }
+  }
+
+  if (assignedIds.size !== rawSentences.length) {
+    const missingIds = rawSentences
+      .filter((sentence) => !assignedIds.has(sentence.id))
+      .map((sentence) => sentence.id)
+    throw new Error(`Stage2 validation failed: unassigned sentence IDs: ${missingIds.join(', ')}`)
   }
 
   return { nodes, sentences }

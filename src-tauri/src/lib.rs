@@ -1,12 +1,13 @@
-pub mod ytdlp;
-pub mod whisper;
-pub mod ffmpeg;
 pub mod asr;
 pub mod asr_persistence;
-pub mod events;
-pub mod scheduler;
 pub mod commands;
+pub mod events;
+pub mod ffmpeg;
 pub mod runtime;
+pub mod scheduler;
+pub mod structure_persistence;
+pub mod whisper;
+pub mod ytdlp;
 
 use std::sync::Arc;
 
@@ -24,6 +25,7 @@ pub fn run() {
             commands::generate_thumbnail,
             commands::start_asr,
             commands::save_asr_atomically,
+            commands::assign_asr_sentences_atomically,
             commands::download_whisper_model,
             commands::list_whisper_models,
             // convert_file_src 用纯函数，前端直接调用

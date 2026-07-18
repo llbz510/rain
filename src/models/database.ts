@@ -6,7 +6,7 @@
 // 公开 API（Database 接口 + 所有导出函数签名）两种后端完全一致。
 // ========================================
 
-import type { Video, Node, Sentence, Note, ImportCheckpoint } from './types'
+import type { Video, VideoStatus, Node, Sentence, Note, ImportCheckpoint } from './types'
 // 仅类型引用：编译期擦除，不在 jsdom 下触发模块加载。
 // 运行时通过 createDatabase 内的动态 import() 加载。
 import type TauriSqlPlugin from '@tauri-apps/plugin-sql'
@@ -519,6 +519,30 @@ export async function updateVideoStatus(db: Database, id: string, status: string
   memDb._setTable('video', table)
 }
 
+export async function updateVideoImportState(
+  db: Database,
+  id: string,
+  status: VideoStatus,
+  stage: Video['stage'] | null,
+  errorMessage: string | null = null,
+): Promise<void> {
+  if (isTauriDb(db)) {
+    await db.exec(
+      'UPDATE video SET status = $1, stage = $2, error_message = $3 WHERE id = $4',
+      [status, stage, errorMessage, id],
+    )
+    return
+  }
+  const memDb = db as unknown as MemoryDatabase
+  const table = memDb._getTable('video')
+  const row = table.find((candidate) => candidate.id === id)
+  if (!row) throw new Error(`Video not found: ${id}`)
+  row.status = status
+  row.stage = stage
+  row.error_message = errorMessage
+  memDb._setTable('video', table)
+}
+
 export async function listVideos(db: Database, sortBy: string = 'lastStudied'): Promise<Video[]> {
   if (isTauriDb(db)) {
     let sql = 'SELECT * FROM video'
@@ -820,6 +844,48 @@ export async function saveAsrAtomically(videoId: string, language: string, sente
     throw error
   }
 }
+export async function assignAsrSentencesToNodes(
+  db: Database,
+  videoId: string,
+  sentences: Sentence[],
+): Promise<void> {
+  if (isTauriDb(db)) {
+    const { tauriInvoke } = await import('@/lib/tauri-env')
+    await tauriInvoke<void>('assign_asr_sentences_atomically', {
+      videoId,
+      assignments: sentences.map((sentence) => ({
+        id: sentence.id,
+        nodeId: sentence.nodeId,
+        sortOrder: sentence.sortOrder,
+      })),
+    })
+    return
+  }
+  const memDb = db as unknown as MemoryDatabase
+  const rows = memDb._getTable('sentence')
+  const backup = rows.map((row) => ({ ...row }))
+  const validNodeIds = new Set(
+    memDb._getTable('node').filter((row) => row.video_id === videoId).map((row) => row.id),
+  )
+  try {
+    for (const sentence of sentences) {
+      if (!validNodeIds.has(sentence.nodeId)) {
+        throw new Error(`Cannot assign ASR sentence "${sentence.id}" to node "${sentence.nodeId}"`)
+      }
+      const row = rows.find((candidate) => candidate.id === sentence.id && candidate.node_id === videoId)
+      if (!row) {
+        throw new Error(`Cannot assign ASR sentence "${sentence.id}" to node "${sentence.nodeId}"`)
+      }
+      row.node_id = sentence.nodeId
+      row.sort_order = sentence.sortOrder
+    }
+    memDb._setTable('sentence', rows)
+  } catch (error) {
+    memDb._setTable('sentence', backup)
+    throw error
+  }
+}
+
 export async function atomicInsertSentences(db: Database, sentences: Sentence[]): Promise<void> {
   if (isTauriDb(db)) {
     // 原子插入：用 BEGIN/COMMIT/ROLLBACK 事务保证全部成功或全部失败
