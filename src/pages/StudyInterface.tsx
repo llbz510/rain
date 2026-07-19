@@ -9,7 +9,7 @@
 //   mapExpand  → controlBar + diagramZone + textPreview + sideTree + rightPanel
 // ========================================
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRainStore } from '@/store/rain-store'
 import { getVisibility } from '@/ui/layout'
 import { SideTree, CatalogBar, DiagramZone } from '@/ui/components/catalog'
@@ -17,8 +17,8 @@ import { VideoZone, VideoControls } from '@/ui/components/video'
 import { TextZone } from '@/ui/components/text-zone'
 import { NotesPanel } from '@/ui/components/notes'
 import { AiAssistant, ChatInput } from '@/ui/components/ai-assistant'
-import { streamAiChat } from '@/llm/client'
-import type { ChatMessage } from '@/llm/types'
+import { redactSecret, streamAiChat } from '@/llm/client'
+import { buildAssistantContext, type AssistantSource } from '@/ai/assistant-context'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -162,77 +162,65 @@ export function StudyInterface() {
   const videoTitle = useRainStore((s) => s.currentVideoTitle)
 
   // AI chat state
-  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; sources?: AssistantSource[] }>>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const [cleanupFn, setCleanupFn] = useState<(() => void) | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null)
+  const requestIdRef = useRef(0)
+  useEffect(() => () => {
+    requestIdRef.current += 1
+    cleanupRef.current?.()
+  }, [])
+
+  const handleStopMessage = useCallback(() => {
+    requestIdRef.current += 1
+    cleanupRef.current?.()
+    cleanupRef.current = null
+    setIsStreaming(false)
+  }, [])
 
   const handleSendMessage = useCallback((text: string) => {
     const store = useRainStore.getState()
-    const roleAssignment = store.roleAssignment
-    const modelPool = store.modelPool
-    const assistantModel = modelPool.find((m) => m.id === roleAssignment.assistant)
-
-    if (!assistantModel) {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'user', content: text },
-        { role: 'assistant', content: 'Please configure an AI assistant model in Settings first.' },
-      ])
+    const assistantModel = store.modelPool.find((model) => model.id === store.roleAssignment.assistant)
+    const exactBaseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    const exactModel = 'qwen3.5-omni-flash'
+    if (!assistantModel || assistantModel.baseUrl?.replace(/\/+$/, '') !== exactBaseUrl || assistantModel.modelName !== exactModel || !assistantModel.apiKey?.trim()) {
+      setChatMessages((previous) => [...previous, { role: 'user', content: text }, { role: 'assistant', content: '请先在设置中配置可用的 Qwen 助手。' }])
       return
     }
-
-    const userMsg = { role: 'user' as const, content: text }
-    setChatMessages((prev) => [...prev, userMsg])
-    setIsStreaming(true)
-
-    // Build context from current sentences
-    const sentences = store.sentences
-    const contextText = sentences.length > 0
-      ? `Context (video transcript):\n${sentences.map((s) => s.text).join(' ')}\n\n`
-      : ''
-
-    const llmMessages: ChatMessage[] = [
-      { role: 'system', content: `You are a video learning assistant. Help the user understand the video content. ${contextText}` },
-      ...chatMessages.map((m) => ({ role: m.role, content: m.content })),
-      { role: 'user', content: text },
-    ]
-
-    const settings = {
-      baseUrl: assistantModel.baseUrl ?? '',
-      apiKey: assistantModel.apiKey ?? '',
-      model: assistantModel.modelName,
-    }
-
+    cleanupRef.current?.()
+    cleanupRef.current = null
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    const context = buildAssistantContext({ nodes: store.nodeTree, sentences: store.sentences, playPosition: store.playPosition, question: text, history: chatMessages })
+    const settings = { baseUrl: exactBaseUrl, apiKey: assistantModel.apiKey, model: exactModel }
+    let active = true
     let currentContent = ''
-    setChatMessages((prev) => [...prev, { role: 'assistant', content: '' }])
-
-    const cleanup = streamAiChat(llmMessages, settings, {
+    setChatMessages((previous) => [...previous, { role: 'user', content: text }, { role: 'assistant', content: '', sources: context.sources }])
+    setIsStreaming(true)
+    const cleanup = streamAiChat([{ role: 'system', content: context.systemPrompt }, ...context.history, { role: 'user', content: text }], settings, {
       onToken: (token) => {
+        if (!active || requestIdRef.current !== requestId) return
         currentContent += token
-        setChatMessages((prev) => {
-          const updated = [...prev]
-          updated[updated.length - 1] = { role: 'assistant', content: currentContent }
+        setChatMessages((previous) => {
+          const updated = [...previous]
+          updated[updated.length - 1] = { role: 'assistant', content: currentContent, sources: context.sources }
           return updated
         })
       },
-      onDone: () => {
-        setIsStreaming(false)
-        setCleanupFn(null)
-      },
-      onError: (err) => {
-        setIsStreaming(false)
-        setCleanupFn(null)
-        setChatMessages((prev) => {
-          const updated = [...prev]
-          updated[updated.length - 1] = { role: 'assistant', content: `Error: ${err.message}` }
+      onDone: () => { if (active && requestIdRef.current === requestId) { setIsStreaming(false); cleanupRef.current = null } },
+      onError: (error) => {
+        if (!active || requestIdRef.current !== requestId) return
+        setIsStreaming(false); cleanupRef.current = null
+        const safeMessage = redactSecret(error.message, [settings.apiKey])
+        setChatMessages((previous) => {
+          const updated = [...previous]
+          updated[updated.length - 1] = { role: 'assistant', content: `请求失败：${safeMessage}`, sources: context.sources }
           return updated
         })
       },
     })
-
-    setCleanupFn(() => cleanup)
+    cleanupRef.current = () => { active = false; cleanup() }
   }, [chatMessages])
-
   // 显隐完全交给布局状态机，不在此处重新实现逻辑（决策19）
   const visibility = getVisibility(layoutMode)
 
@@ -287,7 +275,7 @@ export function StudyInterface() {
         )}
         {visibility.textZone && (
           <div style={flexFillStyle}>
-            <TextZone />
+            <TextZone onSeek={handleSeek} />
           </div>
         )}
         {visibility.diagramZone && (
@@ -322,7 +310,7 @@ export function StudyInterface() {
           <div style={tabContentStyle}>
             {aiPanelState === 'ai' ? (
               <>
-                <AiAssistant messages={chatMessages} isStreaming={isStreaming} />
+                <AiAssistant messages={chatMessages} isStreaming={isStreaming} onStop={handleStopMessage} onSeekSource={handleSeek} />
                 <ChatInput onSend={handleSendMessage} />
               </>
             ) : (

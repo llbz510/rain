@@ -72,7 +72,7 @@ export function ParagraphItem({ paragraph, sentences, onSeek }: ParagraphItemPro
   )
 }
 
-export function TextZone() {
+export function TextZone({ onSeek }: { onSeek?: (time: number) => void }) {
   const nodes = useRainStore((s) => s.nodeTree)
   const sentences = useRainStore((s) => s.sentences)
 
@@ -85,6 +85,7 @@ export function TextZone() {
           key={p.id}
           paragraph={p}
           sentences={sentences.filter((s) => s.nodeId === p.id)}
+          onSeek={onSeek}
         />
       ))}
     </div>

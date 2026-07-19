@@ -1,78 +1,81 @@
-// src/ui/components/ai-assistant.tsx
-// ========================================
-// M10 AI 助手组件（决策10/80/83）
-// ========================================
-
-import React, { useState, useRef } from 'react'
+import React, { useState } from 'react'
 import { getQuickActionsForType } from '@/ai/assistant'
+import type { AssistantSource } from '@/ai/assistant-context'
 import type { ParagraphType } from '@/models/types'
 
-interface QuickActionsProps {
-  paragraphType: ParagraphType
-}
-
+interface QuickActionsProps { paragraphType: ParagraphType }
 export function QuickActions({ paragraphType }: QuickActionsProps) {
-  const actions = getQuickActionsForType(paragraphType)
-  return (
-    <div data-testid="quick-actions">
-      {actions.map((a) => (
-        <button key={a.id}>{a.label}</button>
-      ))}
-    </div>
-  )
+  return <div data-testid="quick-actions">{getQuickActionsForType(paragraphType).map((action) => <button key={action.id}>{action.label}</button>)}</div>
 }
 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   frameImage?: string | null
+  sources?: AssistantSource[]
 }
-
 interface AiAssistantProps {
   messages: ChatMessage[]
   isStreaming?: boolean
+  onStop?: () => void
+  onSeekSource?: (time: number) => void
 }
 
-export function AiAssistant({ messages, isStreaming = false }: AiAssistantProps) {
-  return (
-    <div data-testid="ai-assistant">
-      {messages.map((msg, i) => (
-        <div key={i} data-testid={`message-${msg.role}`}>
-          {msg.role === 'user' && msg.frameImage && (
-            <img src={msg.frameImage} alt="当前帧" />
-          )}
-          <span>{msg.content}</span>
-        </div>
-      ))}
-      {isStreaming && <button>停止</button>}
-    </div>
-  )
-}
+const CITATION_PATTERN = /\[sentence:([^\]\s]+)\s*@\s*([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)\]/g
 
-interface ChatInputProps {
-  onSend?: (text: string) => void
-}
+function renderMessageContent(message: ChatMessage, onSeekSource?: (time: number) => void) {
+  const sourcesById = new Map((message.sources ?? []).map((source) => [source.sentenceId, source]))
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
 
-export function ChatInput({ onSend }: ChatInputProps) {
-  const [text, setText] = useState('')
+  for (const match of message.content.matchAll(CITATION_PATTERN)) {
+    const [citation, sentenceId, rawStart, rawEnd] = match
+    const index = match.index ?? 0
+    if (index > lastIndex) parts.push(message.content.slice(lastIndex, index))
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      if (text.trim()) {
-        onSend?.(text.trim())
-        setText('')
-      }
+    const source = sourcesById.get(sentenceId)
+    const citedStart = Number(rawStart)
+    const citedEnd = Number(rawEnd)
+    const citationMatchesSource = source && Math.abs(source.startTime - citedStart) < 0.001 && Math.abs(source.endTime - citedEnd) < 0.001
+    if (source && citationMatchesSource) {
+      parts.push(
+        <button
+          key={`${sentenceId}-${index}`}
+          type="button"
+          aria-label={citation.slice(1, -1)}
+          onClick={() => onSeekSource?.(source.startTime)}
+        >
+          {citation}
+        </button>,
+      )
+    } else {
+      parts.push(citation)
     }
+    lastIndex = index + citation.length
   }
 
-  return (
-    <textarea
-      role="textbox"
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onKeyDown={handleKeyDown}
-      placeholder="输入消息..."
-    />
-  )
+  if (lastIndex < message.content.length) parts.push(message.content.slice(lastIndex))
+  return parts.length > 0 ? parts : message.content
+}
+
+export function AiAssistant({ messages, isStreaming = false, onStop, onSeekSource }: AiAssistantProps) {
+  return <div data-testid="ai-assistant">
+    {messages.map((message, index) => <div key={index} data-testid={`message-${message.role}`}>
+      {message.role === 'user' && message.frameImage && <img src={message.frameImage} alt="当前帧" />}
+      <span>{renderMessageContent(message, onSeekSource)}</span>
+    </div>)}
+    {isStreaming && <button type="button" onClick={onStop}>停止</button>}
+  </div>
+}
+
+interface ChatInputProps { onSend?: (text: string) => void }
+export function ChatInput({ onSend }: ChatInputProps) {
+  const [text, setText] = useState('')
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
+      event.preventDefault()
+      if (text.trim()) { onSend?.(text.trim()); setText('') }
+    }
+  }
+  return <textarea role="textbox" value={text} onChange={(event) => setText(event.target.value)} onKeyDown={handleKeyDown} placeholder="输入消息..." />
 }
