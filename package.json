@@ -7,7 +7,10 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:live:qwen": "set RAIN_LIVE_QWEN_REQUIRED=1&& vitest run src/__tests__/live-qwen.test.ts",
+    "e2e:real": "powershell.exe -ExecutionPolicy Bypass -File scripts/run-real-e2e.ps1",
+    "validate:evidence": "powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.11.1",
