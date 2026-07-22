@@ -1,0 +1,67 @@
+[
+    {
+        "at":  "2026-07-19T18:49:08.916Z",
+        "detail":  "rain-real-e2e-1784486948914",
+        "event":  "start_import"
+    },
+    {
+        "at":  "2026-07-19T18:49:08.916Z",
+        "detail":  "0",
+        "event":  "cancel_progress:asr"
+    },
+    {
+        "at":  "2026-07-19T18:49:09.927Z",
+        "detail":  "rain-real-e2e-1784486948914",
+        "event":  "cancel_import"
+    },
+    {
+        "at":  "2026-07-19T18:49:09.963Z",
+        "detail":  "ASR cancelled",
+        "event":  "cancel_error"
+    },
+    {
+        "at":  "2026-07-19T18:49:09.964Z",
+        "detail":  "rain-real-e2e-1784486948914",
+        "event":  "import_cancelled"
+    },
+    {
+        "at":  "2026-07-19T18:49:09.965Z",
+        "detail":  "rain-real-e2e-1784486948914",
+        "event":  "retry_import"
+    },
+    {
+        "at":  "2026-07-19T18:49:09.968Z",
+        "detail":  "0",
+        "event":  "retry_progress:asr"
+    },
+    {
+        "at":  "2026-07-19T18:56:03.366Z",
+        "detail":  "100",
+        "event":  "retry_progress:asr"
+    },
+    {
+        "at":  "2026-07-19T18:56:03.366Z",
+        "detail":  "0",
+        "event":  "retry_progress:stage2"
+    },
+    {
+        "at":  "2026-07-19T19:13:44.547Z",
+        "detail":  "100",
+        "event":  "retry_progress:stage2"
+    },
+    {
+        "at":  "2026-07-19T19:13:44.550Z",
+        "detail":  "0",
+        "event":  "retry_progress:merging"
+    },
+    {
+        "at":  "2026-07-19T19:13:44.642Z",
+        "detail":  "100",
+        "event":  "retry_progress:merging"
+    },
+    {
+        "at":  "2026-07-19T19:13:44.644Z",
+        "detail":  "rain-real-e2e-1784486948914",
+        "event":  "import_complete"
+    }
+]

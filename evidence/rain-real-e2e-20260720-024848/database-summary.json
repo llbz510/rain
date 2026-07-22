@@ -1,0 +1,12 @@
+{
+    "databasePath":  "D:\\gongju\\shengcan\\rain\\.worktrees\\codex\\rain-real-local-video\\evidence\\rain-real-e2e-20260720-024848\\rain-e2e.db",
+    "evidenceSource":  "rain-app-query",
+    "nodeCount":  59,
+    "queriedAt":  "2026-07-19T19:13:44.699Z",
+    "qwenBlockCount":  12,
+    "rawStage":  null,
+    "sentenceCount":  1953,
+    "stage":  "ready",
+    "status":  "ready",
+    "videoId":  "rain-real-e2e-1784486948914"
+}

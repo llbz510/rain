@@ -1,0 +1,113 @@
+{
+    "generatedAt":  "2026-07-19T19:13:47.2230744Z",
+    "video":  {
+                  "path":  "D:\\xiazaiwenjian\\bilidown\\【华中科技大学】电子技术基础 张林（全138讲）电子信息工程专业必修课\\1.2.1 信号及其放大.mp4",
+                  "sha256":  "3870B5BD62E574685AC99A8E44295F5E44AC44B76343666742C1C4CA48365F8A",
+                  "probe":  "probe.json"
+              },
+    "databasePath":  "D:\\gongju\\shengcan\\rain\\.worktrees\\codex\\rain-real-local-video\\evidence\\rain-real-e2e-20260720-024848\\rain-e2e.db",
+    "runtime":  {
+                    "qwenBaseUrl":  "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "qwenModel":  "qwen3.5-omni-flash",
+                    "whisperBackend":  "cuda",
+                    "whisperModel":  "ggml-large-v3.bin"
+                },
+    "timings":  {
+                    "asrSeconds":  413,
+                    "pipelineSeconds":  1475,
+                    "qwenSeconds":  1061
+                },
+    "asr":  {
+                "sentenceCount":  1953,
+                "manualReviewSamples":  [
+                                            {
+                                                "endTime":  13.04,
+                                                "id":  "whisper-a852cf82-60d7-4c58-a991-f3e457db7af1",
+                                                "startTime":  0,
+                                                "text":  "虚论这一章实际上是"
+                                            },
+                                            {
+                                                "endTime":  14.18,
+                                                "id":  "whisper-081de0c3-dee2-484e-85c9-d0b38de805e9",
+                                                "startTime":  13.04,
+                                                "text":  "之所以叫虚论呢"
+                                            },
+                                            {
+                                                "endTime":  18.66,
+                                                "id":  "whisper-d456b8eb-9252-4178-84ef-b09a046f991d",
+                                                "startTime":  14.18,
+                                                "text":  "它不是课程内容的最核心的内容部分"
+                                            },
+                                            {
+                                                "endTime":  20.72,
+                                                "id":  "whisper-8efab427-7c27-47c9-97e2-ffb21e899a05",
+                                                "startTime":  18.66,
+                                                "text":  "只是一个引则或者是引言"
+                                            },
+                                            {
+                                                "endTime":  24.16,
+                                                "id":  "whisper-816d7da5-5d6c-4f21-b74b-914c54ea5015",
+                                                "startTime":  20.72,
+                                                "text":  "那么要学这门课程里面"
+                                            },
+                                            {
+                                                "endTime":  24.84,
+                                                "id":  "whisper-ad02ead0-7f20-46de-bd4c-02c5198bc502",
+                                                "startTime":  24.16,
+                                                "text":  "我们需要"
+                                            },
+                                            {
+                                                "endTime":  27.14,
+                                                "id":  "whisper-b33a33c8-4dce-4549-bfd6-21c8cffea1a0",
+                                                "startTime":  24.84,
+                                                "text":  "首先要准备些什么知识"
+                                            },
+                                            {
+                                                "endTime":  29.3,
+                                                "id":  "whisper-9006dad6-b8cb-4fd5-9104-22a0a9e6cb1c",
+                                                "startTime":  27.14,
+                                                "text":  "要理解一些什么基本的概念"
+                                            },
+                                            {
+                                                "endTime":  32.1,
+                                                "id":  "whisper-1af9f77f-41d7-4151-a893-b398771a5929",
+                                                "startTime":  29.3,
+                                                "text":  "在这个虚论里面先给大家提出来"
+                                            },
+                                            {
+                                                "endTime":  34.12,
+                                                "id":  "whisper-fad299c6-6bbb-427e-85f3-1793d7cf9c5b",
+                                                "startTime":  32.1,
+                                                "text":  "所以虚论这一章呢"
+                                            }
+                                        ],
+                "detectedLanguage":  "zh"
+            },
+    "qwen":  {
+                 "blockCount":  12
+             },
+    "validation":  {
+                       "sentenceCoverage":  "computed-by-validator",
+                       "noDemoSentences":  "computed-by-validator",
+                       "noDemoIds":  "computed-by-validator"
+                   },
+    "cancellation":  {
+                         "result":  "passed",
+                         "artifact":  "cancellation-proof.json"
+                     },
+    "restart":  {
+                    "result":  "passed",
+                    "artifact":  "restart-proof.json"
+                },
+    "secretsDetected":  false,
+    "artifacts":  {
+                      "probe":  "probe.json",
+                      "qwenBlocks":  "qwen-blocks.json",
+                      "transcript":  "transcript.json",
+                      "appEvents":  "app-events.json",
+                      "database":  "database-summary.json",
+                      "screenshots":  [
+                                          "screenshots/study-ready.png"
+                                      ]
+                  }
+}

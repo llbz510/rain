@@ -12,7 +12,7 @@ use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
 use crate::whisper::{self, WhisperModelSize};
 use crate::ytdlp;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
@@ -97,6 +97,7 @@ pub async fn start_asr(
     file_path: String,
     tier: String,
     model_path: Option<String>,
+    language: Option<String>,
 ) -> Result<Vec<asr::Sentence>, String> {
     if let Err(error) = validate_asr_tier(&tier) {
         let _ = events::emit_import_failed(&app, video_id, error.clone());
@@ -104,6 +105,7 @@ pub async fn start_asr(
     }
 
     let model = model_path.unwrap_or_default();
+    let language = normalize_asr_language(language)?;
     if let Err(error) = whisper::validate_asr_request(&file_path, &model) {
         let _ = events::emit_import_failed(&app, video_id, error.clone());
         return Err(error);
@@ -111,7 +113,7 @@ pub async fn start_asr(
 
     let task = scheduler.start_video_task(video_id.clone()).await;
     let token = task.token();
-    let result = run_whisper_asr(&app, &video_id, &file_path, &model, token.clone()).await;
+    let result = run_whisper_asr(&app, &video_id, &file_path, &model, &language, token.clone()).await;
 
     let response = match result {
         Ok(sentences) => match scheduler.finish_success(&token).await {
@@ -141,6 +143,23 @@ pub async fn start_asr(
     response
 }
 
+fn rain_database_path(app: &AppHandle) -> Result<PathBuf, String> {
+    if std::env::var("RAIN_E2E_MODE").ok().as_deref() == Some("1") {
+        if let Ok(path) = std::env::var("RAIN_E2E_DB_PATH") {
+            let database_path = PathBuf::from(path);
+            if let Some(parent) = database_path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| format!("Create E2E database dir: {error}"))?;
+            }
+            return Ok(database_path);
+        }
+    }
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
+    Ok(config_dir.join("rain.db"))
+}
 #[tauri::command]
 pub async fn save_asr_atomically(
     app: AppHandle,
@@ -149,11 +168,7 @@ pub async fn save_asr_atomically(
     sentences: Vec<PersistedSentence>,
 ) -> Result<(), String> {
     use sqlx::{Connection, SqliteConnection};
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
-    let database_path = config_dir.join("rain.db");
+    let database_path = rain_database_path(&app)?;
     let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
         .await
         .map_err(|error| format!("Open Rain database: {error}"))?;
@@ -173,11 +188,7 @@ pub async fn assign_asr_sentences_atomically(
     assignments: Vec<SentenceAssignment>,
 ) -> Result<(), String> {
     use sqlx::{Connection, SqliteConnection};
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
-    let database_path = config_dir.join("rain.db");
+    let database_path = rain_database_path(&app)?;
     let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
         .await
         .map_err(|error| format!("Open Rain database: {error}"))?;
@@ -197,11 +208,7 @@ pub async fn transition_video_import_state(
     next: ImportState,
 ) -> Result<(), String> {
     use sqlx::{Connection, SqliteConnection};
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
-    let database_path = config_dir.join("rain.db");
+    let database_path = rain_database_path(&app)?;
     let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
         .await
         .map_err(|error| format!("Open Rain database: {error}"))?;
@@ -223,11 +230,7 @@ pub async fn merge_import_atomically(
     assignments: Vec<SentenceAssignment>,
 ) -> Result<(), String> {
     use sqlx::{Connection, SqliteConnection};
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| format!("Cannot resolve app config dir: {error}"))?;
-    let database_path = config_dir.join("rain.db");
+    let database_path = rain_database_path(&app)?;
     let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
         .await
         .map_err(|error| format!("Open Rain database: {error}"))?;
@@ -249,11 +252,23 @@ fn validate_asr_tier(tier: &str) -> Result<(), String> {
         ))
     }
 }
+
+fn normalize_asr_language(language: Option<String>) -> Result<String, String> {
+    let normalized = language
+        .unwrap_or_else(|| "zh".to_string())
+        .trim()
+        .to_ascii_lowercase();
+    match normalized.as_str() {
+        "zh" | "en" | "auto" => Ok(normalized),
+        _ => Err(format!("ASR language '{normalized}' is not supported; use zh, en, or auto")),
+    }
+}
 async fn run_whisper_asr(
     app: &AppHandle,
     video_id: &str,
     file_path: &str,
     model_path: &str,
+    language: &str,
     token: CancellationToken,
 ) -> Result<Vec<asr::Sentence>, String> {
     ensure_asr_not_cancelled(&token)?;
@@ -286,8 +301,9 @@ async fn run_whisper_asr(
     let model = model_path.to_string();
     let wav = temp_wav_string;
     let inference_token = token.clone();
+    let whisper_language = if language == "auto" { None } else { Some(language.to_string()) };
     let whisper_result = tokio::task::spawn_blocking(move || {
-        whisper::transcribe_wav(&model, &wav, true, Some(inference_token))
+        whisper::transcribe_wav_with_language(&model, &wav, whisper_language.as_deref(), Some(inference_token))
     })
     .await
     .map_err(|error| format!("Whisper task failed: {error}"))?
@@ -319,6 +335,9 @@ fn validate_whisper_sentences(sentences: &[asr::Sentence]) -> Result<(), String>
         if sentence.text.trim().is_empty() {
             return Err(format!("Whisper sentence {index} has empty text"));
         }
+        if has_mojibake_markers(&sentence.text) {
+            return Err(format!("Whisper sentence {index} contains mojibake text"));
+        }
         if !sentence.start_time.is_finite()
             || !sentence.end_time.is_finite()
             || sentence.start_time < 0.0
@@ -344,45 +363,142 @@ fn validate_whisper_sentences(sentences: &[asr::Sentence]) -> Result<(), String>
     Ok(())
 }
 /// Convert a complete Whisper result to sentence records.
+const MAX_FALLBACK_SENTENCE_CHARS: usize = 500;
+
 fn whisper_result_to_sentences(result: &whisper::WhisperResult) -> Vec<asr::Sentence> {
     let mut sentences = Vec::new();
     let mut current_text = String::new();
     let mut current_start = 0.0f64;
     let mut current_end = 0.0f64;
+    let mut current_chars = 0usize;
 
     for segment in &result.segments {
+        if segment.word_level.is_empty()
+            || result.detected_language == "zh"
+            || segment_word_text_is_suspicious(segment)
+        {
+            if !current_text.trim().is_empty() {
+                push_current_word_sentence(&mut sentences, &mut current_text, current_start, current_end);
+                current_chars = 0;
+            }
+            push_segment_text_sentences(&mut sentences, segment);
+            continue;
+        }
+
         for word in &segment.word_level {
             if current_text.is_empty() {
                 current_start = word.start;
             }
             current_text.push_str(&word.word);
+            current_chars += word.word.chars().count();
             current_end = word.end;
 
-            if is_sentence_ending(&current_text) {
-                let trimmed = current_text.trim().to_string();
-                if !trimmed.is_empty() {
-                    sentences.push(asr::Sentence {
-                        id: format!("whisper-{}", uuid::Uuid::new_v4()),
-                        text: trimmed,
-                        start_time: current_start,
-                        end_time: current_end,
-                    });
-                }
-                current_text.clear();
+            if is_sentence_ending(&current_text) || current_chars >= MAX_FALLBACK_SENTENCE_CHARS {
+                push_current_word_sentence(&mut sentences, &mut current_text, current_start, current_end);
+                current_chars = 0;
             }
         }
     }
 
     if !current_text.trim().is_empty() {
+        push_current_word_sentence(&mut sentences, &mut current_text, current_start, current_end);
+    }
+
+    sentences
+}
+
+fn push_current_word_sentence(
+    sentences: &mut Vec<asr::Sentence>,
+    current_text: &mut String,
+    current_start: f64,
+    current_end: f64,
+) {
+    let trimmed = current_text.trim().to_string();
+    if !trimmed.is_empty() {
         sentences.push(asr::Sentence {
             id: format!("whisper-{}", uuid::Uuid::new_v4()),
-            text: current_text.trim().to_string(),
+            text: trimmed,
             start_time: current_start,
             end_time: current_end,
         });
     }
+    current_text.clear();
+}
 
-    sentences
+fn has_mojibake_markers(text: &str) -> bool {
+    text.contains('\u{fffd}') || text.contains("\u{951f}\u{65a4}\u{62f7}")
+}
+
+fn segment_word_text_is_suspicious(segment: &whisper::WhisperSegment) -> bool {
+    let joined = segment
+        .word_level
+        .iter()
+        .map(|word| word.word.as_str())
+        .collect::<Vec<_>>()
+        .join("");
+    joined.contains("[_TT_") || joined.contains("[_BEG_]") || joined.contains("[_EOT_]") || has_mojibake_markers(&joined)
+}
+
+fn push_segment_text_sentences(sentences: &mut Vec<asr::Sentence>, segment: &whisper::WhisperSegment) {
+    let text = segment.text.trim();
+    if text.is_empty() {
+        return;
+    }
+
+    let total_chars = text.chars().count();
+    if total_chars == 0 {
+        return;
+    }
+
+    let mut chunk = String::new();
+    let mut chunk_start_char = 0usize;
+    for (idx, ch) in text.chars().enumerate() {
+        chunk.push(ch);
+        let chunk_end_char = idx + 1;
+        if is_sentence_ending(&chunk) || chunk.chars().count() >= MAX_FALLBACK_SENTENCE_CHARS {
+            push_estimated_sentence(sentences, segment, chunk.trim(), chunk_start_char, chunk_end_char, total_chars);
+            chunk.clear();
+            chunk_start_char = chunk_end_char;
+        }
+    }
+
+    if !chunk.trim().is_empty() {
+        push_estimated_sentence(sentences, segment, chunk.trim(), chunk_start_char, total_chars, total_chars);
+    }
+}
+
+fn push_estimated_sentence(
+    sentences: &mut Vec<asr::Sentence>,
+    segment: &whisper::WhisperSegment,
+    text: &str,
+    start_char: usize,
+    end_char: usize,
+    total_chars: usize,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let duration = (segment.end_time - segment.start_time).max(0.0);
+    let start_time = if start_char == 0 {
+        segment.start_time
+    } else {
+        segment.start_time + duration * (start_char as f64 / total_chars as f64)
+    };
+    let mut end_time = if end_char >= total_chars {
+        segment.end_time
+    } else {
+        segment.start_time + duration * (end_char as f64 / total_chars as f64)
+    };
+    if end_time <= start_time {
+        end_time = segment.end_time.max(start_time + 0.001);
+    }
+
+    sentences.push(asr::Sentence {
+        id: format!("whisper-{}", uuid::Uuid::new_v4()),
+        text: text.to_string(),
+        start_time,
+        end_time,
+    });
 }
 
 fn is_sentence_ending(text: &str) -> bool {
@@ -391,7 +507,7 @@ fn is_sentence_ending(text: &str) -> bool {
         return false;
     }
     let last = trimmed.chars().last().unwrap();
-    matches!(last, '.' | '!' | '?' | '。' | '！' | '？' | '…')
+    matches!(last, '.' | '!' | '?' | '\u{3002}' | '\u{ff01}' | '\u{ff1f}' | '\u{2026}')
 }
 
 /// 下载 Whisper 模型（决策94）
@@ -513,6 +629,13 @@ mod tests {
         );
         assert!(validate_asr_tier("api").is_err());
     }
+
+    #[test]
+    fn asr_language_defaults_to_chinese_and_fails_closed() {
+        assert_eq!(normalize_asr_language(None).unwrap(), "zh");
+        assert_eq!(normalize_asr_language(Some("AUTO".to_string())).unwrap(), "auto");
+        assert!(normalize_asr_language(Some("fr".to_string())).unwrap_err().contains("zh, en, or auto"));
+    }
     #[test]
     fn empty_whisper_output_fails_closed() {
         assert_eq!(
@@ -532,6 +655,21 @@ mod tests {
         assert_eq!(
             validate_whisper_sentences(&sentences).unwrap_err(),
             "Whisper sentence 0 has empty text"
+        );
+    }
+
+    #[test]
+    fn whisper_output_rejects_mojibake_text() {
+        let sentences = vec![asr::Sentence {
+            id: "s1".to_string(),
+            text: "\u{951f}\u{65a4}\u{62f7}".to_string(),
+            start_time: 0.0,
+            end_time: 1.0,
+        }];
+
+        assert_eq!(
+            validate_whisper_sentences(&sentences).unwrap_err(),
+            "Whisper sentence 0 contains mojibake text"
         );
     }
 
@@ -570,6 +708,72 @@ mod tests {
             validate_whisper_sentences(&sentences).unwrap_err(),
             "Whisper sentence 0 has invalid timestamps"
         );
+    }
+    #[test]
+    fn whisper_segments_without_word_timestamps_still_create_sentences() {
+        let result = whisper::WhisperResult {
+            segments: vec![whisper::WhisperSegment {
+                text: "这里是第一段讲解。".to_string(),
+                start_time: 2.0,
+                end_time: 5.0,
+                word_level: Vec::new(),
+            }],
+            detected_language: "zh".to_string(),
+        };
+
+        let sentences = whisper_result_to_sentences(&result);
+
+        assert_eq!(sentences.len(), 1);
+        assert_eq!(sentences[0].text, "这里是第一段讲解。");
+        assert_eq!(sentences[0].start_time, 2.0);
+        assert_eq!(sentences[0].end_time, 5.0);
+    }
+
+    #[test]
+    fn chinese_segments_ignore_suspicious_token_timestamp_text() {
+        let result = whisper::WhisperResult {
+            segments: vec![whisper::WhisperSegment {
+                text: "这里是正常中文。".to_string(),
+                start_time: 2.0,
+                end_time: 5.0,
+                word_level: vec![whisper::WordTimestamp {
+                    word: "[_BEG_]\u{951f}\u{65a4}\u{62f7}[_TT_100]".to_string(),
+                    start: 2.0,
+                    end: 5.0,
+                }],
+            }],
+            detected_language: "zh".to_string(),
+        };
+
+        let sentences = whisper_result_to_sentences(&result);
+
+        assert_eq!(sentences.len(), 1);
+        assert_eq!(sentences[0].text, "这里是正常中文。");
+        assert_eq!(sentences[0].start_time, 2.0);
+        assert_eq!(sentences[0].end_time, 5.0);
+    }
+    #[test]
+    fn long_segments_without_word_timestamps_are_split_for_stage2_budget() {
+        let long_text = "abcde".repeat(260);
+        let result = whisper::WhisperResult {
+            segments: vec![whisper::WhisperSegment {
+                text: long_text,
+                start_time: 10.0,
+                end_time: 70.0,
+                word_level: Vec::new(),
+            }],
+            detected_language: "zh".to_string(),
+        };
+
+        let sentences = whisper_result_to_sentences(&result);
+
+        assert!(sentences.len() > 1);
+        assert!(sentences.iter().all(|sentence| sentence.text.chars().count() <= 500));
+        for pair in sentences.windows(2) {
+            assert!(pair[0].end_time <= pair[1].start_time);
+        }
+        assert_eq!(sentences.first().unwrap().start_time, 10.0);
+        assert_eq!(sentences.last().unwrap().end_time, 70.0);
     }
     #[test]
     fn sentence_ids_are_globally_unique() {

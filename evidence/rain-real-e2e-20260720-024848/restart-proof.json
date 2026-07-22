@@ -1,0 +1,20 @@
+{
+    "elapsedSeconds":  1475,
+    "events":  [
+                   "start_import",
+                   "cancel_progress:asr",
+                   "cancel_import",
+                   "cancel_error",
+                   "import_cancelled",
+                   "retry_import",
+                   "retry_progress:asr",
+                   "retry_progress:asr",
+                   "retry_progress:stage2",
+                   "retry_progress:stage2",
+                   "retry_progress:merging",
+                   "retry_progress:merging",
+                   "import_complete"
+               ],
+    "result":  "passed",
+    "source":  "rain-app-automation"
+}

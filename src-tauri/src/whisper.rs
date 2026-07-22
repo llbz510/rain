@@ -260,6 +260,16 @@ pub(crate) fn transcribe_wav(
     auto_detect_language: bool,
     cancellation: Option<CancellationToken>,
 ) -> Result<WhisperResult, WhisperError> {
+    let language = if auto_detect_language { None } else { Some("zh") };
+    transcribe_wav_with_language(model_path, wav_path, language, cancellation)
+}
+
+pub(crate) fn transcribe_wav_with_language(
+    model_path: &str,
+    wav_path: &str,
+    language: Option<&str>,
+    cancellation: Option<CancellationToken>,
+) -> Result<WhisperResult, WhisperError> {
     if cancellation_requested(cancellation.as_ref()) {
         return Err(WhisperError::Cancelled);
     }
@@ -278,14 +288,13 @@ pub(crate) fn transcribe_wav(
         .create_state()
         .map_err(|error| WhisperError::TranscribeFailed(format!("Create state failed: {error}")))?;
 
+    if cancellation_requested(cancellation.as_ref()) {
+        return Err(WhisperError::Cancelled);
+    }
+
     let mut params =
         whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
-    if auto_detect_language {
-        params.set_language(None);
-        params.set_detect_language(true);
-    } else {
-        params.set_language(Some("zh"));
-    }
+    params.set_language(language);
     params.set_n_threads(num_cpus() as i32);
     params.set_token_timestamps(true);
 
@@ -345,11 +354,9 @@ pub(crate) fn transcribe_wav(
         });
     }
 
-    let detected_language = if auto_detect_language {
-        detect_language_from_segments(&segments)
-    } else {
-        "zh".to_string()
-    };
+    let detected_language = language
+        .map(ToString::to_string)
+        .unwrap_or_else(|| detect_language_from_segments(&segments));
 
     Ok(WhisperResult {
         segments,

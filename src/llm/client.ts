@@ -170,6 +170,68 @@ async function readSseStream(response: Response, callbacks: StreamCallbacks): Pr
 
 // callStage2：非流式 Stage2 结构化调用，返回 JSON 对象（Stage2Result）
 // messages 构造：system 放 prompt（结构化指令），user 放 sentences 文本。
+function tryParseJson(content: string): unknown | undefined {
+  try {
+    return JSON.parse(content)
+  } catch {
+    return undefined
+  }
+}
+
+function extractBalancedJson(content: string): string | null {
+  for (let start = 0; start < content.length; start += 1) {
+    const first = content[start]
+    if (first !== '{' && first !== '[') continue
+    const stack: string[] = []
+    let inString = false
+    let escaped = false
+    for (let index = start; index < content.length; index += 1) {
+      const char = content[index]
+      if (inString) {
+        if (escaped) {
+          escaped = false
+        } else if (char === '\\') {
+          escaped = true
+        } else if (char === '"') {
+          inString = false
+        }
+        continue
+      }
+      if (char === '"') {
+        inString = true
+        continue
+      }
+      if (char === '{') stack.push('}')
+      if (char === '[') stack.push(']')
+      if (char === '}' || char === ']') {
+        if (stack.at(-1) !== char) break
+        stack.pop()
+        if (stack.length === 0) return content.slice(start, index + 1)
+      }
+    }
+  }
+  return null
+}
+
+function parseModelJsonContent(content: string, label: string): unknown {
+  const trimmed = content.trim()
+  const direct = tryParseJson(trimmed)
+  if (direct !== undefined) return direct
+
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]
+  if (fenced) {
+    const parsedFence = tryParseJson(fenced.trim())
+    if (parsedFence !== undefined) return parsedFence
+  }
+
+  const balanced = extractBalancedJson(trimmed)
+  if (balanced) {
+    const parsedBalanced = tryParseJson(balanced)
+    if (parsedBalanced !== undefined) return parsedBalanced
+  }
+
+  throw new Error(`${label} failed: response content is not valid JSON`)
+}
 export async function callStage2(
   prompt: string,
   sentences: string,
@@ -198,11 +260,7 @@ export async function callStage2(
     throw new Error('Stage2 call failed: missing choices[0].message.content')
   }
 
-  try {
-    return JSON.parse(content) as Stage2Result
-  } catch {
-    throw new Error('Stage2 call failed: response content is not valid JSON')
-  }
+  return parseModelJsonContent(content, 'Stage2 call') as Stage2Result
 }
 
 // callMerge：非流式合并调用，messages 只放元数据（决策28：不重读全文）
@@ -234,11 +292,7 @@ export async function callMerge(
     throw new Error('Merge call failed: missing choices[0].message.content')
   }
 
-  try {
-    return JSON.parse(content)
-  } catch {
-    throw new Error('Merge call failed: response content is not valid JSON')
-  }
+  return parseModelJsonContent(content, 'Merge call')
 }
 
 // streamAiChat：流式 SSE 对话，返回 cleanup 函数用于 abort（决策83）

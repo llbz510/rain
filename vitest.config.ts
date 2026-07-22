@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['harness/**/*.test.{ts,tsx}', 'src/__tests__/**/*.test.{ts,tsx}'],
+    include: ['harness/**/*.test.{ts,tsx}', 'src/__tests__/**/*.test.{ts,tsx}', 'scripts/**/*.test.ts'],
     environment: 'jsdom',
     setupFiles: ['harness/setup.ts'],
     globals: true,

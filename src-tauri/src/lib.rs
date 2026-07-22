@@ -1,6 +1,7 @@
 pub mod asr;
 pub mod asr_persistence;
 pub mod commands;
+pub mod e2e_config;
 pub mod events;
 pub mod ffmpeg;
 pub mod import_state_persistence;
@@ -31,6 +32,7 @@ pub fn run() {
             commands::merge_import_atomically,
             commands::download_whisper_model,
             commands::list_whisper_models,
+            e2e_config::get_real_e2e_config,
             // convert_file_src 用纯函数，前端直接调用
         ])
         .run(tauri::generate_context!())

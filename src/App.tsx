@@ -10,6 +10,7 @@ import { VideoListPage } from '@/pages/VideoListPage'
 import { StudyInterface } from '@/pages/StudyInterface'
 import { SettingsPage } from '@/ui/components/settings'
 import { ShortcutManager } from '@/ui/components/shortcut-manager'
+import { RealE2eRunner } from '@/e2e/real-e2e-runner'
 
 export default function App() {
   const currentPage = useRainStore((s) => s.currentPage)
@@ -29,6 +30,7 @@ export default function App() {
   return (
     <>
       <ShortcutManager />
+      <RealE2eRunner />
       {page}
     </>
   )

@@ -177,6 +177,7 @@ describe('fail-closed ASR pipeline', () => {
       filePath: video.filePath,
       tier: 'whisper',
       modelPath: 'C:\\models\\ggml-large-v3.bin',
+      language: 'zh',
     })
     expect(sentences).toEqual([
       { id: 'real_s_1', nodeId: '', text: 'First sentence.', startTime: 0, endTime: 1.5, sortOrder: 0 },
@@ -186,6 +187,30 @@ describe('fail-closed ASR pipeline', () => {
     expect(await getVideoById(db, video.id)).toMatchObject({ status: 'processing', stage: 'stage2' })
   })
 
+  it('accepts an explicit ggml Whisper model path for real E2E runs', async () => {
+    const db = await getDb()
+    const explicitModelPath = 'D:\\models\\ggml-large-v3.bin'
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'list_whisper_models') return []
+      if (command === 'start_asr') return asrPayload
+      throw new Error(`Unexpected command: ${command}`)
+    })
+
+    await runAsrStage({
+      video,
+      asrModel: { type: 'whisper-local', modelName: explicitModelPath },
+      db,
+      invoke,
+    })
+
+    expect(invoke).toHaveBeenNthCalledWith(2, 'start_asr', {
+      videoId: video.id,
+      filePath: video.filePath,
+      tier: 'whisper',
+      modelPath: explicitModelPath,
+      language: 'zh',
+    })
+  })
   it('fails an import when Whisper rejects its model path', async () => {
     const db = await getDb()
     const invokeMock = vi.fn(async (command: string) => {
@@ -287,6 +312,7 @@ describe('fail-closed ASR pipeline', () => {
       { id: 'same', text: 'Two', start_time: 1, end_time: 2 },
     ]],
     ['blank text', [{ id: 's1', text: ' ', start_time: 0, end_time: 1 }]],
+    ['mojibake text', [{ id: 's1', text: '\u951f\u65a4\u62f7 text', start_time: 0, end_time: 1 }]],
     ['non-finite timestamps', [{ id: 's1', text: 'Text', start_time: 0, end_time: Number.POSITIVE_INFINITY }]],
     ['a negative start', [{ id: 's1', text: 'Text', start_time: -1, end_time: 1 }]],
     ['an empty range', [{ id: 's1', text: 'Text', start_time: 1, end_time: 1 }]],

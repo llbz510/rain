@@ -29,7 +29,7 @@ pub fn runtime_capability() -> RuntimeCapability {
     };
     RuntimeCapability {
         whisper_backend,
-        cpu_fallback_available: true,
+        cpu_fallback_available: false,
     }
 }
 
@@ -38,7 +38,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capability_reports_compiled_backend_and_cpu_fallback() {
+    fn capability_reports_compiled_backend_without_claiming_runtime_fallback() {
         let capability = runtime_capability();
 
         #[cfg(feature = "cuda-whisper")]
@@ -47,6 +47,6 @@ mod tests {
         #[cfg(not(feature = "cuda-whisper"))]
         assert_eq!(capability.whisper_backend, "cpu");
 
-        assert!(capability.cpu_fallback_available);
+        assert!(!capability.cpu_fallback_available);
     }
 }

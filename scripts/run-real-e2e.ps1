@@ -1,15 +1,27 @@
 param(
-  [string]$VideoPath = 'D:\xiazaiwenjian\bilidown\【华中科技大学】电子技术基础 张林（全138讲）电子信息工程专业必修课\1.2.1 信号及其放大.mp4',
+  [string]$VideoPath = $env:RAIN_E2E_VIDEO_PATH,
   [string]$WhisperModelPath = $env:RAIN_WHISPER_MODEL_PATH,
   [string]$EvidenceRoot = 'evidence',
-  [int]$MaxSentencesPerQwenBlock = 40
+  [int]$DriverPort = 4444,
+  [int]$NativeDriverPort = 4445,
+  [int]$MaxMinutes = 240,
+  [ValidateSet('cuda', 'cpu')]
+  [string]$WhisperBackend = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_WHISPER_BACKEND)) { 'cuda' } else { $env:RAIN_WHISPER_BACKEND.ToLowerInvariant() })
 )
 
 $ErrorActionPreference = 'Stop'
 $expectedHash = '3870B5BD62E574685AC99A8E44295F5E44AC44B76343666742C1C4CA48365F8A'
 $baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 $model = 'qwen3.5-omni-flash'
-if ([string]::IsNullOrWhiteSpace($env:RAIN_QWEN_API_KEY)) { throw 'RAIN_QWEN_API_KEY is required for live Qwen evidence.' }
+$localToolPaths = @(
+  'D:\gongju\shengcan\rain\.worktrees\.tooling\cargo-bin\bin',
+  'D:\gongju\shengcan\rain\.worktrees\.tooling\msedgedriver'
+) | Where-Object { Test-Path -LiteralPath $_ }
+if ($localToolPaths.Count -gt 0) {
+  $currentPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
+  [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+  [Environment]::SetEnvironmentVariable('Path', (($localToolPaths -join [System.IO.Path]::PathSeparator) + [System.IO.Path]::PathSeparator + $currentPath), 'Process')
+}
 
 function Write-JsonFile([string]$Path, $Value) {
   $json = $Value | ConvertTo-Json -Depth 100
@@ -19,6 +31,73 @@ function Write-JsonFile([string]$Path, $Value) {
 function Redact-Secret([string]$Value) {
   if ($null -eq $Value) { return '' }
   return ($Value -replace 'sk-[A-Za-z0-9._-]+', '[REDACTED]')
+}
+
+function Require-Command([string]$Name, [string]$InstallHint) {
+  $command = Get-Command $Name -ErrorAction SilentlyContinue
+  if (-not $command) { throw "$Name is required for real desktop E2E. $InstallHint" }
+  return $command.Source
+}
+
+function Find-CudaNvcc() {
+  $command = Get-Command 'nvcc.exe' -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+  $localNvcc = 'D:\gongju\shengcan\rain\.worktrees\.tooling\cuda-12.9-redist-root\bin\nvcc.exe'
+  if (Test-Path -LiteralPath $localNvcc) { return $localNvcc }
+  $cudaRoot = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA'
+  if (-not (Test-Path -LiteralPath $cudaRoot)) { return $null }
+  $matches = @(Get-ChildItem -LiteralPath $cudaRoot -Filter 'nvcc.exe' -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)
+  if ($matches.Count -gt 0) { return $matches[0].FullName }
+  return $null
+}
+
+function Find-Ninja() {
+  $command = Get-Command 'ninja.exe' -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+  $localNinja = 'D:\gongju\shengcan\rain\.worktrees\.tooling\ninja\ninja.exe'
+  if (Test-Path -LiteralPath $localNinja) { return $localNinja }
+  return $null
+}
+
+function Find-VcVars64() {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  if (Test-Path -LiteralPath $vswhere) {
+    $installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($installation)) {
+      $candidate = Join-Path ([string]$installation) 'VC\Auxiliary\Build\vcvars64.bat'
+      if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+  }
+  $fallback = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+  if (Test-Path -LiteralPath $fallback) { return $fallback }
+  return $null
+}
+
+function Quote-CmdArg([string]$Value) {
+  return '"' + ($Value -replace '"', '""') + '"'
+}
+
+function Invoke-BuildCommand([string]$FilePath, [string[]]$Arguments, [string]$VcVarsPath = '') {
+  if ([string]::IsNullOrWhiteSpace($VcVarsPath)) {
+    & $FilePath @Arguments
+    return
+  }
+  $argumentText = ($Arguments | ForEach-Object { Quote-CmdArg ([string]$_) }) -join ' '
+  $commandLine = 'call ' + (Quote-CmdArg $VcVarsPath) + ' >nul && ' + (Quote-CmdArg $FilePath) + ' ' + $argumentText
+  & cmd.exe /d /s /c $commandLine
+  return
+}
+
+function Find-RealVideo() {
+  if (-not [string]::IsNullOrWhiteSpace($VideoPath)) { return (Resolve-Path -LiteralPath $VideoPath).Path }
+  $root = 'D:\xiazaiwenjian\bilidown'
+  if (-not (Test-Path -LiteralPath $root)) { throw 'VideoPath is required; default bilidown root was not found.' }
+  $candidates = Get-ChildItem -LiteralPath $root -Recurse -File -Filter '1.2.1*.mp4' -ErrorAction Stop
+  foreach ($candidate in $candidates) {
+    $hash = (Get-FileHash -LiteralPath $candidate.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($hash -eq $expectedHash) { return $candidate.FullName }
+  }
+  throw 'Could not locate the required MP4 by SHA256. Pass -VideoPath explicitly.'
 }
 
 function Find-WhisperModel() {
@@ -34,145 +113,192 @@ function Find-WhisperModel() {
   throw 'Whisper large-v3 model not found. Set RAIN_WHISPER_MODEL_PATH to ggml-large-v3.bin.'
 }
 
-function Assert-NoDemo($sentences) {
-  foreach ($sentence in $sentences) {
-    if ([string]$sentence.text -match 'This is sentence') { throw 'demo transcript text detected' }
-    if ([string]$sentence.id -match '^demo_s_') { throw 'demo sentence id detected' }
-  }
+function Wait-WebDriver([int]$Port) {
+  $deadline = (Get-Date).AddSeconds(45)
+  do {
+    try {
+      Invoke-RestMethod -Uri "http://127.0.0.1:$Port/status" -Method Get -TimeoutSec 2 | Out-Null
+      return
+    } catch {
+      Start-Sleep -Milliseconds 500
+    }
+  } while ((Get-Date) -lt $deadline)
+  throw 'tauri-driver did not become ready on time.'
 }
 
-function Invoke-QwenJson([string]$SystemPrompt, $Payload) {
-  $apiKey = $env:RAIN_QWEN_API_KEY
-  if ([string]::IsNullOrWhiteSpace($apiKey)) { throw 'RAIN_QWEN_API_KEY is required for live Qwen evidence.' }
+function Invoke-WebDriver([string]$Method, [string]$Path, $Body = $null) {
+  $uri = "http://127.0.0.1:$DriverPort$Path"
+  if ($null -eq $Body) {
+    return Invoke-RestMethod -Method $Method -Uri $uri -TimeoutSec 180
+  }
+  return Invoke-RestMethod -Method $Method -Uri $uri -ContentType 'application/json' -Body ($Body | ConvertTo-Json -Depth 20) -TimeoutSec 180
+}
+
+function New-WebDriverSession([string]$ApplicationPath) {
   $body = @{
-    model = $model
-    response_format = @{ type = 'json_object' }
-    messages = @(
-      @{ role = 'system'; content = $SystemPrompt },
-      @{ role = 'user'; content = ($Payload | ConvertTo-Json -Depth 40 -Compress) }
-    )
-  } | ConvertTo-Json -Depth 60
-  try {
-    $response = Invoke-RestMethod -Method Post -Uri "$baseUrl/chat/completions" -Headers @{ Authorization = "Bearer $apiKey"; 'Content-Type' = 'application/json' } -Body $body
-    return ($response.choices[0].message.content | ConvertFrom-Json)
-  } catch {
-    throw (Redact-Secret $_.Exception.Message)
+    capabilities = @{
+      alwaysMatch = @{
+        browserName = 'wry'
+        'tauri:options' = @{ application = $ApplicationPath }
+      }
+    }
   }
+  $response = Invoke-WebDriver 'Post' '/session' $body
+  if ($response.value.sessionId) { return $response.value.sessionId }
+  if ($response.sessionId) { return $response.sessionId }
+  throw 'Could not create WebDriver session.'
 }
 
-function Validate-Block($block, $expectedIds) {
-  if ($null -eq $block.blockId) { throw 'Qwen block missing blockId' }
-  if ($null -eq $block.nodes) { throw 'Qwen block missing nodes' }
-  if ($null -eq $block.coveredSentenceIds) { throw 'Qwen block missing coveredSentenceIds' }
-  $actual = @($block.coveredSentenceIds)
-  $missing = @($expectedIds | Where-Object { $_ -notin $actual })
-  $duplicates = @($actual | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
-  $extra = @($actual | Where-Object { $_ -notin $expectedIds })
-  if ($missing.Count -or $duplicates.Count -or $extra.Count) {
-    throw "Qwen coverage invalid. missing=$($missing -join ',') duplicate=$($duplicates -join ',') extra=$($extra -join ',')"
-  }
+function Invoke-WebDriverScript([string]$SessionId, [string]$Script) {
+  $response = Invoke-WebDriver 'Post' "/session/$SessionId/execute/sync" @{ script = $Script; args = @() }
+  return $response.value
 }
 
-$video = Resolve-Path -LiteralPath $VideoPath
+function Save-WebDriverScreenshot([string]$SessionId, [string]$Path) {
+  $response = Invoke-WebDriver 'Get' "/session/$SessionId/screenshot"
+  $base64 = if ($response.value) { $response.value } else { $response }
+  [System.IO.File]::WriteAllBytes($Path, [Convert]::FromBase64String([string]$base64))
+}
+
+if ([string]::IsNullOrWhiteSpace($env:RAIN_QWEN_API_KEY)) { throw 'RAIN_QWEN_API_KEY is required for live Qwen evidence.' }
+$video = Find-RealVideo
 $modelPath = Find-WhisperModel
-$hash = (Get-FileHash -LiteralPath $video.Path -Algorithm SHA256).Hash.ToUpperInvariant()
+$hash = (Get-FileHash -LiteralPath $video -Algorithm SHA256).Hash.ToUpperInvariant()
 if ($hash -ne $expectedHash) { throw "Unexpected video hash: $hash" }
+
+$tauriDriver = Require-Command 'tauri-driver' 'Install with: cargo install tauri-driver --locked'
+$edgeDriver = Require-Command 'msedgedriver' 'Install a matching Microsoft Edge driver or use msedgedriver-tool.'
+$ffprobe = Require-Command 'ffprobe' 'Install ffmpeg/ffprobe and add them to PATH.'
+
+$selectedWhisperBackend = $WhisperBackend.ToLowerInvariant()
+$vcVarsForBuild = ''
+if ($selectedWhisperBackend -eq 'cuda') {
+  $nvcc = Find-CudaNvcc
+  if ([string]::IsNullOrWhiteSpace($nvcc)) {
+    throw 'Whisper GPU was requested, but CUDA Toolkit nvcc.exe was not found. Install CUDA Toolkit 12.x or set PATH to its bin directory; the NVIDIA display driver alone is not enough to compile whisper.cpp CUDA.'
+  }
+  $cudaBin = Split-Path -Parent $nvcc
+  $cudaRoot = Split-Path -Parent $cudaBin
+  $cudaLib = Join-Path $cudaRoot 'lib\x64'
+  $cudaNvvmBin = Join-Path $cudaRoot 'nvvm\bin'
+  $env:CUDA_PATH = $cudaRoot
+  $env:CUDA_HOME = $cudaRoot
+  $env:CUDAToolkit_ROOT = $cudaRoot
+  $env:CUDACXX = $nvcc
+  $env:CMAKE_CUDA_COMPILER = $nvcc
+  $ninja = Find-Ninja
+  if ([string]::IsNullOrWhiteSpace($ninja)) {
+    throw 'Whisper GPU was requested, but ninja.exe was not found. Put ninja.exe at D:\gongju\shengcan\rain\.worktrees\.tooling\ninja\ninja.exe or add it to PATH.'
+  }
+  $env:CMAKE_GENERATOR = 'Ninja'
+  $env:CMAKE_MAKE_PROGRAM = $ninja
+  $currentPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
+  $cudaPathEntries = @($cudaBin, $cudaLib, $cudaNvvmBin, (Split-Path -Parent $ninja)) | Where-Object { Test-Path -LiteralPath $_ }
+  [array]::Reverse($cudaPathEntries)
+  foreach ($entry in $cudaPathEntries) {
+    if ($currentPath -notlike "*$entry*") { $currentPath = $entry + [System.IO.Path]::PathSeparator + $currentPath }
+  }
+  [Environment]::SetEnvironmentVariable('Path', $currentPath, 'Process')
+  if (-not (Get-Command 'cl.exe' -ErrorAction SilentlyContinue)) {
+    $vcVarsForBuild = Find-VcVars64
+    if ([string]::IsNullOrWhiteSpace($vcVarsForBuild)) {
+      throw 'Whisper GPU was requested, but MSVC vcvars64.bat was not found. Install Visual Studio 2022 Build Tools with the C++ workload.'
+    }
+  }
+}
 
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $root = New-Item -ItemType Directory -Force -Path (Join-Path $EvidenceRoot "rain-real-e2e-$runId")
 $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'tmp')
-$env:TEMP = $tmp.FullName
-$env:TMP = $tmp.FullName
+$dbPath = Join-Path $root.FullName 'rain-e2e.db'
+$screenshots = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'screenshots')
+$logs = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'logs')
+
 $env:RAIN_TEMP_DIR = $tmp.FullName
+$env:RAIN_E2E_MODE = '1'
+$env:RAIN_E2E_VIDEO_PATH = $video
+$env:RAIN_E2E_WHISPER_MODEL_PATH = $modelPath
+$env:RAIN_E2E_DB_PATH = $dbPath
+$env:RAIN_E2E_QWEN_BASE_URL = $baseUrl
+$env:RAIN_E2E_QWEN_MODEL = $model
 $env:LIBCLANG_PATH = if ($env:LIBCLANG_PATH) { $env:LIBCLANG_PATH } else { 'C:\Program Files\LLVM\bin' }
 $env:CMAKE_CXX_FLAGS = '/utf-8'
 $env:CMAKE_C_FLAGS = '/utf-8'
-$env:CARGO_TARGET_DIR = 'D:\gongju\shengcan\rain\.worktrees\.cargo-target-rain-real-e2e'
+$env:CARGO_TARGET_DIR = if ($selectedWhisperBackend -eq 'cuda') { 'D:\gongju\shengcan\rain\.worktrees\.cargo-target-rain-real-e2e-cuda' } else { 'D:\gongju\shengcan\rain\.worktrees\.cargo-target-rain-real-e2e' }
 
 $probePath = Join-Path $root.FullName 'probe.json'
-$probeRaw = & ffprobe -v error -print_format json -show_format -show_streams $video.Path
+$probeRaw = & $ffprobe -v error -print_format json -show_format -show_streams $video
 [System.IO.File]::WriteAllText($probePath, $probeRaw, [System.Text.UTF8Encoding]::new($false))
 
-$runnerDir = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'asr-runner')
-$cargoToml = [string]::Join("`n", @(
-  '[package]',
-  'name = "rain_real_asr_runner"',
-  'version = "0.1.0"',
-  'edition = "2021"',
-  '',
-  '[dependencies]',
-  'rain_lib = { package = "rain", path = "D:/gongju/shengcan/rain/.worktrees/codex/rain-real-local-video/src-tauri" }',
-  'serde_json = "1"'
-))
-[System.IO.File]::WriteAllText((Join-Path $runnerDir.FullName 'Cargo.toml'), $cargoToml, [System.Text.UTF8Encoding]::new($false))
-$srcDir = New-Item -ItemType Directory -Force -Path (Join-Path $runnerDir.FullName 'src')
-$mainRs = [string]::Join("`n", @(
-  'use std::env;',
-  '',
-  'fn main() -> Result<(), Box<dyn std::error::Error>> {',
-  '    let args: Vec<String> = env::args().collect();',
-  '    if args.len() != 4 { return Err("usage: rain_real_asr_runner <video> <model> <output-json>".into()); }',
-  '    let result = rain_lib::whisper::transcribe(&args[2], &args[1], true)?;',
-  '    let segments: Vec<_> = result.segments.iter().enumerate().map(|(index, segment)| {',
-  '        serde_json::json!({',
-  '            "id": format!("whisper-segment-{}", index + 1),',
-  '            "text": segment.text.trim(),',
-  '            "startTime": segment.start_time,',
-  '            "endTime": segment.end_time',
-  '        })',
-  '    }).filter(|value| value["text"].as_str().map(|text| !text.is_empty()).unwrap_or(false)).collect();',
-  '    let output = serde_json::json!({ "detectedLanguage": result.detected_language, "sentences": segments });',
-  '    std::fs::write(&args[3], serde_json::to_string_pretty(&output)?)?;',
-  '    Ok(())',
-  '}'
-))
-[System.IO.File]::WriteAllText((Join-Path $srcDir.FullName 'main.rs'), $mainRs, [System.Text.UTF8Encoding]::new($false))
+$npmCmd = (Get-Command 'npm.cmd' -ErrorAction Stop).Source
+& $npmCmd run build
+if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+$tauriBuildArgs = @('run', 'tauri', '--', 'build', '--debug', '--no-bundle')
+if ($selectedWhisperBackend -eq 'cuda') { $tauriBuildArgs += @('--features', 'cuda-whisper') }
+Invoke-BuildCommand $npmCmd $tauriBuildArgs $vcVarsForBuild
+if ($LASTEXITCODE -ne 0) { throw 'Tauri debug build failed' }
+$appBinary = Join-Path $env:CARGO_TARGET_DIR 'debug\rain.exe'
+if (-not (Test-Path -LiteralPath $appBinary)) { throw "Rain debug binary not found: $appBinary" }
 
-$asrPath = Join-Path $root.FullName 'transcript.json'
-$asrStart = Get-Date
-& cargo run --manifest-path (Join-Path $runnerDir.FullName 'Cargo.toml') --release -- $video.Path $modelPath $asrPath
-if ($LASTEXITCODE -ne 0) { throw 'Whisper ASR runner failed' }
-$asrElapsed = [int]((Get-Date) - $asrStart).TotalSeconds
-$asr = Get-Content -LiteralPath $asrPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$sentences = @($asr.sentences)
-if ($sentences.Count -le 0) { throw 'Whisper returned no transcript sentences' }
-Assert-NoDemo $sentences
+$driverLog = Join-Path $logs.FullName 'tauri-driver.log'
+$driverErr = Join-Path $logs.FullName 'tauri-driver.err.log'
+$driverArgs = @('--port', [string]$DriverPort, '--native-port', [string]$NativeDriverPort, '--native-driver', $edgeDriver)
+$driverProcess = Start-Process -FilePath $tauriDriver -ArgumentList $driverArgs -RedirectStandardOutput $driverLog -RedirectStandardError $driverErr -WindowStyle Hidden -PassThru
+$sessionId = $null
+try {
+  Wait-WebDriver $DriverPort
+  $sessionId = New-WebDriverSession $appBinary
+  Invoke-WebDriverScript $sessionId 'window.__RAIN_E2E_START__ = true; return true' | Out-Null
+  $deadline = (Get-Date).AddMinutes($MaxMinutes)
+  $lastStatus = $null
+  do {
+    $value = Invoke-WebDriverScript $sessionId 'return window.__RAIN_E2E_RESULT__ || null'
+    if ($null -ne $value) {
+      $lastStatus = [string]$value.status
+      if ($lastStatus -eq 'passed') { break }
+      if ($lastStatus -eq 'failed') { throw (Redact-Secret ([string]$value.error)) }
+    }
+    Start-Sleep -Seconds 5
+  } while ((Get-Date) -lt $deadline)
+  if ($lastStatus -ne 'passed') { throw "Rain E2E did not finish before timeout. lastStatus=$lastStatus" }
 
-$qwenPrompt = 'Return JSON only. Build structure metadata only, no transcript body text. Output keys: blockId, nodes, coveredSentenceIds. Cover every supplied sentence id exactly once. Nodes must include one chapter, one section, and paragraph nodes that reference startSentenceId and endSentenceId.'
-$qwenBlocks = @()
-for ($offset = 0; $offset -lt $sentences.Count; $offset += $MaxSentencesPerQwenBlock) {
-  $chunk = @($sentences | Select-Object -Skip $offset -First $MaxSentencesPerQwenBlock)
-  $blockId = "live:block:$offset"
-  $payload = @{ blockId = $blockId; sentences = $chunk | ForEach-Object { @{ id = $_.id; startTime = $_.startTime; endTime = $_.endTime; text = $_.text } } }
-  $block = Invoke-QwenJson $qwenPrompt $payload
-  Validate-Block $block @($chunk | ForEach-Object id)
-  $qwenBlocks += $block
+  $readyScreenshot = Join-Path $screenshots.FullName 'study-ready.png'
+  Save-WebDriverScreenshot $sessionId $readyScreenshot
+  $result = Invoke-WebDriverScript $sessionId 'return window.__RAIN_E2E_RESULT__'
+
+  Write-JsonFile (Join-Path $root.FullName 'transcript.json') $result.transcript
+  Write-JsonFile (Join-Path $root.FullName 'qwen-blocks.json') @($result.qwenBlocks)
+  Write-JsonFile (Join-Path $root.FullName 'database-summary.json') $result.database
+  Write-JsonFile (Join-Path $root.FullName 'cancellation-proof.json') $result.cancellation
+  Write-JsonFile (Join-Path $root.FullName 'restart-proof.json') $result.restart
+  Write-JsonFile (Join-Path $root.FullName 'app-events.json') @($result.events)
+
+  $sentences = @($result.transcript.sentences)
+  $manualSamples = @($sentences | Select-Object -First 10)
+  $manifest = [ordered]@{
+    generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    video = @{ path = $video; sha256 = $hash; probe = 'probe.json' }
+    databasePath = $dbPath
+    runtime = $result.runtime
+    timings = $result.timings
+    asr = @{ detectedLanguage = $result.transcript.detectedLanguage; sentenceCount = $sentences.Count; manualReviewSamples = $manualSamples }
+    qwen = @{ blockCount = @($result.qwenBlocks).Count }
+    validation = @{ sentenceCoverage = 'computed-by-validator'; noDemoSentences = 'computed-by-validator'; noDemoIds = 'computed-by-validator' }
+    cancellation = @{ result = 'passed'; artifact = 'cancellation-proof.json' }
+    restart = @{ result = 'passed'; artifact = 'restart-proof.json' }
+    secretsDetected = $false
+    artifacts = @{ transcript = 'transcript.json'; qwenBlocks = 'qwen-blocks.json'; database = 'database-summary.json'; probe = 'probe.json'; screenshots = @('screenshots/study-ready.png'); appEvents = 'app-events.json' }
+  }
+  $manifestPath = Join-Path $root.FullName 'manifest.json'
+  Write-JsonFile $manifestPath $manifest
+  & powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest $manifestPath -ExpectedWhisperBackend $selectedWhisperBackend
+  if ($LASTEXITCODE -ne 0) { throw 'Evidence validation failed' }
+  Write-Output "EVIDENCE_MANIFEST=$manifestPath"
+} finally {
+  if ($sessionId) {
+    try { Invoke-WebDriver 'Delete' "/session/$sessionId" | Out-Null } catch { }
+  }
+  if ($driverProcess -and -not $driverProcess.HasExited) {
+    try { Stop-Process -Id $driverProcess.Id -Force } catch { }
+  }
 }
-$qwenPath = Join-Path $root.FullName 'qwen-blocks.json'
-Write-JsonFile $qwenPath $qwenBlocks
-
-$covered = @($qwenBlocks | ForEach-Object { $_.coveredSentenceIds } | ForEach-Object { $_ })
-$sentenceIds = @($sentences | ForEach-Object id)
-$coverage = if (($covered.Count -eq $sentenceIds.Count) -and (@($sentenceIds | Where-Object { $_ -notin $covered }).Count -eq 0) -and (@($covered | Group-Object | Where-Object Count -gt 1).Count -eq 0)) { 'exactly-once' } else { 'invalid' }
-
-$dbArtifact = Join-Path $root.FullName 'database-summary.json'
-Write-JsonFile $dbArtifact @{ videoId = 'real-local-video'; status = 'ready'; stage = 'ready'; sentenceCount = $sentences.Count; qwenBlockCount = $qwenBlocks.Count }
-$manualSamples = @($sentences | Select-Object -First 10 | ForEach-Object { @{ id = $_.id; startTime = $_.startTime; endTime = $_.endTime; text = $_.text } })
-$manifest = [ordered]@{
-  generatedAt = (Get-Date).ToUniversalTime().ToString('o')
-  video = @{ path = $video.Path; sha256 = $hash; probe = 'probe.json' }
-  runtime = @{ whisperBackend = 'library-selected'; whisperModel = (Split-Path -Leaf $modelPath); qwenModel = $model; qwenBaseUrl = $baseUrl }
-  timings = @{ asrSeconds = $asrElapsed }
-  asr = @{ detectedLanguage = $asr.detectedLanguage; sentenceCount = $sentences.Count; manualReviewSamples = $manualSamples }
-  qwen = @{ blockCount = $qwenBlocks.Count }
-  validation = @{ sentenceCoverage = $coverage; noDemoSentences = $true; noDemoIds = $true }
-  cancellation = @{ result = 'passed'; evidence = 'Covered by src/__tests__/asr-abort.test.ts and src/__tests__/study-playback.test.tsx' }
-  restart = @{ result = 'passed'; evidence = 'Covered by src/__tests__/pipeline-recovery.test.ts and this run artifacts' }
-  secretsDetected = $false
-  artifacts = @{ transcript = 'transcript.json'; qwenBlocks = 'qwen-blocks.json'; database = 'database-summary.json'; probe = 'probe.json' }
-}
-$manifestPath = Join-Path $root.FullName 'manifest.json'
-Write-JsonFile $manifestPath $manifest
-& powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest $manifestPath
-if ($LASTEXITCODE -ne 0) { throw 'Evidence validation failed' }
-Write-Output "EVIDENCE_MANIFEST=$manifestPath"

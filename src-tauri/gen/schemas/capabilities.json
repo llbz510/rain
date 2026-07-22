@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Rain default capabilities","local":true,"windows":["main"],"permissions":["core:default","core:path:default","dialog:default","dialog:allow-open","sql:default"]}}
+{"default":{"identifier":"default","description":"Rain default capabilities","local":true,"windows":["main"],"permissions":["core:default","core:path:default","dialog:default","dialog:allow-open","sql:default","sql:allow-execute"]}}

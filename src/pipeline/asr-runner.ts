@@ -8,6 +8,7 @@ import { tauriInvoke } from '@/lib/tauri-env'
 export interface AsrModelConfig {
   type: string
   modelName: string
+  language?: string
 }
 
 export type PipelineInvoke = (
@@ -20,6 +21,10 @@ interface WhisperSentencePayload {
   text: unknown
   start_time: unknown
   end_time: unknown
+}
+
+function hasMojibakeMarkers(text: string): boolean {
+  return /(?:\u951f\u65a4\u62f7|\uFFFD)/u.test(text)
 }
 
 export interface RunAsrStageInput {
@@ -65,12 +70,12 @@ function resolveInstalledModelPath(savedModelName: string, installedModels: stri
   if (exactPath) return exactPath
 
   const savedLooksLikePath = saved.includes('/') || saved.includes('\\')
+  if (savedLooksLikePath && /^ggml-.+\.bin$/i.test(basename(saved))) return saved
+
   const expectedFilename = /^ggml-.+\.bin$/i.test(saved)
     ? saved
     : `ggml-${saved}.bin`
-  const installedPath = savedLooksLikePath
-    ? undefined
-    : installedModels.find((entry) => basename(entry) === expectedFilename)
+  const installedPath = installedModels.find((entry) => basename(entry) === expectedFilename)
 
   if (!installedPath) {
     throw new Error(
@@ -105,6 +110,9 @@ function validateWhisperResult(result: unknown): Sentence[] {
     }
     if (!text) {
       throw new Error(`Invalid Whisper ASR result: sentence "${id}" has blank text`)
+    }
+    if (hasMojibakeMarkers(text)) {
+      throw new Error(`Invalid Whisper ASR result: sentence "${id}" contains mojibake text`)
     }
     if (typeof startTime !== 'number' || typeof endTime !== 'number'
       || !Number.isFinite(startTime) || !Number.isFinite(endTime)) {
@@ -178,6 +186,7 @@ export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> 
       filePath: video.filePath,
       tier: 'whisper',
       modelPath,
+      language: asrModel.language ?? 'zh',
     })
     throwIfAborted(signal)
     const sentences = validateWhisperResult(result)

@@ -1,0 +1,12 @@
+{
+    "elapsedSeconds":  1,
+    "events":  [
+                   "start_import",
+                   "cancel_progress:asr",
+                   "cancel_import",
+                   "cancel_error",
+                   "import_cancelled"
+               ],
+    "result":  "passed",
+    "source":  "rain-app-automation"
+}

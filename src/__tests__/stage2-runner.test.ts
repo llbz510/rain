@@ -129,6 +129,73 @@ describe('Stage2 strict validation', () => {
     }
     expect(validateStage2BlockOutput(block, output).join('\n')).toMatch(/sibling.*(overlap|order)/i)
   })
+  it('normalizes common Qwen paragraph aliases before strict validation', async () => {
+    const block = buildStage2Blocks(video.id, sentences, 10_000)[0]
+    const output = validOutput(block) as any
+    const section = output.nodes.find((node: any) => node.kind === 'section')
+    section.parentId = null
+    section.type = 'concept'
+    const paragraph = output.nodes.find((node: any) => node.kind === 'paragraph')
+    paragraph.parentId = null
+    paragraph.kind = 'knowledge_point'
+    paragraph.paragraphType = 'concept'
+    paragraph.type = 'concept'
+    const clientMock = vi.fn().mockResolvedValue(output)
+
+    const result = await runStage2Stage({
+      video, sentences, settings, db: await stage2Db(), maxBlockTokens: 10_000, callStage2: clientMock,
+    })
+
+    expect(result.nodes.some((node) => node.kind === 'paragraph' && node.type === 'concept')).toBe(true)
+    expect(clientMock).toHaveBeenCalledTimes(1)
+  })
+  it('repairs overlapping Qwen outline nodes into exact paragraph coverage', async () => {
+    const block = buildStage2Blocks(video.id, sentences, 10_000)[0]
+    const clientMock = vi.fn().mockResolvedValue({
+      blockId: block.blockId,
+      coveredSentenceIds: ['s1', 's2', 's3', 's4'],
+      nodes: [
+        {
+          id: `${block.blockId}:node:topic`,
+          parentId: null,
+          kind: 'topic',
+          title: 'Signal amplification',
+          startSentenceId: 's1',
+          endSentenceId: 's4',
+        },
+        {
+          id: `${block.blockId}:node:point-a`,
+          parentId: `${block.blockId}:node:topic`,
+          kind: 'knowledge_point',
+          title: 'Input signal',
+          paragraphType: 'concept',
+          startSentenceId: 's1',
+          endSentenceId: 's3',
+        },
+        {
+          id: `${block.blockId}:node:point-b`,
+          parentId: `${block.blockId}:node:topic`,
+          kind: 'knowledge_point',
+          title: 'Amplifier output',
+          type: 'example',
+          startSentenceId: 's3',
+          endSentenceId: 's4',
+        },
+      ],
+    })
+
+    const result = await runStage2Stage({
+      video, sentences, settings, db: await stage2Db(), maxBlockTokens: 10_000, callStage2: clientMock,
+    })
+
+    expect(result.sentences.map((sentence) => sentence.nodeId)).toHaveLength(4)
+    expect(new Set(result.sentences.map((sentence) => sentence.id))).toEqual(new Set(['s1', 's2', 's3', 's4']))
+    expect(result.nodes.filter((node) => node.kind === 'paragraph').map((node) => node.title)).toEqual([
+      'Input signal',
+      'Amplifier output',
+    ])
+    expect(clientMock).toHaveBeenCalledTimes(1)
+  })
   it('rejects generated transcript body fields as malformed output', async () => {
     const block = buildStage2Blocks(video.id, sentences, 10_000)[0]
     const clientMock = vi.fn().mockResolvedValue({ ...validOutput(block), bodyText: 'generated text' })
@@ -224,6 +291,16 @@ describe('Stage2 retry, cancellation and HTTP safety', () => {
     expect(body.messages[1].content).toContain('"startTime":0')
   })
 
+  it('parses fenced JSON returned by compatible providers', async () => {
+    const block = buildStage2Blocks(video.id, sentences, 10_000)[0]
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: `Here is the JSON:\n\n\`\`\`json\n${JSON.stringify(validOutput(block))}\n\`\`\`` } }],
+    }), { status: 200 }))
+
+    const result = await callStage2('Return structure metadata as JSON only.', JSON.stringify(block), settings)
+
+    expect(result).toMatchObject(validOutput(block))
+  })
   it('redacts non-2xx body secrets and the configured key', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(
       'Authorization: Bearer bearer-secret; sk-live-leak; configured-secret-value',
@@ -239,23 +316,21 @@ describe('Stage2 retry, cancellation and HTTP safety', () => {
       .toBe('Bearer [REDACTED] [REDACTED] [REDACTED]')
   })
 
-  it('uses the strict merge system contract on the default multi-block fetch path', async () => {
+  it('deterministically merges multi-block outputs without a final Qwen request', async () => {
     const blocks = buildStage2Blocks(video.id, sentences, 32)
     expect(blocks).toHaveLength(2)
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(validOutput(blocks[0])) } }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(validOutput(blocks[1])) } }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(mergedOutput(blocks)) } }] }), { status: 200 }))
 
-    await runStage2Stage({ video, sentences, settings, db: await stage2Db(), maxBlockTokens: 32 })
+    const result = await runStage2Stage({ video, sentences, settings, db: await stage2Db(), maxBlockTokens: 32 })
 
-    expect(fetch).toHaveBeenCalledTimes(3)
-    const mergeBody = JSON.parse(String(vi.mocked(fetch).mock.calls[2][1]?.body))
-    expect(mergeBody.messages[0].content).toMatch(/JSON/i)
-    expect(mergeBody.messages[0].content).toMatch(/exact.*contract/i)
-    expect(mergeBody.messages[0].content).toMatch(/coverage/i)
-    expect(mergeBody.messages[0].content).toMatch(/blockId:node:/i)
-    expect(mergeBody.messages[1].content).not.toContain('Original one.')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    const mergeBlockId = buildMergeBlockId(video.id, sentences)
+    expect(result.nodes.every((node) => node.id.startsWith(`${mergeBlockId}:node:`))).toBe(true)
+    expect(result.sentences.map(({ id, text }) => ({ id, text }))).toEqual(
+      sentences.map(({ id, text }) => ({ id, text })),
+    )
   })
 })
 describe('Stage2 checkpoint recovery and global coverage', () => {
@@ -303,16 +378,14 @@ describe('Stage2 checkpoint recovery and global coverage', () => {
     expect(callBlock).toHaveBeenCalledTimes(1)
   })
 
-  it('merges compact outlines and preserves original ASR text exactly once', async () => {
+  it('deterministically merges compact outlines and preserves original ASR text exactly once', async () => {
     const blocks = buildStage2Blocks(video.id, sentences, 20)
     const callMerge = vi.fn().mockResolvedValue(mergedOutput(blocks))
     const result = await runStage2Stage({
       video, sentences, settings, db: await stage2Db(), maxBlockTokens: 20,
       callStage2: vi.fn(async (_prompt, input) => validOutput(JSON.parse(input))), callMerge,
     })
-    const mergePayload = String(callMerge.mock.calls[0][1])
-    expect(mergePayload).not.toContain('Original one.')
-    expect(mergePayload).toContain(blocks[0].blockId)
+    expect(callMerge).not.toHaveBeenCalled()
     expect(result.sentences.map(({ id, text }) => ({ id, text }))).toEqual(
       sentences.map(({ id, text }) => ({ id, text })),
     )

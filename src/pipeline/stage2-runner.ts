@@ -7,12 +7,14 @@ import {
 import type { Node, Sentence, Video } from '@/models/types'
 import { estimateStage2SentenceTokens } from '@/pipeline/long-video'
 import {
-  parseStage2BlockOutput, validateStage2BlockOutput,
+  normalizeStage2BlockOutputCandidate, parseStage2BlockOutput, validateStage2BlockOutput,
   type Stage2BlockOutput, type Stage2InputBlock,
 } from '@/pipeline/stage2-contract'
 
-const DEFAULT_MAX_BLOCK_TOKENS = 2_000
+const DEFAULT_MAX_BLOCK_TOKENS = 4_000
 const MAX_ATTEMPTS = 3
+const RETRY_BASE_DELAY_MS = 500
+const RETRY_MAX_DELAY_MS = 5_000
 const QWEN_MODEL = 'qwen3.5-omni-flash'
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 
@@ -21,9 +23,8 @@ The exact object keys are blockId, nodes, coveredSentenceIds. Each node contains
 kind, title, optional paragraph type, startSentenceId and endSentenceId. Preserve immutable sentence IDs.
 Every sentence must be covered exactly once. Node IDs must begin with the supplied blockId followed by :node:.`
 
-const MERGE_SYSTEM_PROMPT = `Merge the supplied compact outlines as JSON metadata only. Do not invent transcript text.
-Return the exact Stage2BlockOutput contract: blockId, nodes, coveredSentenceIds. Preserve exact coverage
-of every supplied sentence ID once, and scope every node ID as blockId:node:.`
+
+
 
 export type Stage2ModelCaller = (
   prompt: string,
@@ -106,6 +107,33 @@ export function buildMergeBlockId(videoId: string, sentences: readonly Sentence[
   return `stage2-merge:${encodeURIComponent(videoId)}:${stableHash(sentenceIdentity(videoId, sentences))}`
 }
 
+function retryDelayMs(attempt: number): number {
+  const base = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1))
+  const jitter = Math.floor(base * 0.2 * Math.random())
+  return base + jitter
+}
+
+async function waitBeforeRetry(attempt: number, signal?: AbortSignal): Promise<void> {
+  const delayMs = retryDelayMs(attempt)
+  if (delayMs <= 0) return
+  if (signal?.aborted) throw new DOMException('Stage2 cancelled', 'AbortError')
+  await new Promise<void>((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const cleanup = (): void => {
+      if (timeout !== undefined) clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+    }
+    const onAbort = (): void => {
+      cleanup()
+      reject(new DOMException('Stage2 cancelled', 'AbortError'))
+    }
+    timeout = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, delayMs)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Stage2 cancelled', 'AbortError')
 }
@@ -132,8 +160,9 @@ async function requestValidatedOutput(
     try {
       const value = await caller(prompt, payload, settings, signal)
       throwIfAborted(signal)
-      const validationErrors = validateStage2BlockOutput(block, value, existingNodeIds)
-      const parsed = parseStage2BlockOutput(value)
+      const normalized = normalizeStage2BlockOutputCandidate(value, block)
+      const validationErrors = validateStage2BlockOutput(block, normalized, existingNodeIds)
+      const parsed = parseStage2BlockOutput(normalized)
       if (parsed && validationErrors.length === 0) return parsed
       lastValidationErrors = validationErrors
       lastError = undefined
@@ -142,6 +171,9 @@ async function requestValidatedOutput(
       if (error instanceof LlmHttpError && !error.retryable) throw error
       lastValidationErrors = []
       lastError = error
+      if (error instanceof LlmHttpError && error.retryable && attempt < MAX_ATTEMPTS) {
+        await waitBeforeRetry(attempt, signal)
+      }
     }
   }
   if (lastValidationErrors.length > 0) {
@@ -169,6 +201,63 @@ function checkpointOutputs(value: unknown): Stage2BlockOutput[] {
   return Array.isArray(value)
     ? value.filter((item): item is Stage2BlockOutput => parseStage2BlockOutput(item) !== null)
     : []
+}
+
+function deterministicMergeOutputs(
+  videoId: string,
+  originalSentences: readonly Sentence[],
+  outputs: readonly Stage2BlockOutput[],
+): Stage2BlockOutput {
+  const blockId = buildMergeBlockId(videoId, originalSentences)
+  const sentenceIndex = new Map(originalSentences.map((sentence, index) => [sentence.id, index]))
+  const first = originalSentences[0].id
+  const last = originalSentences.at(-1)!.id
+  const nodes: Stage2BlockOutput['nodes'] = []
+  const rootId = `${blockId}:node:chapter`
+  nodes.push({
+    id: rootId,
+    parentId: null,
+    kind: 'chapter',
+    title: 'Imported lecture',
+    startSentenceId: first,
+    endSentenceId: last,
+  })
+
+  outputs.forEach((output, blockIndex) => {
+    const orderedParagraphs = output.nodes
+      .filter((node) => node.kind === 'paragraph')
+      .sort((left, right) => (sentenceIndex.get(left.startSentenceId) ?? 0) - (sentenceIndex.get(right.startSentenceId) ?? 0))
+    if (orderedParagraphs.length === 0) return
+    const sourceHeading = output.nodes.find((node) => node.kind === 'section')
+      ?? output.nodes.find((node) => node.kind === 'chapter')
+      ?? orderedParagraphs[0]
+    const sectionId = `${blockId}:node:block-${blockIndex + 1}-section`
+    nodes.push({
+      id: sectionId,
+      parentId: rootId,
+      kind: 'section',
+      title: sourceHeading.title,
+      startSentenceId: orderedParagraphs[0].startSentenceId,
+      endSentenceId: orderedParagraphs.at(-1)!.endSentenceId,
+    })
+    orderedParagraphs.forEach((paragraph, paragraphIndex) => {
+      nodes.push({
+        id: `${blockId}:node:block-${blockIndex + 1}-paragraph-${paragraphIndex + 1}`,
+        parentId: sectionId,
+        kind: 'paragraph',
+        title: paragraph.title,
+        type: paragraph.type,
+        startSentenceId: paragraph.startSentenceId,
+        endSentenceId: paragraph.endSentenceId,
+      })
+    })
+  })
+
+  return {
+    blockId,
+    nodes,
+    coveredSentenceIds: originalSentences.map((sentence) => sentence.id),
+  }
 }
 
 function toEntities(
@@ -257,31 +346,9 @@ export async function runStage2Stage(input: RunStage2StageInput): Promise<RunSta
     })
   }
 
-  let finalOutput = outputs[0]
-  if (outputs.length > 1) {
-    const mergeBlock: Stage2InputBlock = {
-      blockId: buildMergeBlockId(input.video.id, input.sentences),
-      videoId: input.video.id,
-      sentences: input.sentences,
-    }
-    const compactPayload = JSON.stringify({
-      blockId: mergeBlock.blockId,
-      blocks: outputs.map((output) => ({
-        blockId: output.blockId,
-        nodes: output.nodes,
-        coveredSentenceIds: output.coveredSentenceIds,
-      })),
-    })
-    finalOutput = await requestValidatedOutput(
-      input.callMerge ?? callStage2,
-      MERGE_SYSTEM_PROMPT,
-      compactPayload,
-      input.settings,
-      input.signal,
-      mergeBlock,
-      new Set(),
-    )
-  }
+  const finalOutput = outputs.length > 1
+    ? deterministicMergeOutputs(input.video.id, input.sentences, outputs)
+    : outputs[0]
   const finalBlock: Stage2InputBlock = {
     blockId: finalOutput.blockId,
     videoId: input.video.id,
