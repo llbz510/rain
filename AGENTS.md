@@ -2,6 +2,20 @@
 
 > 新会话/新 AI 开发者读本文件即可了解环境与构建命令。
 
+## 新会话必读：当前项目状态
+
+任何新 AI / 开发者进入本项目后，必须先读 `docs/PROJECT_STATE.md`，再相信 PRD、旧计划、旧截图或旧 evidence。
+
+`docs/PROJECT_STATE.md` 是当前项目事实来源，记录：
+
+- 当前可验证状态；
+- 文件/目录作用；
+- 已知缺陷；
+- 最近会话改动；
+- 每轮会话结束前必须同步更新的维护清单。
+
+如果本轮会话修改了项目文件，交付前必须同步更新 `docs/PROJECT_STATE.md`。
+
 ## 环境前置依赖
 
 本项目是 Tauri + React + TypeScript 桌面应用。Rust 后端依赖 whisper-rs（whisper.cpp 的 Rust binding），需要以下本机工具链：

@@ -4,3 +4,17 @@ dist
 *.tsbuildinfo
 .npm-cache/
 .worktrees/
+# Local agent / review scratch space. Never treat as project source of truth.
+.superpowers/
+
+# Local audit and build leftovers.
+.audit-*/
+*.log
+
+# Real E2E runs can produce many failed/partial attempts and SQLite runtime
+# sidecars. Keep curated evidence only by explicitly force-adding it.
+evidence/rain-real-e2e-*/
+evidence/whisper-direct-diagnostic/
+evidence/**/rain-e2e.db
+evidence/**/rain-e2e.db-shm
+evidence/**/rain-e2e.db-wal
