@@ -2,10 +2,10 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-22 22:18 +08:00
+Last updated: 2026-07-22 22:39 +08:00
 Current working branch used by Codex: `codex/rain-real-local-video`
-Latest local commit from this session: `a9c5c26 Make Rain real local video pipeline usable`
-Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist.
+Latest committed branch HEAD before this doc freshness correction: `3abc242 Document Rain project state and file hygiene`
+Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
 
@@ -33,7 +33,7 @@ Important evidence facts:
 - Qwen timing: 1061 seconds
 - Pipeline timing: 1475 seconds
 
-Fresh verification performed before commit `a9c5c26`:
+Fresh verification performed before repair commit `a9c5c26` (recorded from the repair session transcript; full test logs were not committed as separate artifacts):
 
 ```powershell
 npm.cmd test
@@ -86,6 +86,8 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 
 ## File-management rules
 
+Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for new local runs, but already tracked curated evidence remains tracked. If a new run becomes the canonical proof, explicitly force-add only the curated JSON/log/screenshot artifacts. SQLite sidecars (`rain-e2e.db`, `.db-wal`, `.db-shm`) and temporary folders are not part of the curated committed evidence set unless the user explicitly asks.
+
 - Keep source, tests, scripts, and curated docs tracked.
 - Keep generated build outputs, caches, failed evidence runs, SQLite sidecars, temporary agent notes, and local logs untracked/ignored.
 - If a future real E2E run is the new canonical proof, force-add only the minimal artifact set needed by `scripts/validate-evidence.ps1`; do not commit large `.db`, `.db-wal`, or `.db-shm` files unless the user explicitly asks.
@@ -102,6 +104,8 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 6. ASR output is readable Chinese and no longer mojibake, but recognition accuracy is not perfect. For example, lecture terms can still be misrecognized by Whisper.
 7. The final Stage2 merge is deterministic local merging rather than a final global Qwen merge. This avoids DashScope token/rate failures and keeps every sentence covered, but it may produce less globally polished chapter naming than a successful global model merge.
 8. Many root-level historical docs (`M*.md`, `PRD.md`, `HANDOFF.md`) make the root directory crowded and can mislead new agents if read as current truth without this state file.
+9. The real E2E script is intentionally bound to this local machine setup: fixed local video hash/path assumptions, DashScope Qwen config, and D-drive CUDA/Ninja tooling paths. Treat it as a local verification script, not a portable CI script.
+10. The main checkout at `D:\gongju\shengcan\rain` is still on `master` and may not include this branch's `.gitignore`/state-doc commits. File hygiene statements in this document apply to the `codex/rain-real-local-video` branch unless merged back.
 
 ## What changed in the 2026-07-18 to 2026-07-22 repair session
 
@@ -115,12 +119,21 @@ Committed in `a9c5c26 Make Rain real local video pipeline usable`:
 - Added real app E2E runner under `src/e2e/` and environment-backed Rust E2E config command.
 - Committed the curated successful evidence directory `evidence/rain-real-e2e-20260720-024848/`.
 
-Current unpushed state after that commit:
+Current branch state after the repair and file-hygiene commits:
 
-- Commit exists locally on `codex/rain-real-local-video`.
+- Commits `a9c5c26` and `3abc242` exist locally on `codex/rain-real-local-video`.
 - Push is blocked by missing remote.
 - Local untracked caches/failed evidence directories may exist but should now be ignored after the file-management cleanup.
 
+
+## What changed in the 2026-07-22 documentation freshness review
+
+A read-only subagent review and local cross-check found the state document was mostly accurate but stale about the latest commit. This section records the correction intent:
+
+- `3abc242` is the file hygiene commit after the real pipeline repair commit.
+- `a9c5c26` remains the latest verified real local-video pipeline repair commit.
+- Future sessions should use `git log -1 --oneline` for current HEAD because a document cannot reliably embed the hash of the same commit that changes it.
+- Test/build pass counts in this document are historical verification results from the repair session; the repository does not currently commit full stdout logs for those commands.
 
 ## What changed in the 2026-07-22 file-management cleanup
 
