@@ -7,6 +7,8 @@ export const TAURI_COMMANDS = [
   'start_import',
   'cancel_import',
   'check_ytdlp',
+  'check_ytdlp_command',
+  'get_runtime_capability',
   'probe_video_info',
   'generate_thumbnail',
   'start_asr',

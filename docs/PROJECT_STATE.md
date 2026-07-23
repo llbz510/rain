@@ -2,7 +2,7 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-23 21:26 +08:00
+Last updated: 2026-07-23 22:16 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
 Merged repair branch through commit: `7a9eeb1 Clarify Rain project state document freshness`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
@@ -71,6 +71,7 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 | `src/pipeline/` | Frontend pipeline orchestration for ASR and Stage2 structuring. | `stage2-runner.ts` owns Qwen block calls and deterministic merge. |
 | `src/llm/` | OpenAI-compatible LLM HTTP client. | Currently used for DashScope-compatible Qwen calls. |
 | `src/models/` | Frontend database and domain models. | Uses Tauri SQL plugin; this is why `sql:allow-execute` exists. |
+| `src/settings/` | Runtime model settings and readiness checks. | `preflight.ts` is the user-facing readiness check for local-video workflow prerequisites. |
 | `src/e2e/` | Real app automation helper for evidence generation. | Guarded by runtime environment; not normal user workflow code. |
 | `src/__tests__/` | Product/unit/regression tests owned by implementation. | Can be modified when implementing features. |
 | `harness/` | Locked frontend harness tests. | Do not modify unless user explicitly approves harness changes. |
@@ -189,6 +190,45 @@ Marked all files under `docs/superpowers/plans/` as historical plans/constructio
 - `docs/superpowers/plans/2026-07-18-rain-real-local-video-repair.md`
 
 No source code was changed. These docs remain useful as history, but current status must be verified from this file, current code, validation scripts, and committed evidence.
+
+## What changed in the 2026-07-23 preflight-readiness session
+
+Added a user-facing "运行前自检" panel to Settings so a non-code user can check whether Rain is ready to process a real local video before starting a long run.
+
+Implementation notes:
+
+- Added `src/settings/preflight.ts` as the single frontend module for readiness checks.
+- Added `PreflightPanel` to `src/ui/components/settings.tsx` and mounted it in the "模型管理" settings page.
+- Added the read-only Tauri command `get_runtime_capability` so the frontend can report whether the compiled Whisper backend is `cuda` or `cpu`.
+- Added tests in `src/__tests__/preflight.test.ts` and `src/__tests__/settings-preflight.test.tsx`.
+- Product decisions confirmed by the user:
+  - missing `yt-dlp` is a warning, not a blocker, because local-video import can still work;
+  - clicking "运行自检" may send one small real Qwen/DashScope health request when a Qwen key is configured.
+  - missing or misconfigured AI assistant model is a warning, not a blocker, because local-video import/ASR/structuring can still finish.
+
+Checks covered by the panel:
+
+- Tauri desktop runtime and compiled Whisper backend;
+- selected ASR/structuring roles;
+- selected assistant role is checked separately as non-blocking learning-feature readiness;
+- installed local Whisper model file;
+- exact DashScope Qwen runtime (`qwen3.5-omni-flash` at `https://dashscope.aliyuncs.com/compatible-mode/v1`);
+- SQLite settings write/delete;
+- `yt-dlp` availability for optional online-video import.
+
+Verification:
+
+```powershell
+npm.cmd test -- src/__tests__/preflight.test.ts src/__tests__/settings-preflight.test.tsx
+npx.cmd tsc --noEmit
+cargo.exe check --manifest-path src-tauri\Cargo.toml
+npm.cmd test
+npm.cmd run build
+cargo.exe test --manifest-path src-tauri\Cargo.toml --no-default-features
+cargo.exe test --manifest-path src-tauri\Cargo.toml --no-default-features --features cuda-whisper runtime::tests::capability_reports_compiled_backend_without_claiming_runtime_fallback
+```
+
+Observed result: targeted preflight tests passed; `npm test` passed 51 files / 423 tests with 1 live Qwen test skipped; frontend build passed with the existing Vite dynamic/static import chunking warnings; Rust tests passed with the existing locked-harness unused warnings. The CUDA runtime test passes when run with the same local CUDA/Ninja/MSVC environment setup used by `scripts/run-real-e2e.ps1`.
 
 ## Maintenance checklist for every future session
 

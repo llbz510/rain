@@ -48,6 +48,12 @@ pub async fn check_ytdlp_command() -> Result<ytdlp::YtdlpResult, String> {
     Ok(ytdlp::check_ytdlp())
 }
 
+/// 读取当前桌面运行能力（用于前端运行前自检）
+#[tauri::command]
+pub async fn get_runtime_capability() -> Result<crate::runtime::RuntimeCapability, String> {
+    Ok(crate::runtime::runtime_capability())
+}
+
 /// 探测视频信息（时长/缩略图等，决策96）
 #[tauri::command]
 pub async fn probe_video_info(

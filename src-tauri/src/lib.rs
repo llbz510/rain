@@ -23,6 +23,7 @@ pub fn run() {
             commands::start_import,
             commands::cancel_import,
             commands::check_ytdlp_command,
+            commands::get_runtime_capability,
             commands::probe_video_info,
             commands::generate_thumbnail,
             commands::start_asr,
