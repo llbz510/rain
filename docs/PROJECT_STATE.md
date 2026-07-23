@@ -2,9 +2,9 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-22 22:39 +08:00
-Current working branch used by Codex: `codex/rain-real-local-video`
-Latest committed branch HEAD before this doc freshness correction: `3abc242 Document Rain project state and file hygiene`
+Last updated: 2026-07-23 21:26 +08:00
+Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
+Merged repair branch through commit: `7a9eeb1 Clarify Rain project state document freshness`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -105,7 +105,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 7. The final Stage2 merge is deterministic local merging rather than a final global Qwen merge. This avoids DashScope token/rate failures and keeps every sentence covered, but it may produce less globally polished chapter naming than a successful global model merge.
 8. Many root-level historical docs (`M*.md`, `PRD.md`, `HANDOFF.md`) make the root directory crowded and can mislead new agents if read as current truth without this state file.
 9. The real E2E script is intentionally bound to this local machine setup: fixed local video hash/path assumptions, DashScope Qwen config, and D-drive CUDA/Ninja tooling paths. Treat it as a local verification script, not a portable CI script.
-10. The main checkout at `D:\gongju\shengcan\rain` is still on `master` and may not include this branch's `.gitignore`/state-doc commits. File hygiene statements in this document apply to the `codex/rain-real-local-video` branch unless merged back.
+10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 
 ## What changed in the 2026-07-18 to 2026-07-22 repair session
 
@@ -153,6 +153,29 @@ git status --short --ignored
 ```
 
 Observed result: `git diff --check` reported no whitespace errors; noisy failed evidence and local scratch directories are now shown as ignored (`!!`) instead of untracked (`??`).
+
+
+## What changed in the 2026-07-23 merge session
+
+The repair branch was merged back into the main checkout:
+
+- Source branch/worktree: `codex/rain-real-local-video` at `D:\gongju\shengcan\rain\.worktrees\codex\rain-real-local-video`.
+- Target checkout: `master` at `D:\gongju\shengcan\rain`.
+- Merge command used: `git merge --ff-only codex/rain-real-local-video`.
+- Result: fast-forward from `b86c011` to `7a9eeb1`, then this document was updated on `master` to record the merge.
+- No remote is configured, so the merged `master` state is still local-only until a remote is added.
+
+Reason for merge: the old `master` pipeline still passed `modelPath: null`, swallowed ASR/LLM failures, and generated demo/default data. The merged branch contains the fail-closed ASR/Stage2 pipeline and real local-video evidence.
+
+Post-merge verification in `D:\gongju\shengcan\rain`:
+
+```powershell
+Select-String -Path src\pipeline\pipeline-orchestrator.ts -Pattern 'modelPath: null|generateDemoSentences|buildDefaultStructure|LLM not available|Whisper not available'
+powershell.exe -ExecutionPolicy Bypass -File scripts\validate-evidence.ps1 -EvidenceManifest evidence\rain-real-e2e-20260720-024848\manifest.json -ExpectedWhisperBackend cuda
+npm.cmd test -- src/__tests__/pipeline-asr.test.ts
+```
+
+Observed result: the old fallback patterns were absent; evidence validator returned `ok: true` with backend `cuda`; `pipeline-asr.test.ts` passed 37 tests.
 
 ## Maintenance checklist for every future session
 
