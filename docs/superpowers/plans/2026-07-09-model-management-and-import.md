@@ -1,5 +1,9 @@
 # 模型管理 + 视频导入 实现计划
 
+> **历史计划/施工图（非当前项目状态）**
+>
+> 本文是早期实施计划，不是当前进度表。不要根据本文里的未勾选 checkbox、测试数量、代码片段、commit 建议来判断 Rain 当前状态。当前真相以 `docs/PROJECT_STATE.md`、当前代码、验证脚本和已提交 evidence 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 Rain 设置页从静态占位改为可交互的模型管理页面（对齐 PRD 决策82 + prototype/m19-settings-mockup.html），并实现视频导入入口（本地文件 + 在线 URL）。

@@ -1,5 +1,9 @@
 # Harness 覆盖缺口补齐 Implementation Plan
 
+> **历史计划/施工图（非当前项目状态）**
+>
+> 本文是早期实施计划，不是当前进度表。不要根据本文里的未勾选 checkbox、测试数量、代码片段、commit 建议来判断 Rain 当前状态。当前真相以 `docs/PROJECT_STATE.md`、当前代码、验证脚本和已提交 evidence 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 新增 3 个 harness 文件 + 1 个源码桩，把 5 个无测覆盖区域补上契约测试，从 281 条升至约 304 条全绿。

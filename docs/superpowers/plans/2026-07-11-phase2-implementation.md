@@ -1,5 +1,9 @@
 # 阶段二：实现补齐 + E2E 测试 Implementation Plan
 
+> **历史计划/施工图（非当前项目状态）**
+>
+> 本文是早期实施计划，不是当前进度表。不要根据本文里的未勾选 checkbox、测试数量、代码片段、commit 建议来判断 Rain 当前状态。当前真相以 `docs/PROJECT_STATE.md`、当前代码、验证脚本和已提交 evidence 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 3 个空壳实现补齐（progress-listener、thumbnail 调用），并用 Tauri mock_builder 跑端到端集成测试。

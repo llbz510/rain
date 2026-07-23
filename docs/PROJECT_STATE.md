@@ -79,7 +79,7 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 | `scripts/` | Project automation scripts. | `run-real-e2e.ps1` runs real workflow; `validate-evidence.ps1` validates evidence. |
 | `evidence/` | Curated proof artifacts only. | Failed/partial E2E runs are ignored by `.gitignore`; force-add only intentionally curated evidence. |
 | `docs/` | Long-lived project docs, plans, specs, and this state document. | `docs/PROJECT_STATE.md` must be updated after every session that changes the project. |
-| `docs/superpowers/` | Superpowers specs/plans used by prior agent work. | Helpful history, not automatically current truth. |
+| `docs/superpowers/` | Superpowers specs/plans used by prior agent work. | Historical plans/construction docs, not automatically current truth; plan checkboxes and old test counts are not progress evidence. |
 | `prototype/` | Mockups and early prototypes. | Do not treat as runtime source. |
 | `test-fixtures/` | Small test media fixtures. | `test-fixtures/sample.mp4` is intentionally tracked. |
 | root `M*.md`, `PRD.md`, `HANDOFF.md` | Original requirements and historical handoff docs. | Useful context but may be stale; prefer this file for current state. |
@@ -176,6 +176,19 @@ npm.cmd test -- src/__tests__/pipeline-asr.test.ts
 ```
 
 Observed result: the old fallback patterns were absent; evidence validator returned `ok: true` with backend `cuda`; `pipeline-asr.test.ts` passed 37 tests.
+
+## What changed in the 2026-07-23 historical-plan marking session
+
+Marked all files under `docs/superpowers/plans/` as historical plans/construction docs so future sessions do not mistake old implementation checklists for current project status:
+
+- `docs/superpowers/plans/2025-07-14-mvp-bug-fixes.md`
+- `docs/superpowers/plans/remaining-landing-plan.md`
+- `docs/superpowers/plans/2026-07-09-model-management-and-import.md`
+- `docs/superpowers/plans/2026-07-11-harness-coverage-gaps.md`
+- `docs/superpowers/plans/2026-07-11-phase2-implementation.md`
+- `docs/superpowers/plans/2026-07-18-rain-real-local-video-repair.md`
+
+No source code was changed. These docs remain useful as history, but current status must be verified from this file, current code, validation scripts, and committed evidence.
 
 ## Maintenance checklist for every future session
 

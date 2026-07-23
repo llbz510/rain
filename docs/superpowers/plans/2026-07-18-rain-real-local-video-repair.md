@@ -1,5 +1,9 @@
 # Rain 本地视频真实可用修复 Implementation Plan
 
+> **历史计划/施工图（非当前项目状态）**
+>
+> 本文是 2026-07-18 真实本地视频修复的实施计划，方向最接近当前修复成果，但仍不是当前完成记录。不要根据本文里的未勾选 checkbox、测试数量、分支状态或代码片段判断 Rain 当前状态。当前真相以 `docs/PROJECT_STATE.md`、当前代码、验证脚本和已提交 evidence 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 用指定本地 MP4 完成真实 Whisper 转录、Qwen 结构化、学习播放和 AI 助手闭环，并生成完整脱敏证据。
