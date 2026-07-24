@@ -2,9 +2,9 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-24 22:10 +08:00
+Last updated: 2026-07-24 22:22 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current HEAD observed in latest session: `e52baf1 feat: add runtime preflight checks`
+Current HEAD observed in latest session: `ee76cca test: harden evidence mojibake checks`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -108,6 +108,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 9. The real E2E script is intentionally bound to this local machine setup: fixed local video hash/path assumptions, DashScope Qwen config, and D-drive CUDA/Ninja tooling paths. Treat it as a local verification script, not a portable CI script.
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
+12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
 
 ## What changed in the 2026-07-18 to 2026-07-22 repair session
 
