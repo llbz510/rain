@@ -27,7 +27,10 @@ function configureQwenStudy() {
     modelPool: [{ id: 'qwen', alias: 'Qwen', type: 'llm', provider: 'dashscope', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-test-secret', modelName: 'qwen3.5-omni-flash', supportsVision: true }],
     roleAssignment: { asr: null, structuring: 'qwen', assistant: 'qwen' },
     nodeTree: [{ id: 'p', videoId: 'v', parentId: null, kind: 'paragraph', title: 'P', type: 'concept', startTime: 0, endTime: 10, text: null, sortOrder: 0 }],
-    sentences: [{ id: 's', nodeId: 'p', text: 'Current transcript.', startTime: 0, endTime: 4, sortOrder: 0 }],
+    sentences: [
+      { id: 's', nodeId: 'p', text: 'Current transcript.', startTime: 0, endTime: 4, sortOrder: 0 },
+      { id: 's-later', nodeId: 'p', text: 'Later sentence in the same paragraph.', startTime: 8, endTime: 9, sortOrder: 1 },
+    ],
   })
 }
 
@@ -76,6 +79,27 @@ describe('real study playback', () => {
 
     expect(cleanupStream).toHaveBeenCalledOnce()
     expect(screen.queryByText('late token')).not.toBeInTheDocument()
+  })
+
+  it('shows current paragraph quick actions and sends one with paragraph-scoped context', () => {
+    let sentMessages: Array<{ role: string; content: string }> = []
+    streamAiChat.mockImplementation((messages, _settings, callbacks) => {
+      sentMessages = messages
+      callbacks.onToken('ok')
+      callbacks.onDone()
+      return vi.fn()
+    })
+    configureQwenStudy()
+
+    render(<StudyInterface />)
+    const quickAction = screen.getByRole('button', { name: '生成例子' })
+    fireEvent.click(quickAction)
+
+    expect(quickAction).toBeInTheDocument()
+    expect(sentMessages.at(-1)).toEqual({ role: 'user', content: '生成例子' })
+    expect(sentMessages[0].content).toContain('Current paragraph transcript:')
+    expect(sentMessages[0].content).toContain('Current transcript.')
+    expect(sentMessages[0].content).toContain('Later sentence in the same paragraph.')
   })
 
   it('renders inline known citations as seek controls while leaving unknown citations visible as text', () => {

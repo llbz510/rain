@@ -1,11 +1,11 @@
 import React, { useState } from 'react'
-import { getQuickActionsForType } from '@/ai/assistant'
+import { getQuickActionsForType, type QuickAction } from '@/ai/assistant'
 import type { AssistantSource } from '@/ai/assistant-context'
 import type { ParagraphType } from '@/models/types'
 
-interface QuickActionsProps { paragraphType: ParagraphType }
-export function QuickActions({ paragraphType }: QuickActionsProps) {
-  return <div data-testid="quick-actions">{getQuickActionsForType(paragraphType).map((action) => <button key={action.id}>{action.label}</button>)}</div>
+interface QuickActionsProps { paragraphType: ParagraphType; onAction?: (action: QuickAction) => void }
+export function QuickActions({ paragraphType, onAction }: QuickActionsProps) {
+  return <div data-testid="quick-actions">{getQuickActionsForType(paragraphType).map((action) => <button key={action.id} type="button" onClick={() => onAction?.(action)}>{action.label}</button>)}</div>
 }
 
 interface ChatMessage {

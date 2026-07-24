@@ -2,9 +2,9 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-24 22:22 +08:00
+Last updated: 2026-07-24 22:30 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current HEAD observed in latest session: `ee76cca test: harden evidence mojibake checks`
+Recent baseline commit before the assistant quick-actions slice: `c1ba250 docs: refresh project state after evidence hardening`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -275,6 +275,28 @@ powershell.exe -ExecutionPolicy Bypass -File scripts\validate-evidence.ps1 -Evid
 ```
 
 Observed result: the targeted Vitest file passed 11 tests; both real evidence manifests passed with `ok: true`, backend `cuda`, Qwen model `qwen3.5-omni-flash`, 1953 sentences, and 12 Qwen blocks.
+
+## What changed in the 2026-07-24 assistant quick-actions session
+
+Implemented the first AI-assistant usability slice after the real local-video pipeline was proven usable:
+
+- Mounted current paragraph type quick actions in the StudyInterface right-side AI panel.
+- Clicking a quick action now sends that action label as the user message through the same real Qwen assistant path as typed chat.
+- Added a `paragraph` assistant-context scope so quick actions send the full current paragraph transcript instead of only the nearby sentence window. This reduces answer bias for actions such as "生成例子" or "变详细".
+- Kept free-form chat on the existing nearby/current-context behavior plus deterministic cross-chapter retrieval for comparison/navigation questions.
+- Deliberately did not implement the universal "解释画面" vision action in this slice; it requires a separate decision/implementation for capturing and sending the current video frame.
+
+Verification performed during this session:
+
+```powershell
+npm.cmd test -- src/__tests__/study-playback.test.tsx src/__tests__/assistant-context.test.ts
+npx.cmd tsc --noEmit
+npm.cmd test -- harness/m10-ai-assistant.test.ts harness/m10-ai-component.test.tsx src/__tests__/study-playback.test.tsx src/__tests__/assistant-context.test.ts
+npm.cmd test
+npm.cmd run build
+```
+
+Observed result: targeted study/assistant tests passed 17 tests; TypeScript check passed; related M10 harness + implementation tests passed 33 tests; full frontend test suite passed 51 files / 426 tests with 1 live Qwen test skipped; frontend build passed with the existing Vite dynamic/static import chunking warnings.
 
 ## Maintenance checklist for every future session
 

@@ -16,9 +16,10 @@ import { SideTree, CatalogBar, DiagramZone } from '@/ui/components/catalog'
 import { VideoZone, VideoControls } from '@/ui/components/video'
 import { TextZone } from '@/ui/components/text-zone'
 import { NotesPanel } from '@/ui/components/notes'
-import { AiAssistant, ChatInput } from '@/ui/components/ai-assistant'
+import { AiAssistant, ChatInput, QuickActions } from '@/ui/components/ai-assistant'
 import { redactSecret, streamAiChat } from '@/llm/client'
 import { buildAssistantContext, type AssistantSource } from '@/ai/assistant-context'
+import type { Node, ParagraphType, Sentence } from '@/models/types'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -140,6 +141,11 @@ const tabContentStyle: React.CSSProperties = {
   flexDirection: 'column',
 }
 
+const quickActionsStyle: React.CSSProperties = {
+  flex: '0 0 auto',
+  marginBottom: 'var(--spacing-3)',
+}
+
 const controlBarStyle: React.CSSProperties = {
   gridColumn: '1 / -1',
   gridRow: '3',
@@ -153,6 +159,20 @@ const controlBarStyle: React.CSSProperties = {
   overflow: 'hidden',
 }
 
+function currentSentence(sentences: Sentence[], position: number): Sentence | undefined {
+  return sentences.find((sentence) => sentence.startTime <= position && position < sentence.endTime)
+    ?? [...sentences].sort((left, right) => Math.abs(left.startTime - position) - Math.abs(right.startTime - position))[0]
+}
+
+function currentParagraphType(nodes: Node[], sentences: Sentence[], playPosition: number, selectedNodeId: string | null): ParagraphType | null {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  const selected = selectedNodeId ? nodesById.get(selectedNodeId) : null
+  if (selected?.kind === 'paragraph') return selected.type
+  const active = currentSentence([...sentences].sort((left, right) => left.sortOrder - right.sortOrder), playPosition)
+  const activeNode = active ? nodesById.get(active.nodeId) : null
+  return activeNode?.kind === 'paragraph' ? activeNode.type : null
+}
+
 export function StudyInterface() {
   const layoutMode = useRainStore((s) => s.layoutMode)
   const aiPanelState = useRainStore((s) => s.aiPanelState)
@@ -160,6 +180,9 @@ export function StudyInterface() {
   const unloadVideo = useRainStore((s) => s.unloadVideo)
   const filePath = useRainStore((s) => s.currentVideoFilePath)
   const videoTitle = useRainStore((s) => s.currentVideoTitle)
+  const selectedNodeId = useRainStore((s) => s.selectedNodeId)
+  const nodeTree = useRainStore((s) => s.nodeTree)
+  const sentences = useRainStore((s) => s.sentences)
 
   // AI chat state
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; sources?: AssistantSource[] }>>([])
@@ -178,7 +201,7 @@ export function StudyInterface() {
     setIsStreaming(false)
   }, [])
 
-  const handleSendMessage = useCallback((text: string) => {
+  const handleSendMessage = useCallback((text: string, scope: 'nearby' | 'paragraph' = 'nearby') => {
     const store = useRainStore.getState()
     const assistantModel = store.modelPool.find((model) => model.id === store.roleAssignment.assistant)
     const exactBaseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
@@ -191,7 +214,7 @@ export function StudyInterface() {
     cleanupRef.current = null
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
-    const context = buildAssistantContext({ nodes: store.nodeTree, sentences: store.sentences, playPosition: store.playPosition, question: text, history: chatMessages })
+    const context = buildAssistantContext({ nodes: store.nodeTree, sentences: store.sentences, playPosition: store.playPosition, question: text, history: chatMessages, scope })
     const settings = { baseUrl: exactBaseUrl, apiKey: assistantModel.apiKey, model: exactModel }
     let active = true
     let currentContent = ''
@@ -232,6 +255,8 @@ export function StudyInterface() {
   const setAiPanel = (panel: 'ai' | 'notes') => {
     useRainStore.setState({ aiPanelState: panel })
   }
+
+  const quickParagraphType = currentParagraphType(nodeTree, sentences, playPosition, selectedNodeId)
 
   // 控制栏隐藏时第 3 行塌缩为 0，避免浪费垂直空间
   const gridTemplateRows = `var(--height-topbar) 1fr ${
@@ -310,6 +335,7 @@ export function StudyInterface() {
           <div style={tabContentStyle}>
             {aiPanelState === 'ai' ? (
               <>
+                {quickParagraphType && <div style={quickActionsStyle}><QuickActions paragraphType={quickParagraphType} onAction={(action) => handleSendMessage(action.label, 'paragraph')} /></div>}
                 <AiAssistant messages={chatMessages} isStreaming={isStreaming} onStop={handleStopMessage} onSeekSource={handleSeek} />
                 <ChatInput onSend={handleSendMessage} />
               </>

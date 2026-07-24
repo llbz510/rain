@@ -15,6 +15,7 @@ export interface AssistantContextInput {
   playPosition: number
   question: string
   history: Array<Pick<ChatMessage, 'role' | 'content'>>
+  scope?: 'nearby' | 'paragraph'
 }
 
 export interface AssistantContext {
@@ -80,9 +81,13 @@ export function buildAssistantContext(input: AssistantContextInput): AssistantCo
   const nodesById = new Map(input.nodes.map((node) => [node.id, node]))
   const activeChapterId = chapterIdFor(active.nodeId, nodesById)
   const activeIndex = ordered.findIndex((sentence) => sentence.id === active.id)
+  const paragraphSentences = ordered.filter((sentence) => sentence.nodeId === active.nodeId)
   const nearby = ordered.slice(Math.max(0, activeIndex - NEARBY_SENTENCE_LIMIT), activeIndex + NEARBY_SENTENCE_LIMIT + 1)
     .filter((sentence) => sentence.nodeId === active.nodeId)
-  const sources = nearby.length > 0 ? nearby : [active]
+  const scopeLabel = input.scope === 'paragraph' ? 'Current paragraph transcript:' : 'Nearby transcript:'
+  const sources = input.scope === 'paragraph'
+    ? (paragraphSentences.length > 0 ? paragraphSentences : [active])
+    : (nearby.length > 0 ? nearby : [active])
 
   if (CROSS_CHAPTER_QUERY.test(input.question)) {
     const terms = queryTerms(input.question)
@@ -108,7 +113,7 @@ export function buildAssistantContext(input: AssistantContextInput): AssistantCo
       `Current sentence: sentence:${active.id} @ ${active.startTime.toFixed(3)}-${active.endTime.toFixed(3)}.`,
       `Current paragraph: ${currentParagraph?.title ?? active.nodeId} (node:${active.nodeId}).`,
       'Cite factual claims using the exact format [sentence:<id> @ <start>-<end>]. Do not invent source IDs or timestamps.',
-      'Nearby transcript:',
+      scopeLabel,
       ...sourceLines,
     ].join('\n') + crossChapterSection,
     history: input.history.slice(-RECENT_HISTORY_LIMIT),
