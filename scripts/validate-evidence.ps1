@@ -38,12 +38,13 @@ function Assert-PositiveNumber($Value, [string]$Message) {
 }
 
 function Assert-NoMojibake([string]$Text, [string]$Message) {
-  if ($Text -match '(\uFFFD|\u951f\u65a4\u62f7)') { throw $Message }
+  if ($Text -match '(\uFFFD|\u951f\u65a4\u62f7|\p{Co}|銆愬|涓|鎶€|淇″|鍙婂|鏀惧|杩欎|绔犲|疄闄|笂鏄|妯″|绠＄)') { throw $Message }
 }
 
 function Assert-VideoProof($Video) {
   Require-Value $Video.path 'missing video.path'
   Require-Value $Video.sha256 'missing video.sha256'
+  Assert-NoMojibake ([string]$Video.path) 'mojibake video path detected'
   if (-not (Test-Path -LiteralPath ([string]$Video.path))) { throw "video path not found: $($Video.path)" }
   $actual = (Get-FileHash -LiteralPath ([string]$Video.path) -Algorithm SHA256).Hash.ToUpperInvariant()
   if ([string]$Video.sha256 -ne $actual) { throw "manifest video hash does not match file: manifest=$($Video.sha256) actual=$actual" }

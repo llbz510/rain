@@ -132,6 +132,33 @@ describe('evidence validator', () => {
     expect(() => runValidator(manifestPath)).toThrow(/mojibake/i)
   })
 
+  it('accepts strict JSON evidence with a Chinese Windows-style video path segment', () => {
+    const manifestPath = createEvidence({}, true)
+    const dir = dirname(manifestPath)
+    const videoPath = join(dir, '【华中科技大学】电子技术基础', '1.2.1 信号及其放大.mp4')
+    mkdirSync(dirname(videoPath), { recursive: true })
+    writeFileSync(videoPath, videoBytes)
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    manifest.video.path = videoPath
+    writeJson(manifestPath, manifest)
+
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8')).video.path).toContain('信号及其放大')
+    expect(() => runValidator(manifestPath)).not.toThrow()
+  })
+
+  it('rejects mojibake video paths even when the referenced file exists', () => {
+    const manifestPath = createEvidence({}, true)
+    const dir = dirname(manifestPath)
+    const videoPath = join(dir, '銆愬崕涓鎶€澶у銆戠數瀛愭妧鏈熀纭€', '1.2.1 淇″彿鍙婂叾鏀惧ぇ.mp4')
+    mkdirSync(dirname(videoPath), { recursive: true })
+    writeFileSync(videoPath, videoBytes)
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    manifest.video.path = videoPath
+    writeJson(manifestPath, manifest)
+
+    expect(() => runValidator(manifestPath)).toThrow(/mojibake/i)
+  })
+
   it('rejects cancellation and restart claims that do not point to proof artifacts', () => {
     const manifestPath = createEvidence({
       cancellation: { result: 'passed', evidence: 'covered by unit tests' },

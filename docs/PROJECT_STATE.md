@@ -2,9 +2,9 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-23 22:16 +08:00
+Last updated: 2026-07-24 22:10 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Merged repair branch through commit: `7a9eeb1 Clarify Rain project state document freshness`
+Current HEAD observed in latest session: `e52baf1 feat: add runtime preflight checks`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -107,6 +107,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 8. Many root-level historical docs (`M*.md`, `PRD.md`, `HANDOFF.md`) make the root directory crowded and can mislead new agents if read as current truth without this state file.
 9. The real E2E script is intentionally bound to this local machine setup: fixed local video hash/path assumptions, DashScope Qwen config, and D-drive CUDA/Ninja tooling paths. Treat it as a local verification script, not a portable CI script.
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
+11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 
 ## What changed in the 2026-07-18 to 2026-07-22 repair session
 
@@ -229,6 +230,50 @@ cargo.exe test --manifest-path src-tauri\Cargo.toml --no-default-features --feat
 ```
 
 Observed result: targeted preflight tests passed; `npm test` passed 51 files / 423 tests with 1 live Qwen test skipped; frontend build passed with the existing Vite dynamic/static import chunking warnings; Rust tests passed with the existing locked-harness unused warnings. The CUDA runtime test passes when run with the same local CUDA/Ninja/MSVC environment setup used by `scripts/run-real-e2e.ps1`.
+
+## What changed in the 2026-07-24 real E2E validation session
+
+Ran the current local-video workflow again against the user-specified lecture video using CUDA Whisper and DashScope-compatible Qwen.
+
+Local evidence directory:
+
+`evidence/rain-real-e2e-20260724-212453/`
+
+Observed evidence facts:
+
+- Video SHA256 matched the expected real lecture input: `3870B5BD62E574685AC99A8E44295F5E44AC44B76343666742C1C4CA48365F8A`.
+- Whisper backend was `cuda`; runtime log contains `use gpu = 1`, `NVIDIA GeForce RTX 5060 Ti`, and `using CUDA0 backend`.
+- Qwen runtime was `qwen3.5-omni-flash` at `https://dashscope.aliyuncs.com/compatible-mode/v1`.
+- Database finished with status/stage `ready` / `ready`.
+- ASR produced 1953 real transcript sentences.
+- Stage2 produced 12 Qwen blocks and 176 persisted structure nodes.
+- Cancellation proof passed, then retry/restart proof passed through final `import_complete`.
+- Screenshot artifact was generated at `screenshots/study-ready.png` with PNG dimensions 1280x800.
+- `scripts\validate-evidence.ps1 -ExpectedWhisperBackend cuda` returned `ok: true`.
+
+Important caveat from this run:
+
+- `transcript.json`, `qwen-blocks.json`, `database-summary.json`, `cancellation-proof.json`, `restart-proof.json`, and `app-events.json` are strict JSON-readable.
+- `manifest.json` from this run was also checked with Python strict JSON parsing and contains the readable Chinese video path and manual review samples. A prior PowerShell-to-Python pipeline parse failure was a shell/pipe false positive, not file corruption.
+- The generated evidence directory was local runtime output and was not committed in this session.
+
+## What changed in the 2026-07-24 evidence-validator hardening session
+
+After the successful real E2E run, tightened the evidence validator around mojibake handling:
+
+- Added regression coverage that accepts strict JSON evidence with a normal Chinese Windows-style video path segment.
+- Added regression coverage that rejects a mojibake video path even when the referenced file exists and has the expected hash.
+- Updated `scripts\validate-evidence.ps1` so `manifest.video.path` is checked with the same mojibake guard already used for transcript/manual review text.
+
+Verification:
+
+```powershell
+npm.cmd test -- scripts/validate-evidence.test.ts
+powershell.exe -ExecutionPolicy Bypass -File scripts\validate-evidence.ps1 -EvidenceManifest evidence\rain-real-e2e-20260720-024848\manifest.json -ExpectedWhisperBackend cuda
+powershell.exe -ExecutionPolicy Bypass -File scripts\validate-evidence.ps1 -EvidenceManifest evidence\rain-real-e2e-20260724-212453\manifest.json -ExpectedWhisperBackend cuda
+```
+
+Observed result: the targeted Vitest file passed 11 tests; both real evidence manifests passed with `ok: true`, backend `cuda`, Qwen model `qwen3.5-omni-flash`, 1953 sentences, and 12 Qwen blocks.
 
 ## Maintenance checklist for every future session
 
