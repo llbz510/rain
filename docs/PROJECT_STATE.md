@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the live-model configuration slice: `28e31ee refactor: define database adapter seam`
+Current working base before the database import-state slice: `2658e7e fix: align live model configuration`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active and checkpoint persistence has moved behind it. Most legacy CRUD and import functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
+17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint plus import-state persistence have moved behind it. Most legacy CRUD and atomic import functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
 
 ## What changed in the 2026-07-26 project-control baseline session
 
@@ -1060,6 +1060,29 @@ npx.cmd tsc --noEmit
 ```
 
 Observed result: 4 focused files / 21 tests passed, the single live-key test was skipped because no Key was present, and TypeScript passed. The full frontend suite passed 63 files / 394 tests with the same live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings; the canonical schema v2 CUDA evidence passed with `qwen3-omni-flash`; `git diff --check` reported no whitespace errors.
+
+## What changed in the 2026-07-27 database import-state slice
+
+Continued the database-control sequence after `2658e7e fix: align live model configuration`:
+
+- Added `src/models/database-import-state.ts` as the owner of guarded video import-state transitions and ASR recovery decisions.
+- Kept `transitionVideoImportState`, `determineRecoveryAction` and their types re-exported from `@/models/database`; Pipeline, pages and Harness callers did not learn an internal path.
+- Implemented both SQLite and memory behavior through the discriminated adapter seam. The moved memory behavior no longer uses the legacy `_getTable/_setTable` compatibility bridge.
+- Added `database-import-state.test.ts` to prove the SQLite adapter sends the exact Rust transition command and maps persisted sentence counts to `skip_asr` or `rerun_asr`.
+- Extended the internal-module boundary test so production callers outside `src/models/` cannot import the new module directly.
+- Reduced `database.ts` from about 898 to 848 lines. Atomic ASR save, sentence assignment and final import merge remain the next, higher-risk persistence slice.
+- This is a behavior-preserving refactor under `AC-LV-03`, `AC-LV-06`, `AC-LV-07` and `AC-LV-08`; it does not change their acceptance status.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/database-import-state.test.ts src/__tests__/database-boundary.test.ts src/__tests__/pipeline-asr.test.ts src/__tests__/pipeline-recovery.test.ts src/__tests__/database-recovery.test.ts src/__tests__/video-list-page-recovery.test.tsx harness/m03-video-import.test.ts harness/m15-settings-recovery.test.ts harness/m20-boundaries.test.ts
+npx.cmd tsc --noEmit
+cargo.exe test --manifest-path src-tauri/Cargo.toml --lib persistence
+```
+
+Observed result: the focused frontend set passed 9 files / 75 tests, TypeScript passed, and Rust persistence passed 7 tests. The full frontend suite passed 64 files / 397 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings; `git diff --check` reported no whitespace errors.
 
 ## Maintenance checklist for every future session
 

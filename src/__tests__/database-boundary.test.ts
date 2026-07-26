@@ -30,6 +30,7 @@ describe('database adapter seam', () => {
     const internalModuleNames = [
       'database-adapter',
       'database-checkpoints',
+      'database-import-state',
       'database-schema',
     ]
     const violations = sourceFiles(sourceRoot)

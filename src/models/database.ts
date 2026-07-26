@@ -6,7 +6,7 @@
 // 公开 API（Database 接口 + 所有导出函数签名）两种后端完全一致。
 // ========================================
 
-import type { Video, VideoStatus, Node, Sentence, Note } from './types'
+import type { Video, Node, Sentence, Note } from './types'
 import {
   isSqlDatabase,
   type Database,
@@ -25,6 +25,12 @@ import type TauriSqlPlugin from '@tauri-apps/plugin-sql'
 
 export type { Database } from './database-adapter'
 export { getImportCheckpoint, saveImportCheckpoint } from './database-checkpoints'
+export {
+  determineRecoveryAction,
+  transitionVideoImportState,
+  type ImportRecoveryAction,
+  type VideoImportState,
+} from './database-import-state'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）
@@ -449,39 +455,6 @@ export async function updateVideoStatus(db: Database, id: string, status: string
   memDb._setTable('video', table)
 }
 
-export interface VideoImportState {
-  status: VideoStatus
-  stage: Video['stage'] | null
-  errorMessage?: string | null
-}
-
-export async function transitionVideoImportState(
-  db: Database,
-  id: string,
-  expected: VideoImportState,
-  next: VideoImportState,
-): Promise<void> {
-  if (isTauriDb(db)) {
-    const { tauriInvoke } = await import('@/lib/tauri-env')
-    await tauriInvoke<void>('transition_video_import_state', {
-      videoId: id,
-      expected,
-      next,
-    })
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('video')
-  const row = table.find((candidate) => candidate.id === id)
-  const actualStage = row?.stage ?? null
-  if (!row || row.status !== expected.status || actualStage !== expected.stage) {
-    throw new Error(`Persisted import state changed for video "${id}"`)
-  }
-  row.status = next.status
-  row.stage = next.stage
-  row.error_message = next.errorMessage ?? null
-  memDb._setTable('video', table)
-}
 export async function listVideos(db: Database, sortBy: string = 'lastStudied'): Promise<Video[]> {
   if (isTauriDb(db)) {
     let sql = 'SELECT * FROM video'
@@ -658,29 +631,6 @@ export async function deleteVideoWithCascade(db: Database, videoId: string): Pro
   ))
 }
 
-export async function determineRecoveryAction(db: Database, videoId: string): Promise<'skip_asr' | 'rerun_asr'> {
-  if (isTauriDb(db)) {
-    const rows = await db.query<{ cnt: number }>(
-      'SELECT COUNT(*) as cnt FROM sentence WHERE node_id = $1 OR node_id IN (SELECT id FROM node WHERE video_id = $1)',
-      [videoId]
-    )
-    return rows[0]?.cnt > 0 ? 'skip_asr' : 'rerun_asr'
-  }
-  const memDb = db as unknown as MemoryDatabase
-
-  // 获取视频关联的 nodes
-  const nodeRows = memDb._getTable('node').filter(r => r.video_id === videoId)
-  const nodeIds = nodeRows.map(r => r.id)
-
-  // 检查是否有 sentences
-  const sentenceRows = memDb._getTable('sentence').filter(r => r.node_id === videoId || nodeIds.includes(r.node_id))
-
-  if (sentenceRows.length > 0) {
-    return 'skip_asr'
-  } else {
-    return 'rerun_asr'
-  }
-}
 export async function getSentencesByVideoId(db: Database, videoId: string): Promise<Sentence[]> {
   if (isTauriDb(db)) {
     const rows = await db.query<TableRow>(
