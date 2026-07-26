@@ -21,31 +21,51 @@ vi.mock('@/pipeline/progress-listener', () => ({
 import { VideoListPage } from '@/pages/VideoListPage'
 import { getDb, resetDb } from '@/models/db-singleton'
 import { listVideos } from '@/models/database'
+import { recordCapabilityCheck } from '@/settings/model-capabilities'
+import {
+  runtimeModelFromPoolEntry,
+  type ModelPoolEntry,
+} from '@/settings/model-pool'
 import { useRainStore } from '@/store/rain-store'
 
 function configureRunnableSettings(): void {
+  const modelPool: ModelPoolEntry[] = [
+    {
+      id: 'asr',
+      alias: 'Whisper',
+      type: 'whisper-local',
+      provider: 'local',
+      modelName: 'large-v3',
+      supportsVision: false,
+    },
+    {
+      id: 'qwen',
+      alias: 'Qwen',
+      type: 'llm',
+      provider: 'dashscope',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: 'test-key',
+      modelName: 'qwen3.5-omni-flash',
+      supportsVision: true,
+    },
+  ]
   useRainStore.setState({
     settingsReady: true,
     settingsError: null,
-    modelPool: [
-      {
-        id: 'asr',
-        alias: 'Whisper',
-        type: 'whisper-local',
-        provider: 'local',
-        modelName: 'large-v3',
-        supportsVision: false,
-      },
-      {
-        id: 'qwen',
-        alias: 'Qwen',
-        type: 'llm',
-        provider: 'dashscope',
-        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        apiKey: 'test-key',
-        modelName: 'qwen3.5-omni-flash',
-        supportsVision: true,
-      },
+    modelPool,
+    capabilityRecords: [
+      recordCapabilityCheck({
+        model: runtimeModelFromPoolEntry(modelPool[0]),
+        role: 'asr',
+        ok: true,
+        message: 'ASR probe passed',
+      }),
+      recordCapabilityCheck({
+        model: runtimeModelFromPoolEntry(modelPool[1]),
+        role: 'structuring',
+        ok: true,
+        message: 'Structuring probe passed',
+      }),
     ],
     roleAssignment: { asr: 'asr', structuring: 'qwen', assistant: 'qwen' },
     loadRuntimeSettings: async () => undefined,

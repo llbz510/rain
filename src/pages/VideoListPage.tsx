@@ -312,6 +312,7 @@ export function VideoListPage() {
           error: configured.settingsError,
           models: configured.modelPool.map((model) => ({ ...model })),
           roles: { ...configured.roleAssignment },
+          capabilities: configured.capabilityRecords.map((record) => ({ ...record })),
         }
       },
       onChanged: () => refreshVideosRef.current(),

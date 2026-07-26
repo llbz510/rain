@@ -114,7 +114,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring probe and preflight integration are implemented. `AC-LV-12` remains Partial because the assistant role probe and Pipeline runtime-entry enforcement are not complete; existing saved assignments are temporarily preserved.
+13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring probe, preflight integration and local-video runtime-entry enforcement are implemented. `AC-LV-12` remains Partial because the assistant role probe is not complete; existing saved assignments are preserved, but missing, failed or stale ASR/structuring checks now block a new local-video run.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 
 ## What changed in the 2026-07-26 project-control baseline session
@@ -594,6 +594,41 @@ git diff --check
 
 Observed result: 6 related files / 57 tests passed; TypeScript passed; Tauri debug compilation and debug NSIS packaging passed, producing `Rain_0.1.0_x64-setup.exe` with the configured probe resource; the full frontend suite passed 53 files / 357 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. A live Whisper probe against the locally installed 3 GB model and a full real-video E2E were not run in this slice, so the new probe path is `Compatible`-eligible but not promoted to `Verified` by this session.
 
+## What changed in the 2026-07-26 runtime capability gate session
+
+Continued `AC-LV-12` after the ASR capability probe:
+
+- `VideoImportController` now reuses `decideModelRoleAssignment` immediately before Pipeline startup for the selected ASR and structuring models.
+- Missing, failed or stale capability records block the run before progress or `runPipeline`; the pending video becomes `failed` with a role/model-specific reason.
+- `VideoListPage` passes cloned model, role and capability records as one startup snapshot. Later Store changes do not alter the active run's model configuration.
+- A page-level test proves that omitting required capability evidence from the Store blocks the real UI entry instead of silently using the legacy path.
+- The `capabilities` field remains optional only to preserve the locked pre-capability M03/M21 Harness contract. The production page always supplies it, including an empty array; this exception is documented and covered rather than hidden behind a runtime switch.
+- Locked Harness and Rust source/tests were not modified.
+
+Files added or changed:
+
+- `src/pipeline/video-import-controller.ts`
+- `src/pages/VideoListPage.tsx`
+- `src/__tests__/video-import-capability-gate.test.ts`
+- `src/__tests__/video-list-local-import.test.tsx`
+- `src/__tests__/video-list-page-recovery.test.tsx`
+- `docs/development/acceptance-standard.md`
+- `docs/development/harness-coverage.md`
+- `docs/development/module-map.md`
+- `docs/PROJECT_STATE.md`
+
+Verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/video-import-capability-gate.test.ts src/__tests__/video-list-local-import.test.tsx src/__tests__/video-list-page-recovery.test.tsx harness/m03-video-import.test.ts harness/m21-import-controller.test.ts
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: the focused runtime-entry set passed 5 files / 19 tests, including unchanged locked M03/M21; TypeScript passed; the full frontend suite passed 54 files / 362 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. Rust and real-video E2E were not rerun because this slice changes only the frontend startup gate and its control documents.
+
 ## Current controllability audit on 2026-07-26
 
 The project is more controllable than at the start of the Harness review, but it is not uniformly clean:
@@ -602,7 +637,7 @@ The project is more controllable than at the start of the Harness review, but it
 - Shadow registries, tautological tests, test-only production helpers and obsolete commands were removed in the approved Harness Migration.
 - `AC-LV-12` is intentionally still `Partial`; the control documents do not claim multi-model support is complete.
 - URL import, universal vision explanation and advanced tree editing remain explicit Gap/Proposed work instead of being represented by placeholder success paths.
-- The role gate plus ASR/structuring probes form a coherent capability path; assistant capability and Pipeline entry enforcement remain explicit next slices.
+- The role gate, ASR/structuring probes and local-video runtime-entry enforcement now form a coherent required-model capability path; assistant capability remains the explicit next `AC-LV-12` slice.
 
 The immediate `settings.tsx` hotspot has been resolved by behavior-preserving extraction. The public file is now a 10-line barrel; page composition, preflight, model-pool actions, add-model form, role selection and shared presentation resources have separate owners under `src/ui/components/settings/`. New settings behavior should enter the matching component, while capability decisions and probes remain in `src/settings/`.
 

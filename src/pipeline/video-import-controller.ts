@@ -6,7 +6,16 @@ import {
 } from '@/models/database'
 import type { Video } from '@/models/types'
 import type { ProgressPayload } from '@/architecture/events'
-import type { ModelPoolEntry, ModelRole } from '@/settings/model-pool'
+import {
+  runtimeModelFromPoolEntry,
+  type ModelPoolEntry,
+  type ModelRole,
+} from '@/settings/model-pool'
+import {
+  decideModelRoleAssignment,
+  type ModelCapabilityRecord,
+} from '@/settings/model-capabilities'
+import { redactSecret } from '@/llm/client'
 import { isTauri, tauriInvoke } from '@/lib/tauri-env'
 import { runPipeline } from '@/pipeline/pipeline-orchestrator'
 
@@ -20,6 +29,11 @@ export interface ImportRuntimeSettings {
   error: string | null
   models: ModelPoolEntry[]
   roles: Record<ModelRole, string | null>
+  /**
+   * Optional only while the locked pre-capability Harness contract is migrated.
+   * Production callers must include this field, including an empty array.
+   */
+  capabilities?: ModelCapabilityRecord[]
 }
 
 export interface VideoImportController {
@@ -50,6 +64,28 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
+function assertRoleCapability(
+  model: ModelPoolEntry,
+  role: 'asr' | 'structuring',
+  capabilities: ModelCapabilityRecord[],
+): void {
+  const decision = decideModelRoleAssignment(
+    runtimeModelFromPoolEntry(model),
+    role,
+    capabilities,
+  )
+  if (decision.allowed) return
+
+  const roleLabel = role === 'asr' ? 'ASR 模型' : '结构化模型'
+  const reason = redactSecret(
+    decision.capability.message,
+    [model.apiKey ?? ''],
+  )
+  throw new Error(
+    `${roleLabel}“${model.alias}”不可用：${reason}`,
+  )
+}
+
 export function createVideoImportController(
   options: VideoImportControllerOptions,
 ): VideoImportController {
@@ -77,6 +113,11 @@ export function createVideoImportController(
       const structuringModel = settings.models.find((entry) => entry.id === settings.roles.structuring)
       if (!asrModel || !structuringModel) {
         throw new Error('Select saved ASR and structuring models before importing')
+      }
+
+      if (settings.capabilities) {
+        assertRoleCapability(asrModel, 'asr', settings.capabilities)
+        assertRoleCapability(structuringModel, 'structuring', settings.capabilities)
       }
 
       options.onProgress(videoId, { stage: video.stage ?? 'asr', percent: 0 })

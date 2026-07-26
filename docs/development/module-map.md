@@ -101,7 +101,7 @@ cancelImport(videoId)
 
 模型能力记录是 SQLite 中的设置事实，Zustand 只缓存当前加载副本。记录不保存 API Key 明文；读取时必须按当前配置重新评估指纹，不能直接相信旧状态字符串。
 
-新的角色分配必须经过 `decideModelRoleAssignment`，UI 禁用只是提示层，Store 是当前不可绕过的写入门禁。迁移期间已有旧分配会保留，直到各角色存在可执行的完整能力检查后再启用运行入口门禁。
+新的角色分配必须经过 `decideModelRoleAssignment`，UI 禁用只是提示层，Store 是当前不可绕过的写入门禁。迁移期间已有旧分配会保留；本地视频启动时，`VideoImportController` 必须再次用启动快照中的能力记录裁决 ASR 和结构化角色，不能只相信已保存的角色 ID。`VideoListPage` 是当前唯一生产适配器，必须传入能力记录副本；`capabilities` 缺省只用于兼容尚未迁移的锁定 M03/M21 Harness，不是生产回退规则。
 
 结构化探针必须复用生产 `STAGE2_BLOCK_SYSTEM_PROMPT`、`buildStage2Blocks`、输出归一化和 `validateStage2BlockOutput`。不得另建一份更宽松的测试 schema，否则探针通过不能证明生产 Stage2 可用。
 
