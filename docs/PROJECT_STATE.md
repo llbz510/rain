@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-26 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base: `fb16dfb feat: gate verified evidence by model capability`
+Current working base before the AC-ST-05 slice: `154830f feat: control directory navigation`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -122,6 +122,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
 13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate, learning-page assistant gate, and schema v2 Evidence Harness are implemented. `AC-LV-12` has Strong + Evidence for the exact `ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash` structuring/text-assistant configuration. Other model fingerprints remain merely `Compatible` or `Unavailable` until they receive their own complete evidence.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
+15. `src/__tests__/live-qwen.test.ts` is intentionally skipped without a live Key, but it and the legacy default Qwen health path still hard-code `qwen3.5-omni-flash`, while the current schema v2 verified configuration is `qwen3-omni-flash`. The skipped smoke test is therefore not a valid judge for the current verified fingerprint until it reads the selected runtime configuration.
 
 ## What changed in the 2026-07-26 project-control baseline session
 
@@ -872,6 +873,39 @@ git diff --check
 ```
 
 Observed result: the full frontend suite passed 59 files / 385 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. No Rust test or real-video E2E was run because this slice changed only frontend navigation behavior and its documentation.
+
+## What changed in the 2026-07-26 AC-ST-05 study progress slice
+
+Continued the learning-page controls in acceptance order:
+
+- Added `src/__tests__/study-progress.test.tsx` at the production `StudyInterface` seam with a real in-memory database.
+- Proved that media `timeupdate` persists the furthest reached position while Store `playPosition` remains free to represent a rewind.
+- Added `recordPlaybackProgress(videoId, position)` under `src/study/session.ts`; video UI reports media time, the page supplies the current Video ID, and the Study Session module owns persistence.
+- Updated successful `loadVideo` sessions to refresh `lastStudiedAt` only after the video, paragraphs and sentences pass completeness checks.
+- Proved that unloading and reopening restores the persisted position into both Store and the actual media element.
+- Kept locked files under `harness/` and `src-tauri/tests/` unchanged.
+- Recorded the stale live-Qwen model-name mismatch as an explicit Harness risk; it does not affect this local progress slice.
+
+`AC-ST-05` is now `Strong`. The next controlled slice is `AC-ST-06`: persist excerpt notes, free notes and edits, reload them from the database, and route note citations through Study Navigation.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/study-progress.test.tsx src/__tests__/study-load.test.tsx harness/m06-video-component.test.tsx harness/m15-queries.test.ts harness/store-zustand-phase2.test.tsx
+npx.cmd tsc --noEmit
+```
+
+Observed result: focused production and locked compatibility coverage passed 5 files / 21 tests; TypeScript passed. Full-suite and production-build results are recorded below before commit.
+
+Final verification:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: the full frontend suite passed 60 files / 387 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. No Rust test or real-video E2E was run because this slice reused the existing TypeScript database interface and changed no Rust or evidence contract.
 
 ## Maintenance checklist for every future session
 

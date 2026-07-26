@@ -7,6 +7,7 @@ interface VideoZoneProps {
   filePath: string
   currentSubtitle?: string
   resumePosition?: number
+  onProgress?: (position: number) => void
 }
 
 let activeVideo: HTMLVideoElement | null = null
@@ -21,7 +22,7 @@ export function localMediaUrl(filePath: string): string {
   return isTauri() ? convertFileSrc(filePath) : filePath
 }
 
-export function VideoZone({ filePath, currentSubtitle, resumePosition }: VideoZoneProps) {
+export function VideoZone({ filePath, currentSubtitle, resumePosition, onProgress }: VideoZoneProps) {
   const subtitleOn = useRainStore((s) => s.subtitleOn)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [mediaError, setMediaError] = useState<string | null>(null)
@@ -45,8 +46,11 @@ export function VideoZone({ filePath, currentSubtitle, resumePosition }: VideoZo
   }, [resumePosition])
 
   const handleTimeUpdate = useCallback(() => {
-    if (videoRef.current) useRainStore.setState({ playPosition: videoRef.current.currentTime })
-  }, [])
+    if (!videoRef.current) return
+    const position = videoRef.current.currentTime
+    useRainStore.setState({ playPosition: position })
+    onProgress?.(position)
+  }, [onProgress])
 
   return (
     <div data-testid="video-zone-wrapper" style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>

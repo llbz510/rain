@@ -141,7 +141,7 @@ export const useRainStore = create<RainState>((set, get) => ({
   loadVideo: async (videoId: string) => {
     try {
       const { getDb } = await import('@/models/db-singleton')
-      const { getNodesByVideoId, getNotesByVideoId, getSentencesByNodeId, getVideoById } =
+      const { getNodesByVideoId, getNotesByVideoId, getSentencesByNodeId, getVideoById, updateVideoLastStudiedAt } =
         await import('@/models/database')
       const db = await getDb()
 
@@ -157,6 +157,7 @@ export const useRainStore = create<RainState>((set, get) => ({
       const sentenceArrays = await Promise.all(sentencePromises)
       const sentences = sentenceArrays.flat()
       if (sentences.length === 0) throw new Error('视频没有可学习的转录内容')
+      await updateVideoLastStudiedAt(db, videoId, Date.now())
 
       set({
         currentVideoId: videoId,

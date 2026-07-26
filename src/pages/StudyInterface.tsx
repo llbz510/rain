@@ -23,6 +23,7 @@ import type { Node, ParagraphType, Sentence } from '@/models/types'
 import { decideModelRoleAssignment } from '@/settings/model-capabilities'
 import { runtimeModelFromPoolEntry } from '@/settings/model-pool'
 import { resolveNodeNavigationTarget } from '@/study/navigation'
+import { recordPlaybackProgress } from '@/study/session'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -181,6 +182,7 @@ export function StudyInterface() {
   const aiPanelState = useRainStore((s) => s.aiPanelState)
   const playPosition = useRainStore((s) => s.playPosition)
   const unloadVideo = useRainStore((s) => s.unloadVideo)
+  const currentVideoId = useRainStore((s) => s.currentVideoId)
   const filePath = useRainStore((s) => s.currentVideoFilePath)
   const videoTitle = useRainStore((s) => s.currentVideoTitle)
   const selectedNodeId = useRainStore((s) => s.selectedNodeId)
@@ -277,6 +279,13 @@ export function StudyInterface() {
     useRainStore.setState({ playPosition: time })
   }
 
+  const handlePlaybackProgress = useCallback((position: number) => {
+    if (!currentVideoId) return
+    void recordPlaybackProgress(currentVideoId, position).catch((error) => {
+      console.error('Unable to persist study progress', error)
+    })
+  }, [currentVideoId])
+
   const handleNodeNavigate = useCallback((nodeId: string) => {
     const target = resolveNodeNavigationTarget(nodeTree, sentences, nodeId)
     if (!target) return
@@ -327,6 +336,7 @@ export function StudyInterface() {
             <VideoZone
               filePath={filePath}
               resumePosition={playPosition}
+              onProgress={handlePlaybackProgress}
             />
           </div>
         )}

@@ -37,7 +37,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
 | Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择 | 定义能力裁决、直接实现模型请求、承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
-| Study Session | 原子加载一个 ready 视频、统一播放位置、协调跳转、进度保存和学习页错误 | SQLite 细节、具体面板渲染、模型 HTTP 请求 | `src/store/rain-store.ts` 中现有加载动作；后续学习行为应收敛到小型流程接口 |
+| Study Session | 原子加载一个 ready 视频、统一播放位置、协调跳转、进度保存和学习页错误 | SQLite 细节、具体面板渲染、模型 HTTP 请求 | `src/store/rain-store.ts` 负责原子加载和成功打开时间；`src/study/session.ts` 负责把媒体进度持久化为单调递增的跨会话事实 |
 | Study Navigation | 把句子、节点和可信引用解析为同一时间线跳转，保持播放状态并通知相关区域定位 | 保存笔记、调用 LLM、直接读写 SQL | `src/study/navigation.ts` 负责节点到最早叶子句子的解析；`StudyInterface` 协调 Store/media，文本区负责滚动和真实预览 |
 | Notes Workflow | 创建摘注/自由笔记、编辑持久化、解析引用跳转 | 维护 React 局部草稿作为最终事实、修改目录结构 | 当前尚未形成生产流程模块；数据库接口在 `src/models/database.ts`，UI 在 `src/ui/components/notes.tsx` |
 | Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
@@ -106,6 +106,8 @@ cancelImport(videoId)
 学习页必须先完整读取同一 Video ID 的 Video、Node、Sentence 和 Note，再一次性切换到 `study`。加载失败不得把部分缓存或空数组包装成成功页面。`playPosition` 是视频、句子高亮和目录当前位置的唯一会话事实；`isPlaying` 是视频区、控制栏和随播滚动共享的播放状态，不能再由组件维护第二份。持久化的 `Video.position` 是跨会话最远进度，与这两个瞬时会话状态语义不同。
 
 当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
+
+当前进度接口是 `recordPlaybackProgress(videoId, position)`。`VideoZone` 只上报媒体时间，`StudyInterface` 传入当前 Video ID，Study Session 再通过数据库的单调更新保存最远位置。成功的 `loadVideo` 在内容完整性检查之后更新 `lastStudiedAt`；加载失败不得伪造最近学习记录。
 
 当前句子和可信引用都通过 `StudyInterface` 的同一个时间 seek 处理器写入 `playPosition`，`VideoZone` 负责把它同步到 media。目录节点导航通过 `resolveNodeNavigationTarget(nodes, sentences, nodeId)` 这一个 interface 隐藏容器子树遍历、最早句子选择和段落定位规则；`StudyInterface` 只协调选择、时间和一次性文本定位请求，目录区与文本区不再各自猜测容器节点的时间。
 
