@@ -1,8 +1,6 @@
 import type { LlmSettings } from '@/llm/types'
 import { redactSecret } from '@/llm/client'
 
-const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-const QWEN_MODEL = 'qwen3.5-omni-flash'
 const HEALTH_PROMPT = 'Return JSON only. Return {"ok":true}.'
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -13,11 +11,19 @@ export interface QwenConnectionResult {
   message: string
 }
 
-function assertConfiguredQwen(settings: LlmSettings): void {
-  if (settings.baseUrl.replace(/\/+$/, '') !== QWEN_BASE_URL || settings.model !== QWEN_MODEL) {
-    throw new Error('只能测试配置的 Qwen 连接')
+function assertConfiguredModel(settings: LlmSettings): string {
+  let endpoint: URL
+  try {
+    endpoint = new URL(settings.baseUrl)
+  } catch {
+    throw new Error('模型服务地址必须是有效的 HTTP(S) URL')
   }
-  if (!settings.apiKey.trim()) throw new Error('Qwen API 密钥不能为空')
+  if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') {
+    throw new Error('模型服务地址必须使用 HTTP(S)')
+  }
+  if (!settings.model.trim()) throw new Error('模型名称不能为空')
+  if (!settings.apiKey.trim()) throw new Error('模型 API 密钥不能为空')
+  return settings.baseUrl.replace(/\/+$/, '')
 }
 
 function safeFailure(error: unknown, apiKey: string): QwenConnectionResult {
@@ -30,17 +36,17 @@ export async function testQwenConnection(
   fetcher: Fetcher = fetch,
   now: () => number = Date.now,
 ): Promise<QwenConnectionResult> {
-  assertConfiguredQwen(settings)
+  const baseUrl = assertConfiguredModel(settings)
   const startedAt = now()
   try {
-    const response = await fetcher(`${QWEN_BASE_URL}/chat/completions`, {
+    const response = await fetcher(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${settings.apiKey}`,
       },
       body: JSON.stringify({
-        model: QWEN_MODEL,
+        model: settings.model,
         response_format: { type: 'json_object' },
         messages: [{ role: 'user', content: HEALTH_PROMPT }],
       }),

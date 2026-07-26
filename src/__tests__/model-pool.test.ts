@@ -4,6 +4,7 @@ import { getSetting, setSetting } from '@/models/database'
 import {
   createRuntimeSettingsInitializer,
   executeRuntimeSettingsMigration,
+  getDefaultRuntimeSettings,
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@/settings/model-pool'
@@ -21,6 +22,17 @@ const qwenModel = {
 }
 
 describe('runtime model settings', () => {
+  it('defaults to the current verified text model without claiming vision', () => {
+    const defaults = getDefaultRuntimeSettings()
+    const model = defaults.models.find((entry) => entry.id === 'qwen-main')
+
+    expect(model).toMatchObject({
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3-omni-flash',
+      supportsVision: false,
+    })
+  })
+
   it('keeps the saved model ID after restart', async () => {
     await saveRuntimeSettings({ models: [qwenModel], roles })
 

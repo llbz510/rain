@@ -70,8 +70,9 @@ export function SettingsPage() {
     type: model.type,
     supportsVision: model.supportsVision,
     canTest: model.type === 'llm'
-      && model.baseUrl === 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-      && model.modelName === 'qwen3.5-omni-flash',
+      && Boolean(model.baseUrl?.trim())
+      && Boolean(model.modelName.trim())
+      && Boolean(model.apiKey?.trim()),
   }))
 
   const runtimeSettings: RuntimeSettings = {

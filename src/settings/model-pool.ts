@@ -3,6 +3,7 @@
 import { getDb } from '@/models/db-singleton'
 import { deleteSetting, getSetting, setSetting } from '@/models/database'
 import { parseCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
+import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from '@/settings/default-runtime'
 
 export type ModelType = 'llm' | 'asr-api' | 'whisper-local' | 'subtitle'
 export type ModelRole = 'asr' | 'structuring' | 'assistant'
@@ -45,10 +46,6 @@ export interface RuntimeSettings {
   capabilities?: ModelCapabilityRecord[]
 }
 
-const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-const QWEN_MODEL = 'qwen3.5-omni-flash'
-
-
 export type RuntimeSettingsInitialization =
   | { ok: true; ready: true; settings: RuntimeSettings }
   | { ok: false; ready: false; error: string }
@@ -79,8 +76,8 @@ const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
       type: 'whisper-local', provider: 'local', supportsVision: false,
     },
     {
-      id: 'qwen-main', alias: 'Qwen', baseUrl: QWEN_BASE_URL, model: QWEN_MODEL,
-      type: 'llm', provider: 'dashscope', supportsVision: true,
+      id: 'qwen-main', alias: 'Qwen', baseUrl: DEFAULT_LLM_BASE_URL, model: DEFAULT_LLM_MODEL,
+      type: 'llm', provider: 'dashscope', supportsVision: false,
     },
   ],
   roles: { asr: 'whisper-large-v3', structuring: 'qwen-main', assistant: 'qwen-main' },

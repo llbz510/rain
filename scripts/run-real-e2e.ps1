@@ -2,7 +2,7 @@ param(
   [string]$VideoPath = $env:RAIN_E2E_VIDEO_PATH,
   [string]$WhisperModelPath = $env:RAIN_WHISPER_MODEL_PATH,
   [string]$LlmBaseUrl = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_BASE_URL)) { 'https://dashscope.aliyuncs.com/compatible-mode/v1' } else { $env:RAIN_E2E_LLM_BASE_URL }),
-  [string]$LlmModel = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_MODEL)) { 'qwen3.5-omni-flash' } else { $env:RAIN_E2E_LLM_MODEL }),
+  [string]$LlmModel = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_MODEL)) { 'qwen3-omni-flash' } else { $env:RAIN_E2E_LLM_MODEL }),
   [string]$EvidenceRoot = 'evidence',
   [ValidateSet('full', 'ui-proof')]
   [string]$RunMode = 'full',

@@ -3,12 +3,12 @@ import { testQwenConnection } from '@/llm/qwen-health'
 
 const settings = {
   baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  model: 'qwen3.5-omni-flash',
+  model: 'qwen3-omni-flash',
   apiKey: 'sk-test-secret',
 }
 
 describe('Qwen connection health check', () => {
-  it('uses the fixed DashScope JSON request and returns a latency without the key', async () => {
+  it('uses the selected OpenAI-compatible configuration and returns a latency without the key', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"ok":true}' } }],
     }), { status: 200 }))
@@ -22,7 +22,7 @@ describe('Qwen connection health check', () => {
     )
     const request = JSON.parse(fetcher.mock.calls[0][1].body)
     expect(request).toMatchObject({
-      model: 'qwen3.5-omni-flash',
+      model: 'qwen3-omni-flash',
       response_format: { type: 'json_object' },
       messages: expect.arrayContaining([
         expect.objectContaining({ content: 'Return JSON only. Return {"ok":true}.' }),
@@ -42,9 +42,9 @@ describe('Qwen connection health check', () => {
     expect(result.message).toContain('连接测试失败')
   })
 
-  it('rejects another endpoint or model before sending a request', async () => {
+  it('rejects an invalid endpoint before sending a request', async () => {
     const fetcher = vi.fn()
-    await expect(testQwenConnection({ ...settings, model: 'other' }, fetcher)).rejects.toThrow('只能测试配置的 Qwen 连接')
+    await expect(testQwenConnection({ ...settings, baseUrl: 'file:///tmp/model' }, fetcher)).rejects.toThrow('模型服务地址')
     expect(fetcher).not.toHaveBeenCalled()
   })
 })
