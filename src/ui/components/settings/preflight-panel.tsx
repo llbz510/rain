@@ -94,7 +94,7 @@ export function PreflightPanel({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>运行前自检</div>
         <span style={{ color: COLORS.dimmer, fontSize: 12 }}>
-          检查桌面环境、Whisper、结构化模型、数据库和在线视频工具；会运行短语音转写和小型 Stage2 契约请求
+          检查桌面环境、Whisper、结构化模型、文本助手、数据库和在线视频工具
         </span>
         <div style={{ flex: 1 }} />
         <button style={s.primaryBtn} disabled={running} onClick={() => void handleRun()}>

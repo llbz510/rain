@@ -20,6 +20,8 @@ import { AiAssistant, ChatInput, QuickActions } from '@/ui/components/ai-assista
 import { redactSecret, streamAiChat } from '@/llm/client'
 import { buildAssistantContext, type AssistantSource } from '@/ai/assistant-context'
 import type { Node, ParagraphType, Sentence } from '@/models/types'
+import { decideModelRoleAssignment } from '@/settings/model-capabilities'
+import { runtimeModelFromPoolEntry } from '@/settings/model-pool'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -203,11 +205,27 @@ export function StudyInterface() {
 
   const handleSendMessage = useCallback((text: string, scope: 'nearby' | 'paragraph' = 'nearby') => {
     const store = useRainStore.getState()
-    const assistantModel = store.modelPool.find((model) => model.id === store.roleAssignment.assistant)
-    const exactBaseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-    const exactModel = 'qwen3.5-omni-flash'
-    if (!assistantModel || assistantModel.baseUrl?.replace(/\/+$/, '') !== exactBaseUrl || assistantModel.modelName !== exactModel || !assistantModel.apiKey?.trim()) {
-      setChatMessages((previous) => [...previous, { role: 'user', content: text }, { role: 'assistant', content: '请先在设置中配置可用的 Qwen 助手。' }])
+    const selected = store.modelPool.find((model) => model.id === store.roleAssignment.assistant)
+    const assistantModel = selected ? { ...selected } : null
+    const capabilities = store.capabilityRecords.map((record) => ({ ...record }))
+    if (
+      !assistantModel
+      || assistantModel.type !== 'llm'
+      || !assistantModel.baseUrl?.trim()
+      || !assistantModel.modelName.trim()
+      || !assistantModel.apiKey?.trim()
+    ) {
+      setChatMessages((previous) => [...previous, { role: 'user', content: text }, { role: 'assistant', content: '请先在设置中配置可用的文本助手模型。' }])
+      return
+    }
+    const decision = decideModelRoleAssignment(
+      runtimeModelFromPoolEntry(assistantModel),
+      'assistant',
+      capabilities,
+    )
+    if (!decision.allowed) {
+      const reason = redactSecret(decision.capability.message, [assistantModel.apiKey])
+      setChatMessages((previous) => [...previous, { role: 'user', content: text }, { role: 'assistant', content: `助手模型“${assistantModel.alias}”不可用：${reason}` }])
       return
     }
     cleanupRef.current?.()
@@ -215,7 +233,11 @@ export function StudyInterface() {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     const context = buildAssistantContext({ nodes: store.nodeTree, sentences: store.sentences, playPosition: store.playPosition, question: text, history: chatMessages, scope })
-    const settings = { baseUrl: exactBaseUrl, apiKey: assistantModel.apiKey, model: exactModel }
+    const settings = {
+      baseUrl: assistantModel.baseUrl,
+      apiKey: assistantModel.apiKey,
+      model: assistantModel.modelName,
+    }
     let active = true
     let currentContent = ''
     setChatMessages((previous) => [...previous, { role: 'user', content: text }, { role: 'assistant', content: '', sources: context.sources }])

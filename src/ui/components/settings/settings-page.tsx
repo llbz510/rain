@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
+import { checkAssistantModelCapability } from '@/settings/assistant-capability'
 import { checkAsrModelCapability } from '@/settings/asr-capability'
 import { runtimeModelFromPoolEntry, type RuntimeSettings } from '@/settings/model-pool'
 import { checkStructuringModelCapability } from '@/settings/structuring-capability'
@@ -116,6 +117,17 @@ export function SettingsPage() {
     }
   }
 
+  const handleAssistantCheck = async (modelId: string): Promise<ConnectionTestResult> => {
+    const model = modelPool.find((entry) => entry.id === modelId)
+    if (!model) return { ok: false, message: '未找到已保存的助手模型配置。' }
+    const record = await checkAssistantModelCapability(runtimeModelFromPoolEntry(model))
+    await setCapabilityRecords([record])
+    return {
+      ok: record.status === 'Compatible' || record.status === 'Verified',
+      message: record.message,
+    }
+  }
+
   return (
     <div
       data-testid="settings-page"
@@ -219,6 +231,7 @@ export function SettingsPage() {
                 <ModelPoolList
                   models={models}
                   onTestConnection={handleTestConnection}
+                  onCheckAssistant={handleAssistantCheck}
                   onCheckAsr={handleAsrCheck}
                   onCheckStructuring={handleStructuringCheck}
                 />

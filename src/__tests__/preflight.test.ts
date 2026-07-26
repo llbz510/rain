@@ -55,6 +55,17 @@ function successfulAsrCheck() {
     }))
 }
 
+function successfulAssistantCheck() {
+  return vi.fn(async (model: RuntimeModel) =>
+    recordCapabilityCheck({
+      model,
+      role: 'assistant',
+      ok: true,
+      message: '文本助手能力检查通过；不包含 vision 能力。',
+      checkedAt: 100,
+    }))
+}
+
 function desktopInvoke(options: { whisperModels?: string[]; ytdlp?: boolean } = {}) {
   return vi.fn(async (command: string) => {
     if (command === 'get_runtime_capability') {
@@ -83,6 +94,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke(),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
       checkAsr: successfulAsrCheck(),
       checkStructuring: (model) => checkStructuringModelCapability(model, { callStage2 }),
     })
@@ -110,6 +122,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke,
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
       checkAsr: successfulAsrCheck(),
       checkStructuring,
     })
@@ -128,8 +141,8 @@ describe('Rain preflight check', () => {
       }),
       expect.objectContaining({
         role: 'assistant',
-        status: 'Unavailable',
-        message: expect.stringContaining('停止或取消能力检查'),
+        status: 'Compatible',
+        message: expect.stringContaining('不包含 vision 能力'),
       }),
     ]))
     expect(report.checks).toEqual(expect.arrayContaining([
@@ -167,6 +180,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke(),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
       checkAsr: successfulAsrCheck(),
       checkStructuring: successfulStructuringCheck(),
     })
@@ -189,6 +203,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke({ whisperModels: ['D:\\models\\ggml-small.bin'] }),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
       checkAsr: successfulAsrCheck(),
       checkStructuring: successfulStructuringCheck(),
     })
@@ -213,6 +228,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke(),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
       checkAsr: successfulAsrCheck(),
       checkStructuring: successfulStructuringCheck(),
     })
@@ -220,6 +236,38 @@ describe('Rain preflight check', () => {
     expect(report.ready).toBe(true)
     expect(report.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'assistant', status: 'warning' }),
+    ]))
+  })
+
+  it('warns about a failed assistant probe without blocking local video processing', async () => {
+    const settings = withGenericStructuringModel(getDefaultRuntimeSettings())
+    const report = await runPreflightCheck({
+      runtimeSettings: settings,
+      isTauri: () => true,
+      invoke: desktopInvoke(),
+      checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: vi.fn(async (model: RuntimeModel) =>
+        recordCapabilityCheck({
+          model,
+          role: 'assistant',
+          ok: false,
+          message: '文本助手能力检查失败：流式响应不可用。',
+          checkedAt: 100,
+        })),
+      checkAsr: successfulAsrCheck(),
+      checkStructuring: successfulStructuringCheck(),
+    })
+
+    expect(report.ready).toBe(true)
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'assistant',
+        status: 'warning',
+        message: expect.stringContaining('流式响应不可用'),
+      }),
+    ]))
+    expect(report.capabilities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', status: 'Unavailable' }),
     ]))
   })
 
@@ -239,6 +287,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke(),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
       checkAsr,
       checkStructuring: successfulStructuringCheck(),
     })

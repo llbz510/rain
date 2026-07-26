@@ -11,6 +11,7 @@ export interface ConnectionTestResult {
 interface ModelPoolListProps {
   models: ModelEntry[]
   onTestConnection?: (modelId: string) => Promise<ConnectionTestResult>
+  onCheckAssistant?: (modelId: string) => Promise<ConnectionTestResult>
   onCheckAsr?: (modelId: string) => Promise<ConnectionTestResult>
   onCheckStructuring?: (modelId: string) => Promise<ConnectionTestResult>
 }
@@ -18,6 +19,7 @@ interface ModelPoolListProps {
 export function ModelPoolList({
   models,
   onTestConnection,
+  onCheckAssistant,
   onCheckAsr,
   onCheckStructuring,
 }: ModelPoolListProps) {
@@ -71,12 +73,26 @@ export function ModelPoolList({
     }
   }
 
+  const handleAssistantCheck = async (model: ModelEntry) => {
+    if (!onCheckAssistant || testingModelId) return
+    setTestingModelId(model.id)
+    setConnectionStatus(null)
+    try {
+      const result = await onCheckAssistant(model.id)
+      setConnectionStatus({ modelId: model.id, ok: result.ok, message: result.message })
+    } catch {
+      setConnectionStatus({ modelId: model.id, ok: false, message: '助手能力检查失败，请检查模型配置。' })
+    } finally {
+      setTestingModelId(null)
+    }
+  }
+
   return (
     <div data-testid="model-pool-list">
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '160px 150px 1fr 260px',
+          gridTemplateColumns: '160px 150px 1fr 360px',
           gap: 8,
           padding: '0 8px 4px',
           fontSize: 12,
@@ -96,7 +112,7 @@ export function ModelPoolList({
             data-testid={`model-${model.id}`}
             style={{
               display: 'grid',
-              gridTemplateColumns: '160px 150px 1fr 260px',
+              gridTemplateColumns: '160px 150px 1fr 360px',
               gap: 8,
               alignItems: 'center',
               padding: 8,
@@ -142,6 +158,16 @@ export function ModelPoolList({
                   style={s.miniBtn}
                 >
                   {testingModelId === model.id ? '检查中…' : '检查结构化'}
+                </button>
+              )}
+              {onCheckAssistant && model.type === 'llm' && (
+                <button
+                  aria-label={`检查助手 ${model.alias}`}
+                  disabled={testingModelId !== null}
+                  onClick={() => void handleAssistantCheck(model)}
+                  style={s.miniBtn}
+                >
+                  {testingModelId === model.id ? '检查中…' : '检查助手'}
                 </button>
               )}
               <button style={s.dangerBtn} onClick={() => removeModel(model.id)}>删除</button>

@@ -114,7 +114,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring probe, preflight integration and local-video runtime-entry enforcement are implemented. `AC-LV-12` remains Partial because the assistant role probe is not complete; existing saved assignments are preserved, but missing, failed or stale ASR/structuring checks now block a new local-video run.
+13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate and learning-page assistant gate are implemented. `AC-LV-12` remains Partial pending a real external-model run and refreshed full E2E evidence for this generic path; existing saved assignments are preserved, but new runtime work rejects missing, failed or stale role checks.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 
 ## What changed in the 2026-07-26 project-control baseline session
@@ -629,6 +629,47 @@ git diff --check
 
 Observed result: the focused runtime-entry set passed 5 files / 19 tests, including unchanged locked M03/M21; TypeScript passed; the full frontend suite passed 54 files / 362 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. Rust and real-video E2E were not rerun because this slice changes only the frontend startup gate and its control documents.
 
+## What changed in the 2026-07-26 text assistant capability session
+
+Continued `AC-LV-12` after commit `94154bc feat: gate local imports by model capability`:
+
+- Added `checkAssistantModelCapability`, which uses the production `streamAiChat` adapter and signs `Compatible` only after an exact streamed contract response. Timeout, malformed output and stream errors become redacted `Unavailable` records.
+- The assistant capability message explicitly excludes vision. The unimplemented current-frame feature remains outside accepted scope.
+- Settings now provides a separate “检查助手” action; preflight executes the same probe but treats assistant failure as a warning so local-video processing remains available.
+- `StudyInterface` no longer hardcodes DashScope/Qwen. It uses the selected OpenAI-compatible model snapshot and rejects missing, failed or stale assistant capability before starting a stream.
+- Existing stop, late-token suppression, paragraph context and citation behavior remain on the same production chat path.
+- Locked Harness and Rust source/tests were not modified.
+
+Files added or changed:
+
+- `CONTEXT.md`
+- `src/settings/assistant-capability.ts`
+- `src/settings/preflight.ts`
+- `src/pages/StudyInterface.tsx`
+- `src/ui/components/settings/model-pool-list.tsx`
+- `src/ui/components/settings/settings-page.tsx`
+- `src/ui/components/settings/preflight-panel.tsx`
+- `src/__tests__/assistant-capability.test.ts`
+- `src/__tests__/settings-assistant-workflow.test.tsx`
+- `src/__tests__/preflight.test.ts`
+- `src/__tests__/study-playback.test.tsx`
+- `docs/development/acceptance-standard.md`
+- `docs/development/harness-coverage.md`
+- `docs/development/module-map.md`
+- `docs/PROJECT_STATE.md`
+
+Verification:
+
+```powershell
+npx.cmd tsc --noEmit
+npm.cmd test -- --run src/__tests__/assistant-capability.test.ts src/__tests__/settings-assistant-workflow.test.tsx src/__tests__/study-playback.test.tsx src/__tests__/preflight.test.ts harness/m10-ai-assistant.test.ts harness/m10-ai-component.test.tsx harness/m19-settings-component.test.tsx
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: TypeScript passed; the focused assistant set passed 7 files / 43 tests, including unchanged locked M10/M19; the full frontend suite passed 56 files / 369 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. No live external model, Rust test or real-video E2E was run for this frontend-only slice.
+
 ## Current controllability audit on 2026-07-26
 
 The project is more controllable than at the start of the Harness review, but it is not uniformly clean:
@@ -637,7 +678,7 @@ The project is more controllable than at the start of the Harness review, but it
 - Shadow registries, tautological tests, test-only production helpers and obsolete commands were removed in the approved Harness Migration.
 - `AC-LV-12` is intentionally still `Partial`; the control documents do not claim multi-model support is complete.
 - URL import, universal vision explanation and advanced tree editing remain explicit Gap/Proposed work instead of being represented by placeholder success paths.
-- The role gate, ASR/structuring probes and local-video runtime-entry enforcement now form a coherent required-model capability path; assistant capability remains the explicit next `AC-LV-12` slice.
+- The role gate, three production-path probes and both local-video/assistant runtime gates now form a coherent capability path. The next `AC-LV-12` work is Evidence: a live generic assistant probe and refreshed full E2E, not another implementation path.
 
 The immediate `settings.tsx` hotspot has been resolved by behavior-preserving extraction. The public file is now a 10-line barrel; page composition, preflight, model-pool actions, add-model form, role selection and shared presentation resources have separate owners under `src/ui/components/settings/`. New settings behavior should enter the matching component, while capability decisions and probes remain in `src/settings/`.
 

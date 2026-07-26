@@ -5,6 +5,8 @@ import { ParagraphItem } from '@/ui/components/text-zone'
 import { AiAssistant } from '@/ui/components/ai-assistant'
 import { TestStoreProvider } from '../../harness/support/test-store-provider'
 import { useRainStore } from '@/store/rain-store'
+import { recordCapabilityCheck } from '@/settings/model-capabilities'
+import { runtimeModelFromPoolEntry, type ModelPoolEntry } from '@/settings/model-pool'
 
 const { streamAiChat } = vi.hoisted(() => ({ streamAiChat: vi.fn() }))
 vi.mock('@/llm/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/llm/client')>()), streamAiChat }))
@@ -18,14 +20,31 @@ afterEach(() => {
   delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 })
 
-function configureQwenStudy() {
+function configureAssistantStudy() {
+  const assistantModel: ModelPoolEntry = {
+    id: 'assistant',
+    alias: 'Custom Assistant',
+    type: 'llm',
+    provider: 'custom',
+    baseUrl: 'https://models.example.test/v1',
+    apiKey: 'sk-test-secret',
+    modelName: 'assistant-a',
+    supportsVision: false,
+  }
   useRainStore.setState({
     currentPage: 'study',
     layoutMode: 'follow',
     aiPanelState: 'ai',
     playPosition: 1,
-    modelPool: [{ id: 'qwen', alias: 'Qwen', type: 'llm', provider: 'dashscope', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-test-secret', modelName: 'qwen3.5-omni-flash', supportsVision: true }],
-    roleAssignment: { asr: null, structuring: 'qwen', assistant: 'qwen' },
+    modelPool: [assistantModel],
+    roleAssignment: { asr: null, structuring: null, assistant: assistantModel.id },
+    capabilityRecords: [recordCapabilityCheck({
+      model: runtimeModelFromPoolEntry(assistantModel),
+      role: 'assistant',
+      ok: true,
+      message: 'Text assistant probe passed',
+      checkedAt: 100,
+    })],
     nodeTree: [{ id: 'p', videoId: 'v', parentId: null, kind: 'paragraph', title: 'P', type: 'concept', startTime: 0, endTime: 10, text: null, sortOrder: 0 }],
     sentences: [
       { id: 's', nodeId: 'p', text: 'Current transcript.', startTime: 0, endTime: 4, sortOrder: 0 },
@@ -68,7 +87,7 @@ describe('real study playback', () => {
     let callbacks: { onToken: (token: string) => void } | undefined
     const cleanupStream = vi.fn()
     streamAiChat.mockImplementation((_messages, _settings, nextCallbacks) => { callbacks = nextCallbacks; return cleanupStream })
-    configureQwenStudy()
+    configureAssistantStudy()
 
     render(<StudyInterface />)
     const input = screen.getByRole('textbox')
@@ -81,6 +100,19 @@ describe('real study playback', () => {
     expect(screen.queryByText('late token')).not.toBeInTheDocument()
   })
 
+  it('blocks the assistant entry when the selected model lacks a current capability record', () => {
+    configureAssistantStudy()
+    useRainStore.setState({ capabilityRecords: [] })
+
+    render(<StudyInterface />)
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: 'Explain this' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(streamAiChat).not.toHaveBeenCalled()
+    expect(screen.getByText(/^助手模型“Custom Assistant”不可用：/)).toBeInTheDocument()
+  })
+
   it('shows current paragraph quick actions and sends one with paragraph-scoped context', () => {
     let sentMessages: Array<{ role: string; content: string }> = []
     streamAiChat.mockImplementation((messages, _settings, callbacks) => {
@@ -89,7 +121,7 @@ describe('real study playback', () => {
       callbacks.onDone()
       return vi.fn()
     })
-    configureQwenStudy()
+    configureAssistantStudy()
 
     render(<StudyInterface />)
     const quickAction = screen.getByRole('button', { name: '生成例子' })
@@ -100,6 +132,15 @@ describe('real study playback', () => {
     expect(sentMessages[0].content).toContain('Current paragraph transcript:')
     expect(sentMessages[0].content).toContain('Current transcript.')
     expect(sentMessages[0].content).toContain('Later sentence in the same paragraph.')
+    expect(streamAiChat).toHaveBeenCalledWith(
+      expect.any(Array),
+      {
+        baseUrl: 'https://models.example.test/v1',
+        apiKey: 'sk-test-secret',
+        model: 'assistant-a',
+      },
+      expect.any(Object),
+    )
   })
 
   it('renders inline known citations as seek controls while leaving unknown citations visible as text', () => {
@@ -140,7 +181,7 @@ describe('real study playback', () => {
       callbacks.push(nextCallbacks)
       return cleanups[callbacks.length - 1]
     })
-    configureQwenStudy()
+    configureAssistantStudy()
 
     render(<StudyInterface />)
     const input = screen.getByRole('textbox')

@@ -40,6 +40,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
 | ASR Capability Probe | 定位内置短语音并复用生产 Whisper 转写模块，只有有效非空句子才能签发 `Compatible` | 写入业务 Video/Sentence、替代完整导入证据、支持尚未实现的 ASR API | `src/settings/asr-capability.ts`、`src/pipeline/asr-runner.ts` |
 | Structuring Capability Probe | 为模型池动作和运行前预检发送最小 Stage2 请求，并用生产契约判断任意 OpenAI-compatible LLM 能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
+| Assistant Capability Probe | 复用生产流式聊天接口检查文本响应、指令遵循、超时和脱敏，并签发助手角色的 `Compatible` | 证明 vision、替代学习页上下文和引用测试、签发 `Verified` | `src/settings/assistant-capability.ts` |
 | LLM Adapter | OpenAI-compatible 请求、流式和错误处理 | 产品状态机、SQLite | `src/llm/` |
 | Tauri Adapter | command/event 名称和前端调用封装 | 产品规则 | `src/lib/tauri-env.ts`、`src/architecture/` |
 | Rust Commands | 把前端请求翻译为 Rust 模块调用 | 承载全部媒体/Whisper 实现 | `src-tauri/src/commands.rs` |
@@ -103,6 +104,8 @@ cancelImport(videoId)
 
 新的角色分配必须经过 `decideModelRoleAssignment`，UI 禁用只是提示层，Store 是当前不可绕过的写入门禁。迁移期间已有旧分配会保留；本地视频启动时，`VideoImportController` 必须再次用启动快照中的能力记录裁决 ASR 和结构化角色，不能只相信已保存的角色 ID。`VideoListPage` 是当前唯一生产适配器，必须传入能力记录副本；`capabilities` 缺省只用于兼容尚未迁移的锁定 M03/M21 Harness，不是生产回退规则。
 
+学习页每次启动助手请求前必须从 Store 创建模型与能力记录快照，并通过同一个 `decideModelRoleAssignment` 裁决助手角色。通过后的请求使用快照中的 OpenAI-compatible endpoint、Key 和模型名，不得再硬编码供应商；此门禁只授权文本问答，不授权 vision。
+
 结构化探针必须复用生产 `STAGE2_BLOCK_SYSTEM_PROMPT`、`buildStage2Blocks`、输出归一化和 `validateStage2BlockOutput`。不得另建一份更宽松的测试 schema，否则探针通过不能证明生产 Stage2 可用。
 
 ## 5. 当前热点和控制策略
@@ -141,7 +144,7 @@ cancelImport(videoId)
 剩余工作：
 
 - 在线 URL 导入尚未经过真实验收，相关逻辑暂时仍在页面中。
-- 模型能力记录、持久化、配置变化失效、新角色分配拦截、真实短样本 ASR 检查和通用 LLM 结构化检查已实现；设置预检复用两种生产探针。助手角色检查和 Pipeline 运行入口门禁仍待后续受控切片完成。
+- 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。下一步是用真实外部模型和完整 E2E 补齐本轮通用能力路径的 Evidence，而不是继续增加旁路。
 - 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
 
 ## 8. Harness Migration 结果

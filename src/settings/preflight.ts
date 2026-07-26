@@ -1,4 +1,5 @@
 import { tauriInvoke, isTauri as detectTauri } from '@/lib/tauri-env'
+import { checkAssistantModelCapability } from '@/settings/assistant-capability'
 import { checkAsrModelCapability } from '@/settings/asr-capability'
 import type { RuntimeModel, RuntimeSettings } from '@/settings/model-pool'
 import {
@@ -30,6 +31,7 @@ export interface RunPreflightCheckInput {
   runtimeSettings: RuntimeSettings
   isTauri?: () => boolean
   invoke?: PreflightInvoke
+  checkAssistant?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
   checkAsr?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
   checkStructuring?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
   checkDatabaseWrite?: () => Promise<void>
@@ -107,6 +109,7 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
   const isTauri = input.isTauri ?? detectTauri
   const invoke = input.invoke ?? tauriInvoke
   const checkDatabaseWrite = input.checkDatabaseWrite ?? defaultDatabaseWriteCheck
+  const checkAssistant = input.checkAssistant ?? checkAssistantModelCapability
   const checkAsr = input.checkAsr ?? checkAsrModelCapability
   const checkStructuring = input.checkStructuring ?? checkStructuringModelCapability
   const checks: PreflightCheck[] = []
@@ -254,6 +257,7 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
     })
   }
 
+  let assistantCapability: ModelCapabilityRecord | null = null
   if (!assistantModel) {
     checks.push({
       id: 'assistant',
@@ -276,11 +280,17 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
       message: '助手模型配置不完整；本地视频处理不受影响，但 AI 助手可能不可用。',
     })
   } else {
+    const result = await checkAssistant(assistantModel)
+    assistantCapability = preserveVerifiedRecord(
+      assistantModel,
+      result,
+      existingCapabilities,
+    )
     checks.push({
       id: 'assistant',
       label: 'AI 助手',
-      status: 'ok',
-      message: '助手模型已配置；完整助手能力仍需单独检查。',
+      status: result.status === 'Compatible' || result.status === 'Verified' ? 'ok' : 'warning',
+      message: result.message,
     })
   }
 
@@ -349,13 +359,15 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
   if (structuringCapability) {
     capabilities.push(structuringCapability)
   }
-  if (assistantModel && assistantCheck) {
+  if (assistantCapability) {
+    capabilities.push(assistantCapability)
+  } else if (assistantModel && assistantCheck) {
     capabilities.push(preflightCapabilityRecord(
       assistantModel,
       'assistant',
       assistantCheck.status === 'ok',
       assistantCheck.message,
-      '助手配置预检通过；尚未执行助手停止或取消能力检查。',
+      '助手配置预检通过；尚未执行真实文本助手能力检查。',
       existingCapabilities,
     ))
   }
