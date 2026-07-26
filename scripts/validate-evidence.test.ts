@@ -33,18 +33,34 @@ function createEvidence(overrides: Record<string, unknown> = {}, cleanTranscript
     ? { id: 'whisper-segment-1', startTime: 0, endTime: 1, text: 'signal gain increases after amplification.' }
     : { id: 'demo_s_1', startTime: 0, endTime: 1, text: 'This is sentence 1.' }
   const events = [
+    { at: '2026-07-18T23:59:57.000Z', event: 'capability_checks_complete' },
+    { at: '2026-07-18T23:59:58.000Z', event: 'import_gate_rejected_missing_capabilities' },
+    { at: '2026-07-18T23:59:59.000Z', event: 'assistant_gate_rejected_missing_capabilities' },
     { at: '2026-07-19T00:00:00.000Z', event: 'start_import' },
     { at: '2026-07-19T00:00:01.000Z', event: 'cancel_import' },
     { at: '2026-07-19T00:00:02.000Z', event: 'import_cancelled' },
     { at: '2026-07-19T00:00:03.000Z', event: 'retry_import' },
     { at: '2026-07-19T00:00:04.000Z', event: 'import_complete' },
+    { at: '2026-07-19T00:00:05.000Z', event: 'assistant_stream_complete' },
   ]
+  const checkedAt = 1_784_419_200_000
+  const checks = [
+    { modelId: 'asr', modelAlias: 'Whisper', role: 'asr', status: 'Compatible', message: 'ASR probe passed', checkedAt, fingerprint: 'cap-v1-asr' },
+    { modelId: 'llm', modelAlias: 'Generic LLM', role: 'structuring', status: 'Compatible', message: 'Structuring probe passed', checkedAt, fingerprint: 'cap-v1-structuring' },
+    { modelId: 'llm', modelAlias: 'Generic LLM', role: 'assistant', status: 'Compatible', message: 'Text assistant probe passed; no vision.', checkedAt, fingerprint: 'cap-v1-assistant' },
+  ]
+  const verifiedRecords = checks.map((record) => ({
+    ...record,
+    status: 'Verified',
+    message: 'Full Rain E2E evidence passed.',
+    evidenceId: 'rain-real-e2e-test',
+  }))
 
   writeJson(join(dir, 'transcript.json'), {
     detectedLanguage: 'zh',
     sentences: [sentence],
   })
-  writeJson(join(dir, 'qwen-blocks.json'), [
+  writeJson(join(dir, 'structuring-blocks.json'), [
     {
       blockId: 'live:block:0',
       nodes: [
@@ -61,44 +77,70 @@ function createEvidence(overrides: Record<string, unknown> = {}, cleanTranscript
     stage: 'ready',
     sentenceCount: 1,
     nodeCount: 3,
-    qwenBlockCount: 1,
+    structuringBlockCount: 1,
     evidenceSource: 'rain-app-query',
     queriedAt: '2026-07-19T00:00:00.000Z',
   })
   writeJson(join(dir, 'probe.json'), { format: { duration: '1.0' }, streams: [{ codec_type: 'video' }] })
   writeJson(join(dir, 'cancellation-proof.json'), { result: 'passed', source: 'rain-app-automation', events: ['start_import', 'cancel_import', 'import_cancelled'] })
   writeJson(join(dir, 'restart-proof.json'), { result: 'passed', source: 'rain-app-automation', events: ['start_import', 'import_cancelled', 'retry_import', 'import_complete'] })
+  writeJson(join(dir, 'capabilities.json'), {
+    source: 'rain-app-automation',
+    checks,
+    verifiedRecords,
+  })
+  writeJson(join(dir, 'runtime-gates.json'), {
+    source: 'rain-app-automation',
+    import: {
+      result: 'passed',
+      implementation: 'VideoImportController',
+      requiredRoles: ['asr', 'structuring'],
+      rejectedWithoutCapabilities: true,
+    },
+    assistant: {
+      result: 'passed',
+      implementation: 'decideModelRoleAssignment+streamAiChat',
+      requiredRoles: ['assistant'],
+      rejectedWithoutCapabilities: true,
+      textOnly: true,
+      responseContract: 'RAIN_ASSISTANT_OK',
+    },
+  })
   writeJson(join(dir, 'app-events.json'), events)
   writeFileSync(join(dir, 'screenshots', 'study-ready.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/eylmE8AAAAASUVORK5CYII=', 'base64'))
   writeFileSync(join(dir, 'logs', 'tauri-driver.err.log'), 'whisper_backend_init_gpu: using CUDA0 backend\nwhisper_init_from_file_with_params_no_state: use gpu = 1\n', 'utf8')
 
   const manifest = {
+    schemaVersion: 2,
+    evidenceId: 'rain-real-e2e-test',
     generatedAt: '2026-07-19T00:00:00.000Z',
     video: { path: videoPath, sha256: testVideoHash, probe: 'probe.json' },
     runtime: {
       whisperBackend: 'cpu',
       whisperModel: 'ggml-large-v3.bin',
-      qwenModel: 'qwen3.5-omni-flash',
-      qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      llmModel: 'generic-model-a',
+      llmBaseUrl: 'https://models.example.test/v1',
     },
-    timings: { asrSeconds: 1, qwenSeconds: 1 },
+    timings: { asrSeconds: 1, structuringSeconds: 1 },
     asr: {
       detectedLanguage: 'zh',
       sentenceCount: 1,
       manualReviewSamples: [sentence],
     },
-    qwen: { blockCount: 1 },
+    structuring: { blockCount: 1 },
     validation: { sentenceCoverage: 'exactly-once', noDemoSentences: true, noDemoIds: true },
     cancellation: { result: 'passed', artifact: 'cancellation-proof.json' },
     restart: { result: 'passed', artifact: 'restart-proof.json' },
     secretsDetected: false,
     artifacts: {
       transcript: 'transcript.json',
-      qwenBlocks: 'qwen-blocks.json',
+      structuringBlocks: 'structuring-blocks.json',
       database: 'database-summary.json',
       probe: 'probe.json',
       screenshots: ['screenshots/study-ready.png'],
       appEvents: 'app-events.json',
+      capabilities: 'capabilities.json',
+      runtimeGates: 'runtime-gates.json',
     },
     ...overrides,
   }
@@ -130,6 +172,39 @@ describe('evidence validator', () => {
     writeJson(manifestPath, manifest)
 
     expect(() => runValidator(manifestPath)).toThrow(/mojibake/i)
+  })
+
+  it('rejects schema v2 evidence without a capability artifact', () => {
+    const manifestPath = createEvidence({}, true)
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    delete manifest.artifacts.capabilities
+    writeJson(manifestPath, manifest)
+
+    expect(() => runValidator(manifestPath)).toThrow(/capabilit/i)
+  })
+
+  it('rejects schema v2 evidence when one model role is missing', () => {
+    const manifestPath = createEvidence({}, true)
+    const capabilityPath = join(dirname(manifestPath), 'capabilities.json')
+    const capabilityEvidence = JSON.parse(readFileSync(capabilityPath, 'utf8'))
+    capabilityEvidence.checks = capabilityEvidence.checks.filter((record: { role: string }) => record.role !== 'assistant')
+    capabilityEvidence.verifiedRecords = capabilityEvidence.verifiedRecords.filter((record: { role: string }) => record.role !== 'assistant')
+    writeJson(capabilityPath, capabilityEvidence)
+
+    expect(() => runValidator(manifestPath)).toThrow(/assistant|role/i)
+  })
+
+  it('accepts a schema v2 generic OpenAI-compatible runtime instead of requiring Qwen', () => {
+    const manifestPath = createEvidence({
+      runtime: {
+        whisperBackend: 'cpu',
+        whisperModel: 'ggml-large-v3.bin',
+        llmModel: 'generic-model-a',
+        llmBaseUrl: 'https://models.example.test/v1',
+      },
+    }, true)
+
+    expect(() => runValidator(manifestPath)).not.toThrow()
   })
 
   it('accepts strict JSON evidence with a Chinese Windows-style video path segment', () => {
@@ -177,7 +252,7 @@ describe('evidence validator', () => {
       stage: 'ready',
       sentenceCount: 1,
       nodeCount: 0,
-      qwenBlockCount: 1,
+      structuringBlockCount: 1,
       evidenceSource: 'rain-app-query',
       queriedAt: '2026-07-19T00:00:00.000Z',
     })
@@ -220,8 +295,8 @@ describe('evidence validator', () => {
       runtime: {
         whisperBackend: 'cuda',
         whisperModel: 'ggml-large-v3.bin',
-        qwenModel: 'qwen3.5-omni-flash',
-        qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        llmModel: 'generic-model-a',
+        llmBaseUrl: 'https://models.example.test/v1',
       },
     }, true)
     writeFileSync(join(dirname(manifestPath), 'logs', 'tauri-driver.err.log'), 'cpu-only whisper log\n', 'utf8')
@@ -259,5 +334,18 @@ describe('real E2E runner GPU preference', () => {
     expect(runner).not.toContain('$buildExitCode = Invoke-BuildCommand')
     expect(runner).toMatch(/--features['\"]?,?\s*['\"]cuda-whisper/s)
     expect(runner).toContain('-ExpectedWhisperBackend $selectedWhisperBackend')
+  })
+
+  it('routes schema v2 evidence through capability probes and the production import controller', () => {
+    const desktopRunner = readFileSync(join(repoRoot, 'scripts', 'run-real-e2e.ps1'), 'utf8')
+    const appRunner = readFileSync(join(repoRoot, 'src', 'e2e', 'real-e2e-runner.tsx'), 'utf8')
+
+    expect(desktopRunner).toContain('RAIN_E2E_LLM_BASE_URL')
+    expect(desktopRunner).toContain('RAIN_E2E_LLM_MODEL')
+    expect(appRunner).toContain('checkAsrModelCapability')
+    expect(appRunner).toContain('checkStructuringModelCapability')
+    expect(appRunner).toContain('checkAssistantModelCapability')
+    expect(appRunner).toContain('createVideoImportController')
+    expect(appRunner).not.toMatch(/\brunPipeline\s*\(/)
   })
 })

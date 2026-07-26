@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-26 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Recent control commits: `dadb416 feat: gate structuring models by capability` and `e06bddc refactor: split settings components by responsibility`
+Recent control commits: `94154bc feat: gate local imports by model capability` and `b699d1a feat: verify and gate text assistants`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -110,11 +110,11 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 6. ASR output is readable Chinese and no longer mojibake, but recognition accuracy is not perfect. For example, lecture terms can still be misrecognized by Whisper.
 7. The final Stage2 merge is deterministic local merging rather than a final global Qwen merge. This avoids DashScope token/rate failures and keeps every sentence covered, but it may produce less globally polished chapter naming than a successful global model merge.
 8. Many root-level historical docs (`M*.md`, `PRD.md`, `HANDOFF.md`) make the root directory crowded and can mislead new agents if read as current truth without this state file.
-9. The real E2E script is intentionally bound to this local machine setup: fixed local video hash/path assumptions, DashScope Qwen config, and D-drive CUDA/Ninja tooling paths. Treat it as a local verification script, not a portable CI script.
+9. The real E2E script is intentionally bound to this local machine setup: fixed local video hash/path assumptions and D-drive CUDA/Ninja tooling paths. Its LLM endpoint/model are now configurable through generic OpenAI-compatible environment variables, but it remains a local verification script rather than portable CI.
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate and learning-page assistant gate are implemented. `AC-LV-12` remains Partial pending a real external-model run and refreshed full E2E evidence for this generic path; existing saved assignments are preserved, but new runtime work rejects missing, failed or stale role checks.
+13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate, learning-page assistant gate, and schema v2 Evidence Harness are implemented. `AC-LV-12` remains Partial pending an actual external-model run and refreshed full E2E evidence; implementation readiness is not itself `Verified` evidence.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 
 ## What changed in the 2026-07-26 project-control baseline session
@@ -683,6 +683,30 @@ The project is more controllable than at the start of the Harness review, but it
 The immediate `settings.tsx` hotspot has been resolved by behavior-preserving extraction. The public file is now a 10-line barrel; page composition, preflight, model-pool actions, add-model form, role selection and shared presentation resources have separate owners under `src/ui/components/settings/`. New settings behavior should enter the matching component, while capability decisions and probes remain in `src/settings/`.
 
 `src/models/database.ts` remains approximately 1034 lines and `src-tauri/src/commands.rs` approximately 796 lines. Their size alone is not permission to rewrite them: both require interface-level tests and responsibility-based extraction, one controlled slice at a time.
+
+## What changed in the 2026-07-26 Evidence Harness migration
+
+The `AC-LV-12` implementation path is now connected to a provider-neutral evidence contract:
+
+- Added evidence schema v2. It requires an `evidenceId`, generic `llmModel`/`llmBaseUrl`, three real role checks, matching `Verified` records, and explicit runtime-gate artifacts.
+- The real E2E Runner now executes ASR, structuring, and text-assistant capability probes; proves missing capabilities are rejected; and runs cancellation/retry through `VideoImportController` instead of calling `runPipeline` directly.
+- New v2 structuring fields no longer use Qwen-specific names. Historical schema v1 manifests retain their original names and exact DashScope/Qwen validation.
+- Rust E2E configuration accepts a generic HTTP(S) OpenAI-compatible endpoint/model and carries the evidence ID. Legacy Qwen environment names remain read-only aliases during migration.
+- No locked files under `harness/` or `src-tauri/tests/` were modified.
+
+Verification:
+
+```powershell
+npm.cmd test -- --run scripts/validate-evidence.test.ts
+npx.cmd tsc --noEmit
+cargo test --manifest-path src-tauri/Cargo.toml e2e_config --lib
+npm.cmd test
+npm.cmd run build
+cargo test --manifest-path src-tauri/Cargo.toml
+powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest evidence/rain-real-e2e-20260720-024848/manifest.json -ExpectedWhisperBackend cuda
+```
+
+Observed result: evidence contract tests passed 15/15; TypeScript and production build passed; the full frontend suite passed 56 files / 373 tests with 1 live-key test skipped; Rust passed 50 library tests plus all executable Harness groups, with the existing real Whisper transcription test ignored; the canonical historical CUDA evidence still passes as schema v1. A new paid, multi-hour real E2E was deliberately not started without explicit confirmation, so `AC-LV-12` remains Partial and no new configuration is yet `Verified`.
 
 ## Maintenance checklist for every future session
 

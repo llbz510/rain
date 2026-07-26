@@ -108,6 +108,8 @@ cancelImport(videoId)
 
 结构化探针必须复用生产 `STAGE2_BLOCK_SYSTEM_PROMPT`、`buildStage2Blocks`、输出归一化和 `validateStage2BlockOutput`。不得另建一份更宽松的测试 schema，否则探针通过不能证明生产 Stage2 可用。
 
+真实 E2E Runner 必须经 `VideoImportController` 进入导入流程，不得直接调用 `runPipeline`。证据 schema v2 由 `scripts/validate-evidence.ps1` 负责裁判三角色能力、负向门禁、生产入口、取消/重试和最终落库；旧 schema v1 只用于验证历史证据，不能为新的模型配置签发 `Verified`。
+
 ## 5. 当前热点和控制策略
 
 | 热点 | 当前规模 | 混合的职责 | 控制策略 |

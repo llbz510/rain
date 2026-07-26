@@ -1,17 +1,18 @@
 use serde::Serialize;
 
-const QWEN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const QWEN_MODEL: &str = "qwen3.5-omni-flash";
+const DEFAULT_LLM_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DEFAULT_LLM_MODEL: &str = "qwen3.5-omni-flash";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RealE2eConfig {
     pub enabled: bool,
+    pub evidence_id: String,
     pub video_path: String,
     pub whisper_model_path: String,
-    pub qwen_base_url: String,
-    pub qwen_model: String,
-    pub qwen_api_key: String,
+    pub llm_base_url: String,
+    pub llm_model: String,
+    pub llm_api_key: String,
     pub whisper_backend: String,
     pub database_path: String,
 }
@@ -24,28 +25,39 @@ where
         return Ok(None);
     }
 
+    let evidence_id = required_env(&get_env, "RAIN_E2E_EVIDENCE_ID")?;
     let video_path = required_env(&get_env, "RAIN_E2E_VIDEO_PATH")?;
     let whisper_model_path = required_env(&get_env, "RAIN_E2E_WHISPER_MODEL_PATH")?;
-    let qwen_api_key = required_env(&get_env, "RAIN_QWEN_API_KEY")?;
+    let llm_api_key =
+        required_env_with_fallback(&get_env, "RAIN_E2E_LLM_API_KEY", "RAIN_QWEN_API_KEY")?;
     let database_path = required_env(&get_env, "RAIN_E2E_DB_PATH")?;
-    let qwen_base_url = get_env("RAIN_E2E_QWEN_BASE_URL").unwrap_or_else(|| QWEN_BASE_URL.to_string());
-    let qwen_model = get_env("RAIN_E2E_QWEN_MODEL").unwrap_or_else(|| QWEN_MODEL.to_string());
+    let llm_base_url = get_env("RAIN_E2E_LLM_BASE_URL")
+        .or_else(|| get_env("RAIN_E2E_QWEN_BASE_URL"))
+        .unwrap_or_else(|| DEFAULT_LLM_BASE_URL.to_string());
+    let llm_model = get_env("RAIN_E2E_LLM_MODEL")
+        .or_else(|| get_env("RAIN_E2E_QWEN_MODEL"))
+        .unwrap_or_else(|| DEFAULT_LLM_MODEL.to_string());
 
-    if qwen_base_url.trim_end_matches('/') != QWEN_BASE_URL {
-        return Err(format!("RAIN_E2E_QWEN_BASE_URL must be {QWEN_BASE_URL}"));
+    let normalized_base_url = llm_base_url.trim().trim_end_matches('/');
+    if !(normalized_base_url.starts_with("https://") || normalized_base_url.starts_with("http://"))
+    {
+        return Err("RAIN_E2E_LLM_BASE_URL must be an absolute HTTP(S) URL".to_string());
     }
-    if qwen_model != QWEN_MODEL {
-        return Err(format!("RAIN_E2E_QWEN_MODEL must be {QWEN_MODEL}"));
+    if llm_model.trim().is_empty() {
+        return Err("RAIN_E2E_LLM_MODEL is required for Rain real E2E mode".to_string());
     }
 
     Ok(Some(RealE2eConfig {
         enabled: true,
+        evidence_id,
         video_path,
         whisper_model_path,
-        qwen_base_url: QWEN_BASE_URL.to_string(),
-        qwen_model: QWEN_MODEL.to_string(),
-        qwen_api_key,
-        whisper_backend: crate::runtime::runtime_capability().whisper_backend.to_string(),
+        llm_base_url: normalized_base_url.to_string(),
+        llm_model: llm_model.trim().to_string(),
+        llm_api_key,
+        whisper_backend: crate::runtime::runtime_capability()
+            .whisper_backend
+            .to_string(),
         database_path,
     }))
 }
@@ -55,6 +67,25 @@ where
     F: Fn(&str) -> Option<String>,
 {
     let value = get_env(key).unwrap_or_default();
+    if value.trim().is_empty() {
+        Err(format!("{key} is required for Rain real E2E mode"))
+    } else {
+        Ok(value)
+    }
+}
+
+fn required_env_with_fallback<F>(
+    get_env: &F,
+    key: &str,
+    fallback_key: &str,
+) -> Result<String, String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let value = get_env(key)
+        .filter(|candidate| !candidate.trim().is_empty())
+        .or_else(|| get_env(fallback_key))
+        .unwrap_or_default();
     if value.trim().is_empty() {
         Err(format!("{key} is required for Rain real E2E mode"))
     } else {
@@ -86,39 +117,68 @@ mod tests {
     }
 
     #[test]
-    fn e2e_config_requires_exact_qwen_model() {
+    fn e2e_config_rejects_non_http_llm_endpoint_without_exposing_secret() {
         let error = read(&[
             ("RAIN_E2E_MODE", "1"),
+            ("RAIN_E2E_EVIDENCE_ID", "rain-real-e2e-test"),
             ("RAIN_E2E_VIDEO_PATH", "D:\\video.mp4"),
             ("RAIN_E2E_WHISPER_MODEL_PATH", "D:\\ggml-large-v3.bin"),
-            ("RAIN_QWEN_API_KEY", "sk-secret"),
+            ("RAIN_E2E_LLM_API_KEY", "sk-secret"),
             ("RAIN_E2E_DB_PATH", "D:\\rain-e2e.db"),
-            ("RAIN_E2E_QWEN_MODEL", "wrong-model"),
+            ("RAIN_E2E_LLM_BASE_URL", "models.example.test/v1"),
+            ("RAIN_E2E_LLM_MODEL", "generic-model"),
         ])
         .unwrap_err();
 
-        assert_eq!(error, "RAIN_E2E_QWEN_MODEL must be qwen3.5-omni-flash");
+        assert_eq!(
+            error,
+            "RAIN_E2E_LLM_BASE_URL must be an absolute HTTP(S) URL"
+        );
         assert!(!error.contains("sk-secret"));
     }
 
     #[test]
-    fn e2e_config_returns_required_runtime_without_redacting_values_needed_by_the_app() {
+    fn e2e_config_accepts_a_generic_openai_compatible_runtime() {
         let config = read(&[
             ("RAIN_E2E_MODE", "1"),
+            ("RAIN_E2E_EVIDENCE_ID", "rain-real-e2e-test"),
             ("RAIN_E2E_VIDEO_PATH", "D:\\video.mp4"),
             ("RAIN_E2E_WHISPER_MODEL_PATH", "D:\\ggml-large-v3.bin"),
-            ("RAIN_QWEN_API_KEY", "sk-secret"),
+            ("RAIN_E2E_LLM_API_KEY", "sk-secret"),
+            ("RAIN_E2E_LLM_BASE_URL", "https://models.example.test/v1/"),
+            ("RAIN_E2E_LLM_MODEL", "generic-model"),
             ("RAIN_E2E_DB_PATH", "D:\\rain-e2e.db"),
         ])
         .unwrap()
         .unwrap();
 
+        assert_eq!(config.evidence_id, "rain-real-e2e-test");
         assert_eq!(config.video_path, "D:\\video.mp4");
         assert_eq!(config.whisper_model_path, "D:\\ggml-large-v3.bin");
-        assert_eq!(config.qwen_base_url, QWEN_BASE_URL);
-        assert_eq!(config.qwen_model, QWEN_MODEL);
-        assert_eq!(config.qwen_api_key, "sk-secret");
+        assert_eq!(config.llm_base_url, "https://models.example.test/v1");
+        assert_eq!(config.llm_model, "generic-model");
+        assert_eq!(config.llm_api_key, "sk-secret");
         assert_eq!(config.database_path, "D:\\rain-e2e.db");
         assert!(config.whisper_backend == "cpu" || config.whisper_backend == "cuda");
+    }
+
+    #[test]
+    fn e2e_config_accepts_legacy_llm_environment_aliases() {
+        let config = read(&[
+            ("RAIN_E2E_MODE", "1"),
+            ("RAIN_E2E_EVIDENCE_ID", "rain-real-e2e-test"),
+            ("RAIN_E2E_VIDEO_PATH", "D:\\video.mp4"),
+            ("RAIN_E2E_WHISPER_MODEL_PATH", "D:\\ggml-large-v3.bin"),
+            ("RAIN_QWEN_API_KEY", "sk-secret"),
+            ("RAIN_E2E_QWEN_BASE_URL", "https://legacy.example.test/v1"),
+            ("RAIN_E2E_QWEN_MODEL", "legacy-model"),
+            ("RAIN_E2E_DB_PATH", "D:\\rain-e2e.db"),
+        ])
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(config.llm_base_url, "https://legacy.example.test/v1");
+        assert_eq!(config.llm_model, "legacy-model");
+        assert_eq!(config.llm_api_key, "sk-secret");
     }
 }

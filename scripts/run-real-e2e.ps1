@@ -1,6 +1,8 @@
 param(
   [string]$VideoPath = $env:RAIN_E2E_VIDEO_PATH,
   [string]$WhisperModelPath = $env:RAIN_WHISPER_MODEL_PATH,
+  [string]$LlmBaseUrl = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_BASE_URL)) { 'https://dashscope.aliyuncs.com/compatible-mode/v1' } else { $env:RAIN_E2E_LLM_BASE_URL }),
+  [string]$LlmModel = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_MODEL)) { 'qwen3.5-omni-flash' } else { $env:RAIN_E2E_LLM_MODEL }),
   [string]$EvidenceRoot = 'evidence',
   [int]$DriverPort = 4444,
   [int]$NativeDriverPort = 4445,
@@ -11,8 +13,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $expectedHash = '3870B5BD62E574685AC99A8E44295F5E44AC44B76343666742C1C4CA48365F8A'
-$baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-$model = 'qwen3.5-omni-flash'
 $localToolPaths = @(
   'D:\gongju\shengcan\rain\.worktrees\.tooling\cargo-bin\bin',
   'D:\gongju\shengcan\rain\.worktrees\.tooling\msedgedriver'
@@ -160,7 +160,11 @@ function Save-WebDriverScreenshot([string]$SessionId, [string]$Path) {
   [System.IO.File]::WriteAllBytes($Path, [Convert]::FromBase64String([string]$base64))
 }
 
-if ([string]::IsNullOrWhiteSpace($env:RAIN_QWEN_API_KEY)) { throw 'RAIN_QWEN_API_KEY is required for live Qwen evidence.' }
+$llmApiKey = $env:RAIN_E2E_LLM_API_KEY
+if ([string]::IsNullOrWhiteSpace($llmApiKey)) { $llmApiKey = $env:RAIN_QWEN_API_KEY }
+if ([string]::IsNullOrWhiteSpace($llmApiKey)) { throw 'RAIN_E2E_LLM_API_KEY is required for live LLM evidence.' }
+if ([string]::IsNullOrWhiteSpace($LlmBaseUrl) -or $LlmBaseUrl -notmatch '^https?://') { throw 'LlmBaseUrl must be an absolute HTTP(S) URL.' }
+if ([string]::IsNullOrWhiteSpace($LlmModel)) { throw 'LlmModel is required for live LLM evidence.' }
 $video = Find-RealVideo
 $modelPath = Find-WhisperModel
 $hash = (Get-FileHash -LiteralPath $video -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -208,7 +212,8 @@ if ($selectedWhisperBackend -eq 'cuda') {
 }
 
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
-$root = New-Item -ItemType Directory -Force -Path (Join-Path $EvidenceRoot "rain-real-e2e-$runId")
+$evidenceId = "rain-real-e2e-$runId"
+$root = New-Item -ItemType Directory -Force -Path (Join-Path $EvidenceRoot $evidenceId)
 $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'tmp')
 $dbPath = Join-Path $root.FullName 'rain-e2e.db'
 $screenshots = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'screenshots')
@@ -219,8 +224,10 @@ $env:RAIN_E2E_MODE = '1'
 $env:RAIN_E2E_VIDEO_PATH = $video
 $env:RAIN_E2E_WHISPER_MODEL_PATH = $modelPath
 $env:RAIN_E2E_DB_PATH = $dbPath
-$env:RAIN_E2E_QWEN_BASE_URL = $baseUrl
-$env:RAIN_E2E_QWEN_MODEL = $model
+$env:RAIN_E2E_EVIDENCE_ID = $evidenceId
+$env:RAIN_E2E_LLM_BASE_URL = $LlmBaseUrl.TrimEnd('/')
+$env:RAIN_E2E_LLM_MODEL = $LlmModel
+$env:RAIN_E2E_LLM_API_KEY = $llmApiKey
 $env:LIBCLANG_PATH = if ($env:LIBCLANG_PATH) { $env:LIBCLANG_PATH } else { 'C:\Program Files\LLVM\bin' }
 $env:CMAKE_CXX_FLAGS = '/utf-8'
 $env:CMAKE_C_FLAGS = '/utf-8'
@@ -267,27 +274,40 @@ try {
   $result = Invoke-WebDriverScript $sessionId 'return window.__RAIN_E2E_RESULT__'
 
   Write-JsonFile (Join-Path $root.FullName 'transcript.json') $result.transcript
-  Write-JsonFile (Join-Path $root.FullName 'qwen-blocks.json') @($result.qwenBlocks)
+  Write-JsonFile (Join-Path $root.FullName 'structuring-blocks.json') @($result.structuringBlocks)
   Write-JsonFile (Join-Path $root.FullName 'database-summary.json') $result.database
   Write-JsonFile (Join-Path $root.FullName 'cancellation-proof.json') $result.cancellation
   Write-JsonFile (Join-Path $root.FullName 'restart-proof.json') $result.restart
   Write-JsonFile (Join-Path $root.FullName 'app-events.json') @($result.events)
+  Write-JsonFile (Join-Path $root.FullName 'capabilities.json') $result.capabilities
+  Write-JsonFile (Join-Path $root.FullName 'runtime-gates.json') $result.runtimeGates
 
   $sentences = @($result.transcript.sentences)
   $manualSamples = @($sentences | Select-Object -First 10)
   $manifest = [ordered]@{
+    schemaVersion = 2
+    evidenceId = $evidenceId
     generatedAt = (Get-Date).ToUniversalTime().ToString('o')
     video = @{ path = $video; sha256 = $hash; probe = 'probe.json' }
     databasePath = $dbPath
     runtime = $result.runtime
     timings = $result.timings
     asr = @{ detectedLanguage = $result.transcript.detectedLanguage; sentenceCount = $sentences.Count; manualReviewSamples = $manualSamples }
-    qwen = @{ blockCount = @($result.qwenBlocks).Count }
+    structuring = @{ blockCount = @($result.structuringBlocks).Count }
     validation = @{ sentenceCoverage = 'computed-by-validator'; noDemoSentences = 'computed-by-validator'; noDemoIds = 'computed-by-validator' }
     cancellation = @{ result = 'passed'; artifact = 'cancellation-proof.json' }
     restart = @{ result = 'passed'; artifact = 'restart-proof.json' }
     secretsDetected = $false
-    artifacts = @{ transcript = 'transcript.json'; qwenBlocks = 'qwen-blocks.json'; database = 'database-summary.json'; probe = 'probe.json'; screenshots = @('screenshots/study-ready.png'); appEvents = 'app-events.json' }
+    artifacts = @{
+      transcript = 'transcript.json'
+      structuringBlocks = 'structuring-blocks.json'
+      database = 'database-summary.json'
+      probe = 'probe.json'
+      screenshots = @('screenshots/study-ready.png')
+      appEvents = 'app-events.json'
+      capabilities = 'capabilities.json'
+      runtimeGates = 'runtime-gates.json'
+    }
   }
   $manifestPath = Join-Path $root.FullName 'manifest.json'
   Write-JsonFile $manifestPath $manifest

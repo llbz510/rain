@@ -31,7 +31,7 @@
 | AC-LV-09 | `validate-evidence.ps1`、数据库摘要、学习页截图 | Evidence | 这是“真实可用”声明的主要裁判；普通单元测试不能替代 |
 | AC-LV-10 | `video-list-page-recovery.test.tsx`、`video-list-import.test.tsx` | Strong | 覆盖事件驱动 UI 和持久化终态；真实事件链由 E2E 补充 |
 | AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、截图和秘密 |
-| AC-LV-12 | `model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts`、`settings-preflight.test.tsx`、`settings-role-assignment.test.tsx`、`asr-capability.test.ts`、`settings-asr-workflow.test.tsx`、`structuring-capability.test.ts`、`settings-structuring-workflow.test.tsx`、`assistant-capability.test.ts`、`settings-assistant-workflow.test.tsx`、`study-playback.test.tsx`、`video-import-capability-gate.test.ts`、`video-list-page-recovery.test.tsx`、`pipeline-asr.test.ts`、`stage2-runner.test.ts` | Partial | 已覆盖能力记录、三种状态、证据门槛、秘密隔离、持久化和失效；新角色分配由领域函数和 Store 拒绝 `Unavailable`。ASR、结构化和文本助手均通过各自生产接口执行角色探针；普通探针不会伪造或降级 `Verified`。本地导入用启动快照拒绝不可用的 ASR/结构化配置，学习页在每次聊天启动前拒绝不可用的助手配置；文本助手不继承或冒充 vision。当前缺口是尚未对本轮通用助手路径执行真实外部模型检查和完整 E2E，锁定 M03/M21 的旧快照兼容也仍待单独 Harness Migration |
+| AC-LV-12 | 上述能力/运行时测试、`validate-evidence.test.ts`、`validate-evidence.ps1`、真实 E2E Runner | Partial（待 Evidence） | 三角色探针、角色门禁、导入门禁和文本助手门禁均复用生产接口。证据 schema v2 要求三角色 `Compatible` 检查、同配置 `Verified` 记录、缺少能力时的负向门禁事件，以及通过 `VideoImportController` 的真实取消/重试/落库流程；通用 OpenAI-compatible endpoint/model 不再被固定 Qwen 名称限制。旧 schema v1 证据继续按原固定运行时规则验证。当前唯一验收缺口是尚未实际运行一次新的 schema v2 外部模型 + 完整视频 E2E，因此不能把任何新配置宣称为 `Verified` |
 
 ## 3. 架构 Harness 审计
 
