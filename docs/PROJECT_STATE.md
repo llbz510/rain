@@ -841,6 +841,38 @@ git diff --check
 
 Observed result: focused playback synchronization tests passed 7 files / 48 tests, including unchanged locked M05-M07 and Store Harness; TypeScript passed; the full frontend suite passed 59 files / 383 tests with 1 live-key test skipped; production build passed with the existing Vite chunking warnings.
 
+## What changed in the 2026-07-26 AC-ST-04 directory navigation slice
+
+Continued the learning-page controls in acceptance order:
+
+- Added production `StudyInterface` tests proving that a tree or diagram single click only selects, while double click selects and navigates without changing playback state.
+- Added `src/study/navigation.ts` as the owner of container-node resolution. Its single interface resolves any chapter, section or paragraph to the earliest sentence in that subtree instead of trusting a container's stale `startTime`.
+- Routed both `SideTree` and `DiagramZone` through the same production navigation path. Their old `onSeek(node.startTime)` behavior remains only as a compatibility adapter for locked component Harness callers.
+- Added an explicit text positioning request so paused directory navigation scrolls the resolved paragraph into view; playback-follow scrolling remains governed by `isPlaying`.
+- Replaced the map-expand text placeholder with the selected node's real earliest paragraph and sentences.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+`AC-ST-04` is now `Strong`. The next controlled slice is `AC-ST-05`: persist the furthest playback position, prevent rewinds from reducing it, restore it on reopen and update the most-recent study time.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/study-navigation.test.tsx harness/m05-catalog-component.test.tsx harness/m07-text-component.test.tsx harness/m16-layout-component.test.tsx
+npx.cmd tsc --noEmit
+```
+
+Observed result: focused navigation and locked compatibility coverage passed 4 files / 24 tests; TypeScript passed. Full-suite and production-build results are recorded in the final verification for this slice before commit.
+
+Final verification:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: the full frontend suite passed 59 files / 385 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. No Rust test or real-video E2E was run because this slice changed only frontend navigation behavior and its documentation.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

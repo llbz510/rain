@@ -14,7 +14,7 @@ import { useRainStore } from '@/store/rain-store'
 import { getVisibility } from '@/ui/layout'
 import { SideTree, CatalogBar, DiagramZone } from '@/ui/components/catalog'
 import { VideoZone, VideoControls } from '@/ui/components/video'
-import { TextZone } from '@/ui/components/text-zone'
+import { TextPreview, TextZone, type TextScrollTarget } from '@/ui/components/text-zone'
 import { NotesPanel } from '@/ui/components/notes'
 import { AiAssistant, ChatInput, QuickActions } from '@/ui/components/ai-assistant'
 import { redactSecret, streamAiChat } from '@/llm/client'
@@ -22,6 +22,7 @@ import { buildAssistantContext, type AssistantSource } from '@/ai/assistant-cont
 import type { Node, ParagraphType, Sentence } from '@/models/types'
 import { decideModelRoleAssignment } from '@/settings/model-capabilities'
 import { runtimeModelFromPoolEntry } from '@/settings/model-pool'
+import { resolveNodeNavigationTarget } from '@/study/navigation'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -189,8 +190,10 @@ export function StudyInterface() {
   // AI chat state
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; sources?: AssistantSource[] }>>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  const [textScrollTarget, setTextScrollTarget] = useState<TextScrollTarget | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
   const requestIdRef = useRef(0)
+  const navigationRequestIdRef = useRef(0)
   useEffect(() => () => {
     requestIdRef.current += 1
     cleanupRef.current?.()
@@ -274,6 +277,18 @@ export function StudyInterface() {
     useRainStore.setState({ playPosition: time })
   }
 
+  const handleNodeNavigate = useCallback((nodeId: string) => {
+    const target = resolveNodeNavigationTarget(nodeTree, sentences, nodeId)
+    if (!target) return
+
+    navigationRequestIdRef.current += 1
+    useRainStore.setState({ playPosition: target.time })
+    setTextScrollTarget({
+      paragraphId: target.paragraphId,
+      requestId: navigationRequestIdRef.current,
+    })
+  }, [nodeTree, sentences])
+
   const setAiPanel = (panel: 'ai' | 'notes') => {
     useRainStore.setState({ aiPanelState: panel })
   }
@@ -301,7 +316,7 @@ export function StudyInterface() {
       {/* 左树：所有模式恒显 */}
       {visibility.sideTree && (
         <aside style={sideTreeStyle}>
-          <SideTree onSeek={handleSeek} playPosition={playPosition} />
+          <SideTree onNavigateNode={handleNodeNavigate} playPosition={playPosition} />
         </aside>
       )}
 
@@ -322,17 +337,17 @@ export function StudyInterface() {
         )}
         {visibility.textZone && (
           <div style={flexFillStyle}>
-            <TextZone onSeek={handleSeek} />
+            <TextZone onSeek={handleSeek} scrollTarget={textScrollTarget} />
           </div>
         )}
         {visibility.diagramZone && (
           <div style={flexFillStyle}>
-            <DiagramZone onSeek={handleSeek} />
+            <DiagramZone onNavigateNode={handleNodeNavigate} />
           </div>
         )}
         {visibility.textPreview && (
-          <div data-testid="text-preview" style={flexFillStyle}>
-            预览
+          <div style={flexFillStyle}>
+            <TextPreview selectedNodeId={selectedNodeId} onSeek={handleSeek} />
           </div>
         )}
       </section>

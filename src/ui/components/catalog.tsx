@@ -10,6 +10,7 @@ import type { Node } from '@/models/types'
 
 interface CatalogProps {
   onSeek?: (time: number) => void
+  onNavigateNode?: (nodeId: string) => void
 }
 
 function getChildren(nodes: Node[], parentId: string | null): Node[] {
@@ -18,12 +19,19 @@ function getChildren(nodes: Node[], parentId: string | null): Node[] {
     .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
-export function SideTree({ onSeek, playPosition: propPosition }: CatalogProps & { playPosition?: number }) {
+export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }: CatalogProps & { playPosition?: number }) {
   const nodes = useRainStore((s) => s.nodeTree)
   const selectedNodeId = useRainStore((s) => s.selectedNodeId)
   const selectNode = useRainStore((s) => s.selectNode)
   const storePosition = useRainStore((s) => s.playPosition)
   const playPosition = propPosition ?? storePosition
+  const selectedNodeRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (selectedNodeId) {
+      selectedNodeRef.current?.scrollIntoView?.({ block: 'nearest' })
+    }
+  }, [selectedNodeId])
 
   const indicators = computeProgressIndicators(
     nodes.map((n) => ({ id: n.id, startTime: n.startTime, endTime: n.endTime })),
@@ -40,11 +48,16 @@ export function SideTree({ onSeek, playPosition: propPosition }: CatalogProps & 
     return (
       <div key={node.id}>
         <div
+          ref={isSelected ? selectedNodeRef : undefined}
           data-selected={isSelected ? 'true' : 'false'}
           data-testid={`progress-indicator-${node.id}`}
           style={{ marginLeft: depth * 16, cursor: 'pointer' }}
           onClick={() => selectNode(node.id, 'tree')}
-          onDoubleClick={() => onSeek?.(node.startTime)}
+          onDoubleClick={() => {
+            selectNode(node.id, 'tree')
+            if (onNavigateNode) onNavigateNode(node.id)
+            else onSeek?.(node.startTime)
+          }}
         >
           <span>{indicator === 'filled' ? '■' : indicator === 'current' ? '▶' : '□'}</span>
           <span>{node.title}</span>
@@ -75,7 +88,7 @@ export function CatalogBar({ onSeek }: CatalogProps) {
   )
 }
 
-export function DiagramZone({ onSeek }: CatalogProps) {
+export function DiagramZone({ onSeek, onNavigateNode }: CatalogProps) {
   const nodes = useRainStore((s) => s.nodeTree)
   const selectedNodeId = useRainStore((s) => s.selectedNodeId)
   const selectNode = useRainStore((s) => s.selectNode)
@@ -88,7 +101,11 @@ export function DiagramZone({ onSeek }: CatalogProps) {
           data-selected={selectedNodeId === node.id ? 'true' : 'false'}
           style={{ cursor: 'pointer' }}
           onClick={() => selectNode(node.id, 'diagram')}
-          onDoubleClick={() => onSeek?.(node.startTime)}
+          onDoubleClick={() => {
+            selectNode(node.id, 'diagram')
+            if (onNavigateNode) onNavigateNode(node.id)
+            else onSeek?.(node.startTime)
+          }}
         >
           {node.title}
         </div>
