@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-26 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Recent baseline commit before the assistant quick-actions slice: `c1ba250 docs: refresh project state after evidence hardening`
+Recent capability commits: `a38ded7 feat: track model role capabilities` and `dadb416 feat: gate structuring models by capability`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -76,6 +76,7 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 | `src/llm/` | OpenAI-compatible LLM HTTP client. | Currently used for DashScope-compatible Qwen calls. |
 | `src/models/` | Frontend database and domain models. | Uses Tauri SQL plugin; this is why `sql:allow-execute` exists. |
 | `src/settings/` | Runtime model settings and readiness checks. | `preflight.ts` is the user-facing readiness check for local-video workflow prerequisites. |
+| `src/ui/components/settings/` | Settings UI components split by responsibility. | `settings-page.tsx` composes the page; capability decisions remain in `src/settings/`; `src/ui/components/settings.tsx` is the stable public barrel. |
 | `src/e2e/` | Real app automation helper for evidence generation. | Guarded by runtime environment; not normal user workflow code. |
 | `src/__tests__/` | Product/unit/regression tests owned by implementation. | Can be modified when implementing features. |
 | `harness/` | Locked frontend harness tests and test-only support. | `harness/support/` may be imported by tests only; production `src/` must never depend on it. Do not modify locked Harness unless user explicitly approves migration. |
@@ -113,7 +114,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001 now confirms multi-model support through per-role capability contracts. Current preflight and evidence validation are still tied to the first verified `large-v3` + `qwen3.5-omni-flash` profile, so implementing generic `Compatible` / `Verified` / `Unavailable` capability state remains a product gap.
+13. DEC-001's generic `Compatible` / `Verified` / `Unavailable` records, stale-result invalidation, role-assignment gate and structuring probe are implemented. `AC-LV-12` remains Partial because ASR/assistant role probes, generic preflight and Pipeline runtime-entry enforcement are not complete; existing saved assignments are temporarily preserved.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 
 ## What changed in the 2026-07-26 project-control baseline session
@@ -496,6 +497,28 @@ git diff --check
 
 Observed result: 6 related files / 43 tests passed; TypeScript passed; the full frontend suite passed 51 files / 346 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings; `git diff --check` passed with only normal Windows LF/CRLF notices. Tests inject the model caller and prove the production contract path, failure handling and settings workflow. No live external model was called in this session, so no concrete model configuration was promoted based on new real evidence. Rust and real-video E2E were not rerun because this slice changes frontend settings and shares an existing Stage2 prompt constant without changing Rust or the full import orchestration.
 
+## What changed in the 2026-07-26 settings UI decomposition session
+
+After committing the capability slice as `dadb416 feat: gate structuring models by capability`, the settings hotspot was split without changing product behavior:
+
+- Kept `src/ui/components/settings.tsx` as the stable public barrel used by `App.tsx`, M19 and implementation-owned tests.
+- Moved page composition, preflight, model-pool actions, add-model form, role selection and shared presentation resources into separate files under `src/ui/components/settings/`.
+- Kept capability decisions and the structuring probe in `src/settings/`; the extracted UI components continue to call those existing owners.
+- Did not modify locked frontend or Rust Harness files.
+- Did not change any AC status. `AC-LV-12` remains Partial and resumes only after this code-health slice.
+
+Verification:
+
+```powershell
+npm.cmd test -- --run harness/m19-settings-component.test.tsx src/__tests__/settings-connection.test.tsx src/__tests__/settings-preflight.test.tsx src/__tests__/settings-role-assignment.test.tsx src/__tests__/settings-structuring-workflow.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: targeted settings tests passed 5 files / 16 tests; TypeScript passed; the full frontend suite passed 51 files / 346 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. Rust and real-video E2E were not rerun because this was a frontend-only behavior-preserving refactor.
+
 ## Current controllability audit on 2026-07-26
 
 The project is more controllable than at the start of the Harness review, but it is not uniformly clean:
@@ -506,7 +529,7 @@ The project is more controllable than at the start of the Harness review, but it
 - URL import, universal vision explanation and advanced tree editing remain explicit Gap/Proposed work instead of being represented by placeholder success paths.
 - The role-gate and structuring-probe work forms one coherent capability slice and must remain separate from unrelated refactoring.
 
-The immediate code-organization risk is `src/ui/components/settings.tsx`, now approximately 1185 lines. It owns the page shell, preflight panel, model list, connection/capability actions, add-model form and role selector. Domain rules were kept out of this file, but continuing to add UI workflows here would create a new hotspot. The next code-health slice should be behavior-preserving extraction behind the same public exports, with existing M19 and `src/__tests__/settings-*.test.tsx` tests acting as regression judges.
+The immediate `settings.tsx` hotspot has been resolved by behavior-preserving extraction. The public file is now a 10-line barrel; page composition, preflight, model-pool actions, add-model form, role selection and shared presentation resources have separate owners under `src/ui/components/settings/`. New settings behavior should enter the matching component, while capability decisions and probes remain in `src/settings/`.
 
 `src/models/database.ts` remains approximately 1034 lines and `src-tauri/src/commands.rs` approximately 796 lines. Their size alone is not permission to rewrite them: both require interface-level tests and responsibility-based extraction, one controlled slice at a time.
 

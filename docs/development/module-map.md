@@ -36,6 +36,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
+| Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择 | 定义能力裁决、直接实现模型请求、承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
 | Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
 | Structuring Capability Probe | 对任意 LLM 发送最小 Stage2 请求，并用生产契约判断能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
 | LLM Adapter | OpenAI-compatible 请求、流式和错误处理 | 产品状态机、SQLite | `src/llm/` |
@@ -107,7 +108,7 @@ cancelImport(videoId)
 
 | 热点 | 当前规模 | 混合的职责 | 控制策略 |
 | --- | ---: | --- | --- |
-| `src/ui/components/settings.tsx` | 约 1185 行 | 页面、表单、预检、模型池、角色门禁、持久化 | 已达到立即治理阈值；停止加入新设置行为，保留公开导出并按职责提取组件 |
+| `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
 | `src/models/database.ts` | 约 1034 行 | 接口、两种实现、schema、映射、CRUD、事务 | 先补调用级测试，再按数据库接口拆实现 |
 | `src-tauri/src/commands.rs` | 约 796 行 | command、参数处理、部分系统行为 | 保持 command 薄，行为下沉到 Rust 模块 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
@@ -157,3 +158,13 @@ cancelImport(videoId)
 - 当前 Stage2 只暴露块调用和本地确定性合并，不再暴露未使用的 `callMerge`。
 - Rust command 注册只包含真实可调用边界；空 `start_import` 和自制 `convert_file_src` 已退役。
 - 已删除只供旧 Harness 使用的浅模块；完整清单见 `harness-migration-2026-07-26.md`。
+
+## 9. 设置 UI 受控拆分结果
+
+状态：`Completed`（2026-07-26）
+
+- `src/ui/components/settings.tsx` 从约 1185 行热点缩为 10 行公共 barrel，原有导入路径保持不变。
+- 页面编排、自检、模型池、添加模型、角色选择和共享展示资源分别进入 `src/ui/components/settings/` 下的独立文件。
+- 设置 UI 继续调用 `src/settings/` 中的能力契约和探针，没有复制领域规则。
+- M19 和现有 `src/__tests__/settings-*.test.tsx` 继续验收相同公共组件；锁定 Harness 未修改。
+- 这是行为保持重构，不改变 AC 状态，也不声称完成 `AC-LV-12`。
