@@ -791,6 +791,31 @@ git diff --check
 
 Observed result: focused loading tests passed 2 files / 6 tests; TypeScript passed; the full frontend suite passed 58 files / 380 tests with 1 live-key test skipped; production build passed with the existing Vite chunking warnings; canonical schema v2 CUDA evidence still passed; `git diff --check` reported no whitespace errors.
 
+## What changed in the 2026-07-26 AC-ST-02 navigation proof
+
+Continued the learning-page controls in acceptance order:
+
+- Added `src/__tests__/study-navigation.test.tsx` at the production `StudyInterface` seam.
+- Proved that double-clicking a transcript sentence updates both Store `playPosition` and the rendered `<video>.currentTime`.
+- Proved that a model-produced citation only becomes a seek control after matching a current assistant source ID and exact timestamps, then traverses the same Store/media path.
+- Covered both playing and paused states and asserted that seek does not call `play()` or `pause()`.
+- Kept the existing production implementation unchanged because the full behavior already passed. The missing item was a cross-module judge, not a product defect.
+- Did not create a speculative navigation module. The current one-time seek interface remains small; `AC-ST-04` will decide whether node resolution and multi-region positioning create enough complexity to justify extraction.
+
+`AC-ST-02` is now `Strong`. The next controlled slice is `AC-ST-03`: drive video `timeupdate` through the shared `playPosition` and prove that sentence highlight and directory current state remain synchronized.
+
+Verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/study-navigation.test.tsx src/__tests__/study-playback.test.tsx harness/m06-video-component.test.tsx harness/m07-text-component.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: focused navigation tests passed 4 files / 24 tests; TypeScript passed; the full frontend suite passed 59 files / 382 tests with 1 live-key test skipped; production build passed with the existing Vite chunking warnings.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
