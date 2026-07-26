@@ -63,8 +63,51 @@ describe('Stage2 contract RED', () => {
     const clientMock = vi.fn().mockResolvedValue('bad')
     await expect(runStage2Stage({
       video, sentences, settings, db: await createDatabase(':memory:'), callStage2: clientMock,
-    })).rejects.toThrow('Qwen returned invalid structured output after 3 attempts')
+    })).rejects.toThrow('Stage2 model returned invalid structured output after 3 attempts')
     expect(clientMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('runs a generic OpenAI-compatible configuration through the production Stage2 path', async () => {
+    const genericSettings = {
+      baseUrl: 'https://models.example.test/v1',
+      apiKey: 'generic-secret',
+      model: 'generic-structuring-model',
+    }
+    const clientMock = vi.fn(async (_prompt, payload) =>
+      validOutput(JSON.parse(payload) as Stage2InputBlock))
+
+    await runStage2Stage({
+      video,
+      sentences,
+      settings: genericSettings,
+      db: await stage2Db(),
+      callStage2: clientMock,
+    })
+
+    expect(clientMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      genericSettings,
+      undefined,
+    )
+  })
+
+  it.each([
+    ['base URL', { ...settings, baseUrl: '' }],
+    ['API key', { ...settings, apiKey: '' }],
+    ['name', { ...settings, model: '' }],
+  ])('rejects a blank Stage2 model %s before making a request', async (_field, invalidSettings) => {
+    const clientMock = vi.fn()
+
+    await expect(runStage2Stage({
+      video,
+      sentences,
+      settings: invalidSettings,
+      db: await createDatabase(':memory:'),
+      callStage2: clientMock,
+    })).rejects.toThrow(/Stage2 model/)
+
+    expect(clientMock).not.toHaveBeenCalled()
   })
 
   it('rejects a single sentence that exceeds the deterministic token budget before any request', async () => {
@@ -196,7 +239,7 @@ describe('Stage2 strict validation', () => {
     const clientMock = vi.fn().mockResolvedValue({ ...validOutput(block), bodyText: 'generated text' })
     await expect(runStage2Stage({
       video, sentences, settings, db: await stage2Db(), maxBlockTokens: 10_000, callStage2: clientMock,
-    })).rejects.toThrow('Qwen returned invalid structured output after 3 attempts')
+    })).rejects.toThrow('Stage2 model returned invalid structured output after 3 attempts')
     expect(clientMock).toHaveBeenCalledTimes(3)
   })
 })

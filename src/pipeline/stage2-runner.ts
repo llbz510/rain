@@ -15,8 +15,6 @@ const DEFAULT_MAX_BLOCK_TOKENS = 4_000
 const MAX_ATTEMPTS = 3
 const RETRY_BASE_DELAY_MS = 500
 const RETRY_MAX_DELAY_MS = 5_000
-const QWEN_MODEL = 'qwen3.5-omni-flash'
-const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 
 export const STAGE2_BLOCK_SYSTEM_PROMPT = `Return JSON structure metadata only. Do not return transcript body text.
 The exact object keys are blockId, nodes, coveredSentenceIds. Each node contains only id, parentId,
@@ -176,7 +174,7 @@ async function requestValidatedOutput(
     }
   }
   if (lastValidationErrors.length > 0) {
-    throw new Error(`Qwen returned invalid structured output after 3 attempts: ${lastValidationErrors.join('; ')}`)
+    throw new Error(`Stage2 model returned invalid structured output after 3 attempts: ${lastValidationErrors.join('; ')}`)
   }
   if (lastError instanceof Error) {
     const redacted = redactSecret(lastError.message, [settings.apiKey])
@@ -189,11 +187,9 @@ async function requestValidatedOutput(
 }
 
 function validateInputSettings(settings: LlmSettings): void {
-  if (!settings.apiKey.trim()) throw new Error('Qwen API key is required')
-  if (settings.model !== QWEN_MODEL) throw new Error(`Qwen model must be ${QWEN_MODEL}`)
-  if (settings.baseUrl.replace(/\/+$/, '') !== DASHSCOPE_BASE_URL) {
-    throw new Error(`Qwen base URL must be ${DASHSCOPE_BASE_URL}`)
-  }
+  if (!settings.baseUrl.trim()) throw new Error('Stage2 model base URL is required')
+  if (!settings.apiKey.trim()) throw new Error('Stage2 model API key is required')
+  if (!settings.model.trim()) throw new Error('Stage2 model name is required')
 }
 
 function checkpointOutputs(value: unknown): Stage2BlockOutput[] {

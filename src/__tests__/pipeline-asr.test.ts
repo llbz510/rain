@@ -427,7 +427,7 @@ describe('fail-closed ASR pipeline', () => {
     await expect(runPipeline(video, llmSettings, callbacks(), db, asrModel, {
       invoke: successfulInvoke(),
       callStage2: vi.fn().mockResolvedValue({ chapters: [{ title: '', start: 1, end: 0, sections: [] }] }),
-    })).rejects.toThrow('Qwen returned invalid structured output after 3 attempts')
+    })).rejects.toThrow('Stage2 model returned invalid structured output after 3 attempts')
 
     expect(await getVideoById(db, video.id)).toMatchObject({ status: 'failed', stage: 'stage2' })
   })

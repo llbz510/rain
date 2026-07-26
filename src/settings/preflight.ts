@@ -1,5 +1,3 @@
-import type { LlmSettings } from '@/llm/types'
-import { testQwenConnection, type QwenConnectionResult } from '@/llm/qwen-health'
 import { tauriInvoke, isTauri as detectTauri } from '@/lib/tauri-env'
 import type { RuntimeModel, RuntimeSettings } from '@/settings/model-pool'
 import {
@@ -7,9 +5,10 @@ import {
   recordCapabilityCheck,
   type ModelCapabilityRecord,
 } from '@/settings/model-capabilities'
+import { checkStructuringModelCapability } from '@/settings/structuring-capability'
 
 export type PreflightStatus = 'ok' | 'warning' | 'error' | 'skipped'
-export type PreflightCheckId = 'runtime' | 'roles' | 'whisper' | 'qwen' | 'assistant' | 'database' | 'ytdlp'
+export type PreflightCheckId = 'runtime' | 'roles' | 'whisper' | 'structuring' | 'assistant' | 'database' | 'ytdlp'
 
 export interface PreflightCheck {
   id: PreflightCheckId
@@ -30,15 +29,8 @@ export interface RunPreflightCheckInput {
   runtimeSettings: RuntimeSettings
   isTauri?: () => boolean
   invoke?: PreflightInvoke
-  testQwen?: (settings: LlmSettings) => Promise<QwenConnectionResult>
+  checkStructuring?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
   checkDatabaseWrite?: () => Promise<void>
-}
-
-const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-const QWEN_MODEL = 'qwen3.5-omni-flash'
-
-function normalizeBaseUrl(baseUrl: string | undefined): string {
-  return (baseUrl ?? '').replace(/\/+$/, '')
 }
 
 function basename(path: string): string {
@@ -60,14 +52,6 @@ function roleModel(settings: RuntimeSettings, role: keyof RuntimeSettings['roles
   const id = settings.roles[role]
   if (!id) return null
   return settings.models.find((model) => model.id === id) ?? null
-}
-
-function qwenSettingsFrom(model: RuntimeModel): LlmSettings {
-  return {
-    baseUrl: model.baseUrl ?? '',
-    model: model.model,
-    apiKey: model.apiKey ?? '',
-  }
 }
 
 async function defaultDatabaseWriteCheck(): Promise<void> {
@@ -104,11 +88,24 @@ function preflightCapabilityRecord(
   })
 }
 
+function preserveVerifiedRecord(
+  model: RuntimeModel,
+  result: ModelCapabilityRecord,
+  existing: ModelCapabilityRecord[],
+): ModelCapabilityRecord {
+  const prior = assessModelCapability(model, result.role, existing)
+  if (result.status !== 'Unavailable' && prior.status === 'Verified' && !prior.stale) {
+    const { stale: _stale, ...record } = prior
+    return record
+  }
+  return result
+}
+
 export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<PreflightReport> {
   const isTauri = input.isTauri ?? detectTauri
   const invoke = input.invoke ?? tauriInvoke
   const checkDatabaseWrite = input.checkDatabaseWrite ?? defaultDatabaseWriteCheck
-  const checkQwen = input.testQwen ?? testQwenConnection
+  const checkStructuring = input.checkStructuring ?? checkStructuringModelCapability
   const checks: PreflightCheck[] = []
   const existingCapabilities = input.runtimeSettings.capabilities ?? []
 
@@ -220,29 +217,25 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
     }
   }
 
-  const structuringQwenConfigured = Boolean(structuringModel)
-    && normalizeBaseUrl(structuringModel?.baseUrl) === QWEN_BASE_URL
-    && structuringModel?.model === QWEN_MODEL
-  if (!structuringQwenConfigured || !structuringModel) {
+  let structuringCapability: ModelCapabilityRecord | null = null
+  if (!structuringModel) {
     checks.push({
-      id: 'qwen',
-      label: 'Qwen/DashScope',
+      id: 'structuring',
+      label: '结构化模型',
       status: 'error',
-      message: `结构化模型必须使用 ${QWEN_MODEL}（${QWEN_BASE_URL}）。`,
-    })
-  } else if (!structuringModel.apiKey?.trim()) {
-    checks.push({
-      id: 'qwen',
-      label: 'Qwen/DashScope',
-      status: 'error',
-      message: 'Qwen API Key 为空，请在模型设置中保存密钥。',
+      message: '没有选择结构化模型。',
     })
   } else {
-    const result = await checkQwen(qwenSettingsFrom(structuringModel))
+    const result = await checkStructuring(structuringModel)
+    structuringCapability = preserveVerifiedRecord(
+      structuringModel,
+      result,
+      existingCapabilities,
+    )
     checks.push({
-      id: 'qwen',
-      label: 'Qwen/DashScope',
-      status: result.ok ? 'ok' : 'error',
+      id: 'structuring',
+      label: '结构化模型',
+      status: result.status === 'Compatible' || result.status === 'Verified' ? 'ok' : 'error',
       message: result.message,
     })
   }
@@ -254,26 +247,26 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
       status: 'warning',
       message: '未选择助手模型；本地视频处理不受影响，但学习页 AI 助手可能不可用。',
     })
-  } else if (normalizeBaseUrl(assistantModel.baseUrl) !== QWEN_BASE_URL || assistantModel.model !== QWEN_MODEL) {
+  } else if (assistantModel.type !== 'llm') {
     checks.push({
       id: 'assistant',
       label: 'AI 助手',
       status: 'warning',
-      message: `助手不是 ${QWEN_MODEL}；本地视频处理不受影响，但 AI 助手可能不可用或表现不一致。`,
+      message: '助手角色需要 LLM 模型；本地视频处理不受影响。',
     })
-  } else if (!assistantModel.apiKey?.trim()) {
+  } else if (!assistantModel.baseUrl?.trim() || !assistantModel.model.trim() || !assistantModel.apiKey?.trim()) {
     checks.push({
       id: 'assistant',
       label: 'AI 助手',
       status: 'warning',
-      message: '助手模型没有 API Key；本地视频处理不受影响，但 AI 助手可能不可用。',
+      message: '助手模型配置不完整；本地视频处理不受影响，但 AI 助手可能不可用。',
     })
   } else {
     checks.push({
       id: 'assistant',
       label: 'AI 助手',
       status: 'ok',
-      message: '助手模型已配置。',
+      message: '助手模型已配置；完整助手能力仍需单独检查。',
     })
   }
 
@@ -325,7 +318,6 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
   }
 
   const whisperCheck = checks.find((check) => check.id === 'whisper')
-  const qwenCheck = checks.find((check) => check.id === 'qwen')
   const assistantCheck = checks.find((check) => check.id === 'assistant')
   const capabilities: ModelCapabilityRecord[] = []
 
@@ -339,25 +331,16 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
       existingCapabilities,
     ))
   }
-  if (structuringModel && qwenCheck) {
-    capabilities.push(preflightCapabilityRecord(
-      structuringModel,
-      'structuring',
-      qwenCheck.status === 'ok',
-      qwenCheck.message,
-      'Qwen 连接预检通过；尚未执行 Stage2 结构契约检查。',
-      existingCapabilities,
-    ))
+  if (structuringCapability) {
+    capabilities.push(structuringCapability)
   }
   if (assistantModel && assistantCheck) {
-    const sharesCheckedConfiguration = assistantModel.id === structuringModel?.id
-    const assistantPreflightPassed = sharesCheckedConfiguration && qwenCheck?.status === 'ok'
     capabilities.push(preflightCapabilityRecord(
       assistantModel,
       'assistant',
-      assistantPreflightPassed,
-      sharesCheckedConfiguration ? (qwenCheck?.message ?? assistantCheck.message) : '助手模型尚未执行独立的文本能力检查。',
-      '文本连接预检通过；尚未执行助手停止或取消能力检查。',
+      assistantCheck.status === 'ok',
+      assistantCheck.message,
+      '助手配置预检通过；尚未执行助手停止或取消能力检查。',
       existingCapabilities,
     ))
   }

@@ -16,7 +16,7 @@ React 页面与 UI
 领域规则（状态机、结构契约、数据类型）
         |
         v
-适配器（SQLite、Tauri、Qwen）
+适配器（SQLite、Tauri、OpenAI-compatible LLM）
         |
         v
 Rust 系统能力（文件、媒体、Whisper、任务调度）
@@ -32,13 +32,13 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Video Import Controller | 创建本地视频记录，启动/重试/取消 Pipeline，归一化进度并修复失败状态 | 文件选择 UI、列表排序和卡片渲染 | `src/pipeline/video-import-controller.ts` |
 | Import Pipeline | 执行 ASR -> Stage2 -> merging，处理取消、失败和恢复 | 页面布局、具体 SQL、Whisper 内部实现 | `src/pipeline/pipeline-orchestrator.ts` |
 | ASR Stage | 解析模型、调用 Whisper、校验结果、原子保存 ASR | Stage2、页面提示布局 | `src/pipeline/asr-runner.ts` |
-| Stage2 | 分块、调用 Qwen、校验、检查点和确定性合并 | ASR、UI、任意改写原始句子 | `src/pipeline/stage2-*.ts` |
+| Stage2 | 分块、调用已通过能力检查的 OpenAI-compatible LLM、校验、检查点和确定性合并 | ASR、UI、任意改写原始句子 | `src/pipeline/stage2-*.ts` |
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
 | Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择 | 定义能力裁决、直接实现模型请求、承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
 | Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
-| Structuring Capability Probe | 对任意 LLM 发送最小 Stage2 请求，并用生产契约判断能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
+| Structuring Capability Probe | 为模型池动作和运行前预检发送最小 Stage2 请求，并用生产契约判断任意 OpenAI-compatible LLM 能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
 | LLM Adapter | OpenAI-compatible 请求、流式和错误处理 | 产品状态机、SQLite | `src/llm/` |
 | Tauri Adapter | command/event 名称和前端调用封装 | 产品规则 | `src/lib/tauri-env.ts`、`src/architecture/` |
 | Rust Commands | 把前端请求翻译为 Rust 模块调用 | 承载全部媒体/Whisper 实现 | `src-tauri/src/commands.rs` |
@@ -140,7 +140,7 @@ cancelImport(videoId)
 剩余工作：
 
 - 在线 URL 导入尚未经过真实验收，相关逻辑暂时仍在页面中。
-- 模型能力记录、持久化、配置变化失效、新角色分配拦截和通用 LLM 结构化检查已实现；ASR/助手角色检查和 Pipeline 运行入口门禁仍待后续受控切片完成。
+- 模型能力记录、持久化、配置变化失效、新角色分配拦截和通用 LLM 结构化检查已实现；设置预检已复用生产结构化探针。ASR/助手角色检查和 Pipeline 运行入口门禁仍待后续受控切片完成。
 - 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
 
 ## 8. Harness Migration 结果

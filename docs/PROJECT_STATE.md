@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-26 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Recent capability commits: `a38ded7 feat: track model role capabilities` and `dadb416 feat: gate structuring models by capability`
+Recent control commits: `dadb416 feat: gate structuring models by capability` and `e06bddc refactor: split settings components by responsibility`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -114,7 +114,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001's generic `Compatible` / `Verified` / `Unavailable` records, stale-result invalidation, role-assignment gate and structuring probe are implemented. `AC-LV-12` remains Partial because ASR/assistant role probes, generic preflight and Pipeline runtime-entry enforcement are not complete; existing saved assignments are temporarily preserved.
+13. DEC-001's generic `Compatible` / `Verified` / `Unavailable` records, stale-result invalidation, role-assignment gate, structuring probe and provider-neutral structuring preflight are implemented. `AC-LV-12` remains Partial because ASR/assistant role probes and Pipeline runtime-entry enforcement are not complete; existing saved assignments are temporarily preserved.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 
 ## What changed in the 2026-07-26 project-control baseline session
@@ -518,6 +518,43 @@ git diff --check
 ```
 
 Observed result: targeted settings tests passed 5 files / 16 tests; TypeScript passed; the full frontend suite passed 51 files / 346 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. Rust and real-video E2E were not rerun because this was a frontend-only behavior-preserving refactor.
+
+## What changed in the 2026-07-26 provider-neutral structuring preflight session
+
+Continued `AC-LV-12` after the settings UI decomposition commit:
+
+- Replaced the fixed DashScope/Qwen health request inside `runPreflightCheck` with the existing production-contract `checkStructuringModelCapability` probe.
+- The selected structuring model may now use any saved OpenAI-compatible endpoint/model combination; the preflight signs `Compatible` only after the production Stage2 schema and exact sentence coverage pass.
+- Removed the conflicting fixed-Qwen guard from the production `runStage2Stage` entry. Production now accepts the same OpenAI-compatible configuration shape as the capability probe and rejects blank endpoint, API Key or model name before a request.
+- A failed probe makes the preflight not ready and returns the probe's redacted reason.
+- A successful ordinary probe preserves an existing current `Verified` record instead of downgrading its E2E evidence.
+- Assistant configuration is still a non-blocking warning/health item and cannot inherit structuring capability. A separate assistant role probe remains required.
+- Locked Harness and Rust files were not modified.
+
+Files changed:
+
+- `src/settings/preflight.ts`
+- `src/pipeline/stage2-runner.ts`
+- `src/ui/components/settings/preflight-panel.tsx`
+- `src/__tests__/preflight.test.ts`
+- `src/__tests__/stage2-runner.test.ts`
+- `src/__tests__/pipeline-asr.test.ts` (updated the supplier-neutral Stage2 failure wording only)
+- `docs/development/harness-coverage.md`
+- `docs/development/module-map.md`
+- `docs/PROJECT_STATE.md`
+
+Verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/preflight.test.ts src/__tests__/structuring-capability.test.ts src/__tests__/settings-preflight.test.tsx src/__tests__/settings-structuring-workflow.test.tsx
+npm.cmd test -- --run src/__tests__/stage2-runner.test.ts src/__tests__/preflight.test.ts src/__tests__/structuring-capability.test.ts harness/m04-ai-pipeline.test.ts harness/m18-long-video.test.ts
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: targeted capability/preflight tests passed 4 files / 11 tests; the production-path alignment set passed 5 files / 49 tests, including locked M04/M18 without modifying them. TypeScript passed; the final frontend suite passed 51 files / 351 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. No live external model, Rust test or real-video E2E was run in this slice.
 
 ## Current controllability audit on 2026-07-26
 
