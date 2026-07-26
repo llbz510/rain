@@ -1,7 +1,7 @@
 import type { Database } from '@/models/database'
 import { saveAsrAtomically, transitionVideoImportState } from '@/models/database'
 import type { Sentence, Video } from '@/models/types'
-import { detectLanguageFromSentences } from '@/pipeline/asr-normalize'
+import { detectLanguageFromSentences } from '@/pipeline/language-detection'
 import { assertTransition, type ImportStage } from '@/pipeline/import-state'
 import { tauriInvoke } from '@/lib/tauri-env'
 

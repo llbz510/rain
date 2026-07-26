@@ -3,7 +3,6 @@
 // Tauri command 层（决策92/96/98）
 // ========================================
 
-use crate::asr;
 use crate::asr_persistence::{self, PersistedSentence};
 use crate::events::{self, ProgressPayload};
 use crate::ffmpeg;
@@ -16,20 +15,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
-/// 启动导入（立即返回，后台 tokio task 跑，决策98）
-/// 流程：yt-dlp下载(在线) → ffprobe时长 → 缩略图 → ASR → 事件推送
-#[tauri::command]
-pub async fn start_import(
-    _app: AppHandle,
-    _scheduler: State<'_, Arc<ImportScheduler>>,
-    _video_id: String,
-    _source: String,
-    _file_path: Option<String>,
-    _source_url: Option<String>,
-) -> Result<(), String> {
-    // 调用方传入的 scheduler 已经从 State 中取出
-    // 立即返回，实际导入流程由前端编排（调 start_asr 等子命令）
-    Ok(())
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AsrSentence {
+    pub id: String,
+    pub text: String,
+    pub start_time: f64,
+    pub end_time: f64,
 }
 
 /// 取消导入（通过 CancellationToken，决策83/98）
@@ -104,7 +95,7 @@ pub async fn start_asr(
     tier: String,
     model_path: Option<String>,
     language: Option<String>,
-) -> Result<Vec<asr::Sentence>, String> {
+) -> Result<Vec<AsrSentence>, String> {
     if let Err(error) = validate_asr_tier(&tier) {
         let _ = events::emit_import_failed(&app, video_id, error.clone());
         return Err(error);
@@ -276,7 +267,7 @@ async fn run_whisper_asr(
     model_path: &str,
     language: &str,
     token: CancellationToken,
-) -> Result<Vec<asr::Sentence>, String> {
+) -> Result<Vec<AsrSentence>, String> {
     ensure_asr_not_cancelled(&token)?;
     let _ = events::emit_progress(app, ProgressPayload::new(video_id, "asr_extraction", 10));
 
@@ -331,7 +322,7 @@ fn ensure_asr_not_cancelled(token: &CancellationToken) -> Result<(), String> {
     }
 }
 
-fn validate_whisper_sentences(sentences: &[asr::Sentence]) -> Result<(), String> {
+fn validate_whisper_sentences(sentences: &[AsrSentence]) -> Result<(), String> {
     if sentences.is_empty() {
         return Err("Whisper ASR returned no sentences".to_string());
     }
@@ -371,7 +362,7 @@ fn validate_whisper_sentences(sentences: &[asr::Sentence]) -> Result<(), String>
 /// Convert a complete Whisper result to sentence records.
 const MAX_FALLBACK_SENTENCE_CHARS: usize = 500;
 
-fn whisper_result_to_sentences(result: &whisper::WhisperResult) -> Vec<asr::Sentence> {
+fn whisper_result_to_sentences(result: &whisper::WhisperResult) -> Vec<AsrSentence> {
     let mut sentences = Vec::new();
     let mut current_text = String::new();
     let mut current_start = 0.0f64;
@@ -414,14 +405,14 @@ fn whisper_result_to_sentences(result: &whisper::WhisperResult) -> Vec<asr::Sent
 }
 
 fn push_current_word_sentence(
-    sentences: &mut Vec<asr::Sentence>,
+    sentences: &mut Vec<AsrSentence>,
     current_text: &mut String,
     current_start: f64,
     current_end: f64,
 ) {
     let trimmed = current_text.trim().to_string();
     if !trimmed.is_empty() {
-        sentences.push(asr::Sentence {
+        sentences.push(AsrSentence {
             id: format!("whisper-{}", uuid::Uuid::new_v4()),
             text: trimmed,
             start_time: current_start,
@@ -445,7 +436,7 @@ fn segment_word_text_is_suspicious(segment: &whisper::WhisperSegment) -> bool {
     joined.contains("[_TT_") || joined.contains("[_BEG_]") || joined.contains("[_EOT_]") || has_mojibake_markers(&joined)
 }
 
-fn push_segment_text_sentences(sentences: &mut Vec<asr::Sentence>, segment: &whisper::WhisperSegment) {
+fn push_segment_text_sentences(sentences: &mut Vec<AsrSentence>, segment: &whisper::WhisperSegment) {
     let text = segment.text.trim();
     if text.is_empty() {
         return;
@@ -474,7 +465,7 @@ fn push_segment_text_sentences(sentences: &mut Vec<asr::Sentence>, segment: &whi
 }
 
 fn push_estimated_sentence(
-    sentences: &mut Vec<asr::Sentence>,
+    sentences: &mut Vec<AsrSentence>,
     segment: &whisper::WhisperSegment,
     text: &str,
     start_char: usize,
@@ -499,7 +490,7 @@ fn push_estimated_sentence(
         end_time = segment.end_time.max(start_time + 0.001);
     }
 
-    sentences.push(asr::Sentence {
+    sentences.push(AsrSentence {
         id: format!("whisper-{}", uuid::Uuid::new_v4()),
         text: text.to_string(),
         start_time,
@@ -591,32 +582,10 @@ pub async fn list_whisper_models(app: AppHandle) -> Result<Vec<String>, String> 
     Ok(found)
 }
 
-/// 将本地文件路径转为 asset:// URL（决策96）
-pub fn convert_file_src(file_path: &str) -> String {
-    let normalized = if file_path.starts_with('/') {
-        file_path.to_string()
-    } else {
-        format!("/{}", file_path.replace('\\', "/"))
-    };
-    format!("asset://localhost{}", normalized)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_convert_file_src_unix() {
-        let result = convert_file_src("/path/to/video.mp4");
-        assert!(result.starts_with("asset://"));
-    }
-
-    #[test]
-    fn test_convert_file_src_windows() {
-        let result = convert_file_src("C:\\videos\\test.mp4");
-        assert!(result.starts_with("asset://"));
-        assert!(result.contains("C:/videos/test.mp4"));
-    }
     #[test]
     fn cancelled_asr_token_is_rejected() {
         let token = crate::scheduler::CancellationToken::new();
@@ -651,7 +620,7 @@ mod tests {
     }
     #[test]
     fn whisper_output_rejects_empty_text() {
-        let sentences = vec![asr::Sentence {
+        let sentences = vec![AsrSentence {
             id: "s1".to_string(),
             text: "   ".to_string(),
             start_time: 0.0,
@@ -666,7 +635,7 @@ mod tests {
 
     #[test]
     fn whisper_output_rejects_mojibake_text() {
-        let sentences = vec![asr::Sentence {
+        let sentences = vec![AsrSentence {
             id: "s1".to_string(),
             text: "\u{951f}\u{65a4}\u{62f7}".to_string(),
             start_time: 0.0,
@@ -682,13 +651,13 @@ mod tests {
     #[test]
     fn whisper_output_rejects_non_monotonic_timestamps() {
         let sentences = vec![
-            asr::Sentence {
+            AsrSentence {
                 id: "s1".to_string(),
                 text: "first".to_string(),
                 start_time: 1.0,
                 end_time: 2.0,
             },
-            asr::Sentence {
+            AsrSentence {
                 id: "s2".to_string(),
                 text: "second".to_string(),
                 start_time: 0.5,
@@ -703,7 +672,7 @@ mod tests {
     }
     #[test]
     fn whisper_output_rejects_invalid_timestamps() {
-        let sentences = vec![asr::Sentence {
+        let sentences = vec![AsrSentence {
             id: "s1".to_string(),
             text: "invalid".to_string(),
             start_time: f64::NAN,
@@ -805,13 +774,13 @@ mod tests {
     #[test]
     fn whisper_output_rejects_overlapping_sentences() {
         let sentences = vec![
-            asr::Sentence {
+            AsrSentence {
                 id: "s1".to_string(),
                 text: "first".to_string(),
                 start_time: 1.0,
                 end_time: 2.0,
             },
-            asr::Sentence {
+            AsrSentence {
                 id: "s2".to_string(),
                 text: "second".to_string(),
                 start_time: 1.5,

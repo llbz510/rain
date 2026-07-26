@@ -44,11 +44,6 @@ function validOutput(block: Stage2InputBlock): Stage2BlockOutput {
   }
 }
 
-function mergedOutput(blocks: Stage2InputBlock[]): Stage2BlockOutput {
-  const allSentences = blocks.flatMap((block) => block.sentences)
-  return validOutput({ blockId: buildMergeBlockId(video.id, allSentences), videoId: video.id, sentences: allSentences })
-}
-
 async function stage2Db(): Promise<Database> {
   const db = await createDatabase(':memory:')
   await insertVideo(db, video)
@@ -345,7 +340,6 @@ describe('Stage2 checkpoint recovery and global coverage', () => {
     const callBlock = vi.fn(async (_prompt, input) => validOutput(JSON.parse(input)))
     const result = await runStage2Stage({
       video, sentences, settings, db, maxBlockTokens: 20, callStage2: callBlock,
-      callMerge: vi.fn().mockResolvedValue(mergedOutput(blocks)),
     })
     expect(callBlock).toHaveBeenCalledTimes(blocks.length - 1)
     expect(callBlock.mock.calls.map((call) => JSON.parse(call[1]).blockId)).not.toContain(blocks[0].blockId)
@@ -359,7 +353,6 @@ describe('Stage2 checkpoint recovery and global coverage', () => {
     const oldCalls = vi.fn(async (_prompt, input) => validOutput(JSON.parse(input)))
     await runStage2Stage({
       video, sentences, settings, db: oldDb, maxBlockTokens: 20, callStage2: oldCalls,
-      callMerge: vi.fn().mockResolvedValue(mergedOutput(blocks)),
     })
     expect(oldCalls).toHaveBeenCalledTimes(blocks.length)
   })
@@ -380,12 +373,10 @@ describe('Stage2 checkpoint recovery and global coverage', () => {
 
   it('deterministically merges compact outlines and preserves original ASR text exactly once', async () => {
     const blocks = buildStage2Blocks(video.id, sentences, 20)
-    const callMerge = vi.fn().mockResolvedValue(mergedOutput(blocks))
     const result = await runStage2Stage({
       video, sentences, settings, db: await stage2Db(), maxBlockTokens: 20,
-      callStage2: vi.fn(async (_prompt, input) => validOutput(JSON.parse(input))), callMerge,
+      callStage2: vi.fn(async (_prompt, input) => validOutput(JSON.parse(input))),
     })
-    expect(callMerge).not.toHaveBeenCalled()
     expect(result.sentences.map(({ id, text }) => ({ id, text }))).toEqual(
       sentences.map(({ id, text }) => ({ id, text })),
     )

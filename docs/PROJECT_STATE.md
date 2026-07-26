@@ -2,7 +2,7 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-24 22:30 +08:00
+Last updated: 2026-07-26 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
 Recent baseline commit before the assistant quick-actions slice: `c1ba250 docs: refresh project state after evidence hardening`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
@@ -56,10 +56,14 @@ Results at that time:
 Read in this order:
 
 1. `AGENTS.md` — environment/build rules and harness restrictions.
-2. `docs/PROJECT_STATE.md` — current truth, recent changes, known defects, and file responsibilities.
-3. `package.json` — runnable frontend/test/E2E commands.
-4. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-5. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+2. `docs/development/control-map.md` — authority by question, document status, and conflict handling.
+3. `docs/PROJECT_STATE.md` — current truth, recent changes, known defects, and file responsibilities.
+4. `docs/development/acceptance-standard.md` — active acceptance criteria.
+5. `docs/development/harness-coverage.md` — AC-to-test/evidence coverage and gaps.
+6. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
+7. `package.json` — runnable frontend/test/E2E commands.
+8. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+9. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -74,7 +78,7 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 | `src/settings/` | Runtime model settings and readiness checks. | `preflight.ts` is the user-facing readiness check for local-video workflow prerequisites. |
 | `src/e2e/` | Real app automation helper for evidence generation. | Guarded by runtime environment; not normal user workflow code. |
 | `src/__tests__/` | Product/unit/regression tests owned by implementation. | Can be modified when implementing features. |
-| `harness/` | Locked frontend harness tests. | Do not modify unless user explicitly approves harness changes. |
+| `harness/` | Locked frontend harness tests and test-only support. | `harness/support/` may be imported by tests only; production `src/` must never depend on it. Do not modify locked Harness unless user explicitly approves migration. |
 | `src-tauri/` | Rust backend, Tauri config, capabilities, and Rust tests. | `src-tauri/target/` is local build output and ignored by `src-tauri/.gitignore`. |
 | `src-tauri/tests/` | Locked Rust harness tests. | Do not modify unless user explicitly approves harness changes. |
 | `scripts/` | Project automation scripts. | `run-real-e2e.ps1` runs real workflow; `validate-evidence.ps1` validates evidence. |
@@ -109,6 +113,53 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
+13. DEC-001 now confirms multi-model support through per-role capability contracts. Current preflight and evidence validation are still tied to the first verified `large-v3` + `qwen3.5-omni-flash` profile, so implementing generic `Compatible` / `Verified` / `Unavailable` capability state remains a product gap.
+14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
+
+## What changed in the 2026-07-26 project-control baseline session
+
+Added the first active control layer for agent-assisted development:
+
+- `docs/development/control-map.md` assigns authority by question and defines document statuses and conflict handling.
+- `docs/development/acceptance-standard.md` defines the initial AC catalog for the real local-video workflow.
+- `docs/development/harness-coverage.md` maps each AC to strong, partial, weak, or real-evidence checks.
+- `docs/development/module-map.md` records module responsibilities, dependency direction, hotspots, and the first controlled refactor target.
+- `AGENTS.md` now requires new sessions to enter through this control layer.
+
+The initial control-document slice did not change product code or locked Harness. Its scope intentionally covers the highest-risk local-video pipeline; remaining PRD modules still need incremental AC mapping.
+
+Follow-up decision recorded in this session:
+
+- The user selected DEC-001 option C: support multiple model configurations through a uniform per-role capability contract.
+- A configuration that passes its role check is `Compatible`; only a full real E2E profile is `Verified`; failed checks are `Unavailable`.
+- The current fixed Qwen/Whisper preflight remains an implementation gap against this confirmed rule.
+
+First controlled refactor completed in the same session:
+
+- Added `src/pipeline/video-import-controller.ts` with the small interface `importLocal/start/cancel/acceptProgress`.
+- Moved local media probing, pending-record creation, runtime-settings snapshotting, Pipeline startup/retry, cancellation, progress normalization, and failure-state repair out of `VideoListPage.tsx`.
+- Disabled the import button until the database/controller is ready, fixing the prior silent return when a user clicked import during startup.
+- Added `src/__tests__/video-list-local-import.test.tsx`, which verifies the path from the local-import UI through the desktop adapter to a persisted `pending` video and visible card, without `yt-dlp`.
+- Updated the existing recovery test mock to use Vitest's hoisted seam after Pipeline became a static controller dependency.
+- Did not modify locked Harness or Rust product code.
+
+Verification:
+
+```powershell
+npm.cmd test -- src/__tests__/video-list-local-import.test.tsx src/__tests__/video-list-page-recovery.test.tsx src/__tests__/video-list-import.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result:
+
+- Targeted video-list tests: 3 files / 7 tests passed.
+- Full frontend suite: 52 files / 427 tests passed; 1 live Qwen test skipped by its existing environment guard.
+- TypeScript and production build passed.
+- Vite retained the existing dynamic/static import chunking warnings.
+- A new paid/long-running real E2E was not run for this refactor; the existing canonical evidence remains the latest real workflow proof.
 
 ## What changed in the 2026-07-18 to 2026-07-22 repair session
 
@@ -297,6 +348,51 @@ npm.cmd run build
 ```
 
 Observed result: targeted study/assistant tests passed 17 tests; TypeScript check passed; related M10 harness + implementation tests passed 33 tests; full frontend test suite passed 51 files / 426 tests with 1 live Qwen test skipped; frontend build passed with the existing Vite dynamic/static import chunking warnings.
+
+## What changed in the 2026-07-26 approved Harness Migration
+
+The user explicitly approved modifying the previously locked Harness after an audit showed that several green tests were validating shadow constants, direct object assignments, function existence, or tautologies rather than current product behavior.
+
+Migration results:
+
+- M03/M21 now call the real `VideoImportController`, memory database, Pipeline boundary and desktop command adapter for AC-LV-02/03/06/07/10.
+- M04/M18 now call the current `stage2-contract.ts` and `stage2-runner.ts` for exact sentence coverage, schema validation, deterministic blocking, retries and local deterministic merge.
+- M20 now parses the real Rust `generate_handler!` command registry and scans real LLM/SQL source boundaries.
+- Component, Store, Notes and progress Harness tests now assert callbacks, persisted state, event forwarding, media properties and cleanup side effects.
+- Rust Harness tests now exercise scheduler serialization, per-video cancellation, payload serialization, invalid inputs, actionable errors and the tracked media fixture.
+- Text assistant model selection no longer incorrectly requires Vision capability, and the unimplemented universal "解释画面" action is no longer advertised as completed.
+- Removed the Harness-only shadow modules listed in `docs/development/harness-migration-2026-07-26.md`.
+- Harness policy is now default-locked but maintainable through an explicitly approved, documented Harness Migration.
+- Added `@types/node` for the source-scanning architecture Harness. `npm update postcss` moved the transitive PostCSS dependency to 8.5.23 and cleared the discovered security advisory.
+
+Second audit pass in the same approved migration:
+
+- Fixed `TextZone` reading video language from a test-only Context. `loadVideo` now stores the database language in `currentVideoLanguage`, and tests inject state only through `harness/support/test-store-provider.tsx`.
+- Removed M02 tree editing, factory, validator and text helpers that had no production caller. The M02 Harness now keeps only persisted enum contracts; Stage2 and database behavior remain covered by their real modules.
+- Removed visible paragraph editing controls whose handlers were empty. Advanced editing remains Proposed rather than falsely advertised.
+- Made `src/index.css` the sole visual-token fact source; M13 loads that real file and checks its CSS variables through CSSOM.
+- Removed unused subtitle/API/legacy Whisper normalization paths, the empty Rust `start_import` command, custom `convert_file_src`, and the unused Stage2 `callMerge` interface.
+- Renamed the remaining language helper to `src/pipeline/language-detection.ts` and M21 Harness to `m21-import-controller.test.ts` so names match actual responsibility.
+
+Verification:
+
+```powershell
+npm.cmd test
+cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
+npm.cmd run build
+npm.cmd audit --json
+git diff --check
+```
+
+Observed result:
+
+- Vitest: 47 files passed, 328 tests passed, 1 live Qwen test skipped.
+- Rust: 71 tests passed, 1 real Whisper-model test ignored; the lower count reflects retired shadow-only tests.
+- Frontend build passed with the existing Vite dynamic/static import chunking warnings.
+- npm audit reported 0 vulnerabilities.
+- `git diff --check` passed; only normal Windows LF/CRLF notices were printed.
+
+No new real-video E2E was run in this migration. The local-video production pipeline was not changed; current curated evidence remains the latest real-run proof.
 
 ## Maintenance checklist for every future session
 

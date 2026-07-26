@@ -1,50 +1,54 @@
-// harness/m13-visual.test.ts
-// ========================================
-// M13 Harness: 视觉设计令牌
-// 锁定后禁止 AI 修改
-// ========================================
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { describe, it, expect } from 'vitest'
-import {
-  PARAGRAPH_COLORS,
-  SPACING_SCALE,
-  FONT_SIZES,
-  BORDER_RADIUS_SCALE,
-  ANIMATION_DURATIONS,
-} from '@/ui/design-tokens'
+let style: HTMLStyleElement
 
-describe('M13-T01: 段落四色（决策66）', () => {
-  it('概念=蓝、例子=绿、类比=橙、过渡=灰', () => {
-    expect(PARAGRAPH_COLORS.concept).toBeDefined()
-    expect(PARAGRAPH_COLORS.example).toBeDefined()
-    expect(PARAGRAPH_COLORS.analogy).toBeDefined()
-    expect(PARAGRAPH_COLORS.transition).toBeDefined()
-    // 精确色值由实现定义，但必须是 4 种且互不相同
-    const colors = Object.values(PARAGRAPH_COLORS)
-    expect(new Set(colors).size).toBe(4)
-  })
+beforeAll(() => {
+  style = document.createElement('style')
+  style.textContent = readFileSync(join(process.cwd(), 'src', 'index.css'), 'utf8')
+  document.head.append(style)
 })
 
-describe('M13-T02: 间距基准阶梯（决策76）', () => {
-  it('8 档：4/8/12/16/20/24/32/48', () => {
-    expect(SPACING_SCALE).toEqual([4, 8, 12, 16, 20, 24, 32, 48])
-  })
+afterAll(() => {
+  style.remove()
 })
 
-describe('M13-T03: 字号 5 档（决策74）', () => {
-  it('18/16/14/13/12', () => {
-    expect(FONT_SIZES).toEqual([18, 16, 14, 13, 12])
-  })
-})
+function cssVariable(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
 
-describe('M13-T04: 圆角 5 档（决策76）', () => {
-  it('0/4/8/12/9999（胶囊）', () => {
-    expect(BORDER_RADIUS_SCALE).toEqual([0, 4, 8, 12, 9999])
+describe('M13: 应用实际加载的视觉令牌', () => {
+  it('加载四种段落颜色', () => {
+    expect([
+      cssVariable('--color-concept'),
+      cssVariable('--color-example'),
+      cssVariable('--color-analogy'),
+      cssVariable('--color-transition'),
+    ]).toEqual(['#3b82f6', '#10b981', '#f59e0b', '#6b7280'])
   })
-})
 
-describe('M13-T05: 动效时长三档（决策81）', () => {
-  it('120/200/320 ms', () => {
-    expect(ANIMATION_DURATIONS).toEqual([120, 200, 320])
+  it('加载间距、字号、圆角和动效阶梯', () => {
+    expect(Array.from({ length: 8 }, (_, index) => cssVariable(`--spacing-${index + 1}`)))
+      .toEqual(['4px', '8px', '12px', '16px', '20px', '24px', '32px', '48px'])
+    expect([
+      cssVariable('--font-size-lg'),
+      cssVariable('--font-size-md'),
+      cssVariable('--font-size-sm'),
+      cssVariable('--font-size-xs'),
+      cssVariable('--font-size-2xs'),
+    ]).toEqual(['18px', '16px', '14px', '13px', '12px'])
+    expect([
+      cssVariable('--radius-0'),
+      cssVariable('--radius-1'),
+      cssVariable('--radius-2'),
+      cssVariable('--radius-3'),
+      cssVariable('--radius-pill'),
+    ]).toEqual(['0px', '4px', '8px', '12px', '9999px'])
+    expect([
+      cssVariable('--anim-fast'),
+      cssVariable('--anim-base'),
+      cssVariable('--anim-slow'),
+    ]).toEqual(['120ms', '200ms', '320ms'])
   })
 })

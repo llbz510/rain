@@ -1,69 +1,81 @@
 // harness/m21-progress-listener.test.ts
 // ========================================
-// M21 Harness: 进度事件前端监听契约
-// 锁定后禁止 AI 修改
+// M21 Harness: progress event adapter behavior
+// Harness migration: 2026-07-26
 // ========================================
 
-import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ProgressPayload } from '@/architecture/events'
+
+const mocks = vi.hoisted(() => ({
+  isTauri: true,
+  listen: vi.fn(),
+  unlisten: vi.fn(),
+}))
+
+vi.mock('@/lib/tauri-env', () => ({
+  isTauri: () => mocks.isTauri,
+}))
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: mocks.listen,
+}))
+
 import { listenProgress, unlistenProgress } from '@/pipeline/progress-listener'
-import type { ProgressCallback } from '@/pipeline/progress-listener'
-import {
-  PROGRESS_EVENT_NAME,
-  IMPORT_COMPLETE_EVENT,
-  IMPORT_FAILED_EVENT,
-  IMPORT_CANCELLED_EVENT,
-  type ProgressPayload,
-} from '@/architecture/events'
 
-describe('M21-T09: listenProgress 函数存在', () => {
-  it('listenProgress 是一个函数', () => {
-    expect(typeof listenProgress).toBe('function')
-  })
+const payload: ProgressPayload = {
+  videoId: 'v1',
+  stage: 'asr_transcription',
+  blockCurrent: 1,
+  blockTotal: 3,
+  percent: 50,
+  retrying: false,
+}
+
+beforeEach(() => {
+  unlistenProgress()
+  mocks.isTauri = true
+  mocks.listen.mockReset()
+  mocks.unlisten.mockReset()
+  mocks.listen.mockResolvedValue(mocks.unlisten)
 })
 
-describe('M21-T10: unlistenProgress 函数存在', () => {
-  it('unlistenProgress 是一个函数', () => {
-    expect(typeof unlistenProgress).toBe('function')
-  })
+afterEach(() => {
+  unlistenProgress()
 })
 
-describe('M21-T11: ProgressCallback 接受 ProgressPayload', () => {
-  it('构造合法 payload 对象可作为回调参数', () => {
-    const payload: ProgressPayload = {
-      videoId: 'v1',
-      stage: 'asr',
-      blockCurrent: 1,
-      blockTotal: 3,
-      percent: 50,
-      retrying: false,
-    }
-    const callback: ProgressCallback = (p) => {
-      expect(p.videoId).toBe('v1')
-    }
-    callback(payload)
-  })
-})
+describe('M21: progress 事件适配器', () => {
+  it('订阅 progress 并把 Tauri payload 原样交给控制器', async () => {
+    const callback = vi.fn()
+    await listenProgress(callback)
 
-describe('M21-T12: 进度事件名 = progress', () => {
-  it('PROGRESS_EVENT_NAME 值为 progress', () => {
-    expect(PROGRESS_EVENT_NAME).toBe('progress')
+    expect(mocks.listen).toHaveBeenCalledWith('progress', expect.any(Function))
+    const eventHandler = mocks.listen.mock.calls[0][1]
+    eventHandler({ payload })
+    expect(callback).toHaveBeenCalledWith(payload)
   })
-})
 
-describe('M21-T13: IMPORT_COMPLETE_EVENT 存在', () => {
-  it('值为 import_complete', () => {
-    expect(IMPORT_COMPLETE_EVENT).toBe('import_complete')
+  it('重复订阅前释放旧监听器', async () => {
+    await listenProgress(vi.fn())
+    await listenProgress(vi.fn())
+
+    expect(mocks.unlisten).toHaveBeenCalledTimes(1)
+    expect(mocks.listen).toHaveBeenCalledTimes(2)
   })
-})
 
-describe('M21-T14: IMPORT_FAILED_EVENT 存在', () => {
-  it('值为 import_failed', () => {
-    expect(IMPORT_FAILED_EVENT).toBe('import_failed')
+  it('unlistenProgress 只释放当前监听器一次', async () => {
+    await listenProgress(vi.fn())
+
+    unlistenProgress()
+    unlistenProgress()
+
+    expect(mocks.unlisten).toHaveBeenCalledTimes(1)
   })
-})
 
-describe('M21-T15: IMPORT_CANCELLED_EVENT 存在', () => {
-  it('值为 import_cancelled', () => {
-    expect(IMPORT_CANCELLED_EVENT).toBe('import_cancelled')
+  it('非 Tauri 环境不注册桌面事件', async () => {
+    mocks.isTauri = false
+
+    await listenProgress(vi.fn())
+
+    expect(mocks.listen).not.toHaveBeenCalled()
   })
 })

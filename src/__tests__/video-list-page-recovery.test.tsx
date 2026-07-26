@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let progressCallback: ((payload: { videoId: string; stage: string; percent: number }) => void) | undefined
-const runPipeline = vi.fn()
+const { runPipeline } = vi.hoisted(() => ({ runPipeline: vi.fn() }))
 vi.mock('@/pipeline/progress-listener', () => ({ listenProgress: vi.fn(async (callback) => { progressCallback = callback }), unlistenProgress: vi.fn() }))
 vi.mock('@/pipeline/pipeline-orchestrator', () => ({ runPipeline }))
 

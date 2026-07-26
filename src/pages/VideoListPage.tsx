@@ -7,9 +7,8 @@
 // jsdom 下 listVideos 返回空 → 显示空状态（getEmptyStateMessage）
 // ========================================
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
-  createDatabase,
   listVideos,
   searchVideosByTitle,
   insertVideo,
@@ -21,6 +20,7 @@ import { getEmptyStateMessage } from '@/ui/video-list'
 import { useRainStore } from '@/store/rain-store'
 import type { Video } from '@/models/types'
 import { listenProgress, unlistenProgress } from '@/pipeline/progress-listener'
+import { createVideoImportController } from '@/pipeline/video-import-controller'
 
 type SortBy = 'lastStudied' | 'createdAt' | 'title'
 
@@ -245,8 +245,6 @@ export function VideoListPage() {
   const [importUrl, setImportUrl] = useState('')
   const [urlError, setUrlError] = useState('')
   const [localImportError, setLocalImportError] = useState('')
-  const [processingVideoId, setProcessingVideoId] = useState<string | null>(null)
-  const importControllers = useRef<Map<string, AbortController>>(new Map())
   const [pipelineProgress, setPipelineProgress] = useState<Record<string, { stage: 'asr' | 'stage2' | 'merging'; percent: number }>>({})
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
@@ -286,16 +284,6 @@ export function VideoListPage() {
   }, [db, sortBy, keyword])
 
   // 点 ready 卡 → 进入学习界面（store 接管 currentVideoId 切页）
-  useEffect(() => {
-    void listenProgress((payload) => {
-      if (!importControllers.current.has(payload.videoId)) return
-      const stage = payload.stage === 'asr' || payload.stage === 'stage2' || payload.stage === 'merging'
-        ? payload.stage
-        : payload.stage.startsWith('asr') ? 'asr' : payload.stage.startsWith('merge') ? 'merging' : 'stage2'
-      setPipelineProgress((current) => ({ ...current, [payload.videoId]: { stage, percent: payload.percent } }))
-    })
-    return () => unlistenProgress()
-  }, [])
   const handleOpen = (videoId: string) => {
     void useRainStore.getState().loadVideo(videoId)
   }
@@ -307,59 +295,55 @@ export function VideoListPage() {
     setVideos(list)
   }, [db, keyword, sortBy])
 
-  const handleOpenImport = useCallback(async (videoId: string) => {
-    let attemptedVideo: Video | null = null
-    if (!db || importControllers.current.has(videoId)) return
-    try {
-      const { runPipeline } = await import('@/pipeline/pipeline-orchestrator')
-      const { getVideoById } = await import('@/models/database')
-      const video = await getVideoById(db, videoId)
-      if (!video) return
-      attemptedVideo = video
-      const store = useRainStore.getState()
-      await store.loadRuntimeSettings()
-      const configured = useRainStore.getState()
-      if (!configured.settingsReady) throw new Error(configured.settingsError ?? 'Runtime settings are unavailable')
-      const asrModel = configured.modelPool.find((entry) => entry.id === configured.roleAssignment.asr)
-      const model = configured.modelPool.find((entry) => entry.id === configured.roleAssignment.structuring)
-      if (!asrModel || !model) throw new Error('Select saved Whisper and Qwen models before importing')
-      const controller = new AbortController()
-      importControllers.current.set(videoId, controller)
-      setProcessingVideoId(videoId)
-      setPipelineProgress((current) => ({ ...current, [videoId]: { stage: video.stage ?? 'asr', percent: 0 } }))
-      await runPipeline(video, { baseUrl: model.baseUrl ?? '', apiKey: model.apiKey ?? '', model: model.modelName }, {
-        onProgress: (stage, percent) => {
-          if (stage === 'asr' || stage === 'stage2' || stage === 'merging') setPipelineProgress((current) => ({ ...current, [videoId]: { stage, percent } }))
-        }, onComplete: () => undefined, onError: () => undefined,
-      }, db, { type: asrModel.type, modelName: asrModel.modelName }, { signal: controller.signal })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      if (attemptedVideo) {
-        try {
-          const { getVideoById, transitionVideoImportState } = await import('@/models/database')
-          const persisted = await getVideoById(db, attemptedVideo.id)
-          if (persisted && persisted.status !== 'ready' && persisted.status !== 'failed' && persisted.status !== 'cancelled') {
-            await transitionVideoImportState(db, persisted.id, { status: persisted.status, stage: persisted.stage ?? null }, {
-              status: 'failed', stage: persisted.stage ?? 'asr', errorMessage: message,
-            })
-          }
-        } catch { /* retain the primary error */ }
-      }
-      console.error('[VideoListPage] pipeline error', err)
-    } finally {
-      importControllers.current.delete(videoId)
-      setProcessingVideoId((current) => current === videoId ? null : current)
-      setPipelineProgress((current) => { const { [videoId]: _removed, ...remaining } = current; return remaining })
-      void refreshVideos()
-    }
-  }, [db, refreshVideos])
+  const refreshVideosRef = useRef(refreshVideos)
+  useEffect(() => {
+    refreshVideosRef.current = refreshVideos
+  }, [refreshVideos])
+
+  const importController = useMemo(() => {
+    if (!db) return null
+    return createVideoImportController({
+      db,
+      loadRuntimeSettings: async () => {
+        await useRainStore.getState().loadRuntimeSettings()
+        const configured = useRainStore.getState()
+        return {
+          ready: configured.settingsReady,
+          error: configured.settingsError,
+          models: configured.modelPool.map((model) => ({ ...model })),
+          roles: { ...configured.roleAssignment },
+        }
+      },
+      onChanged: () => refreshVideosRef.current(),
+      onProgress: (videoId, progress) => {
+        setPipelineProgress((current) => {
+          if (progress) return { ...current, [videoId]: progress }
+          const { [videoId]: _removed, ...remaining } = current
+          return remaining
+        })
+      },
+      onError: (context, error) => {
+        console.error(`[VideoListPage] ${context} error`, error)
+      },
+      onWarning: (message, error) => {
+        console.warn(`[VideoListPage] ${message}`, error)
+      },
+    })
+  }, [db])
+
+  useEffect(() => {
+    if (!importController) return
+    void listenProgress(importController.acceptProgress)
+    return () => unlistenProgress()
+  }, [importController])
+
+  const handleOpenImport = useCallback((videoId: string) => {
+    importController?.start(videoId)
+  }, [importController])
 
   const handleCancelImport = useCallback((videoId: string) => {
-    const controller = importControllers.current.get(videoId)
-    if (!controller) return
-    controller.abort()
-    void import('@/lib/tauri-env').then(({ tauriInvoke, isTauri }) => isTauri() ? tauriInvoke<void>('cancel_import', { videoId }) : undefined).catch(() => undefined)
-  }, [])
+    importController?.cancel(videoId)
+  }, [importController])
   const handleImportClick = () => {
     setImportMenuOpen((prev) => !prev)
   }
@@ -368,9 +352,13 @@ export function VideoListPage() {
     setImportMenuOpen(false)
     setLocalImportError('')
     try {
-      const { isTauri, tauriInvoke } = await import('@/lib/tauri-env')
+      const { isTauri } = await import('@/lib/tauri-env')
       if (!isTauri()) {
         setLocalImportError('请在桌面应用中使用本地文件导入')
+        return
+      }
+      if (!importController) {
+        setLocalImportError('数据库正在初始化，请稍后重试')
         return
       }
       const { open } = await import('@tauri-apps/plugin-dialog')
@@ -380,48 +368,10 @@ export function VideoListPage() {
       })
       if (!selected) return
 
-      const filePath = selected
-      const info = await tauriInvoke<{ title: string; duration: number; thumbnail: string }>(
-        'probe_video_info',
-        { filePath, sourceUrl: null },
-      )
-
-      const videoId = `v_${Date.now()}`
-      let thumbnailPath = ''
-      try {
-        const thumbOutput = filePath.replace(/\.[^.]+$/, '_thumb.jpg')
-        thumbnailPath = await tauriInvoke<string>(
-          'generate_thumbnail',
-          { filePath, outputPath: thumbOutput, timestamp: 1.0 },
-        )
-      } catch (err) {
-        console.warn('[VideoListPage] 缩略图生成失败，继续导入', err)
-      }
-
-      if (!db) return
-      const video: Video = {
-        id: videoId,
-        title: info.title,
-        source: 'local',
-        filePath,
-        thumbnail: thumbnailPath || info.thumbnail,
-        duration: info.duration,
-        language: '',
-        status: 'pending',
-        createdAt: Date.now(),
-        position: 0,
-        lastStudiedAt: Date.now(),
-      }
-      await insertVideo(db, video)
-      const list = keyword.trim()
-        ? await searchVideosByTitle(db, keyword.trim())
-        : await listVideos(db, sortBy)
-      setVideos(list)
-
-      // Trigger pipeline processing
-      void handleOpenImport(videoId)
+      await importController.importLocal(selected)
     } catch (err) {
       console.error('[VideoListPage] 本地文件导入失败', err)
+      setLocalImportError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -516,7 +466,11 @@ export function VideoListPage() {
           <option value="title">名称</option>
         </select>
         <div style={importWrapperStyle}>
-          <button onClick={handleImportClick} style={importButtonStyle}>
+          <button
+            onClick={handleImportClick}
+            style={{ ...importButtonStyle, opacity: importController ? 1 : 0.55 }}
+            disabled={!importController}
+          >
             导入
           </button>
           {importMenuOpen && (

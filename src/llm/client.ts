@@ -2,7 +2,7 @@
 // ========================================
 // OpenAI 兼容 HTTP client（fetch + SSE 解析，决策92）
 // 不引入 openai SDK —— 纯原生 fetch + ReadableStream 即可（YAGNI）。
-// 导出 LLM_FUNCTIONS 列出的三个函数：callStage2 / callMerge / streamAiChat。
+// Stage2 结构化调用与助手流式调用。
 // ========================================
 
 import type { LlmSettings, ChatMessage, StreamCallbacks, Stage2Result } from './types'
@@ -261,38 +261,6 @@ export async function callStage2(
   }
 
   return parseModelJsonContent(content, 'Stage2 call') as Stage2Result
-}
-
-// callMerge：非流式合并调用，messages 只放元数据（决策28：不重读全文）
-// 返回合并方案 JSON。
-export async function callMerge(
-  metadataContext: string,
-  settings: LlmSettings,
-  signal?: AbortSignal,
-): Promise<any> {
-  const messages: ChatMessage[] = [
-    { role: 'system', content: 'Return the merged compact outline as JSON metadata only.' },
-    { role: 'user', content: metadataContext },
-  ]
-
-  const response = await fetch(buildEndpoint(settings.baseUrl, '/chat/completions'), {
-    method: 'POST',
-    headers: buildOpenAiHeaders(settings),
-    body: JSON.stringify(buildRequestBody(settings, messages, { jsonMode: true })),
-    signal,
-  })
-
-  if (!response.ok) {
-    throw await httpError('Merge call', response, settings)
-  }
-
-  const data = await response.json()
-  const content = data?.choices?.[0]?.message?.content
-  if (typeof content !== 'string') {
-    throw new Error('Merge call failed: missing choices[0].message.content')
-  }
-
-  return parseModelJsonContent(content, 'Merge call')
 }
 
 // streamAiChat：流式 SSE 对话，返回 cleanup 函数用于 abort（决策83）

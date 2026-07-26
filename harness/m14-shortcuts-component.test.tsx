@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ShortcutManager } from '@/ui/components/shortcut-manager'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from './support/test-store-provider'
 
 function renderWithStore(ui: React.ReactElement, opts: { isInputFocused?: boolean; selectionOrigin?: 'tree' | 'diagram' } = {}) {
   return render(

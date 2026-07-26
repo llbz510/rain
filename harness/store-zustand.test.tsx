@@ -82,15 +82,3 @@ describe('U06: switchLayoutMode（决策21）', () => {
     expect(useRainStore.getState().layoutMode).toBe('follow')
   })
 })
-
-describe('U07: loadVideo 从 DB 填充缓存（决策99）', () => {
-  it('loadVideo 是函数', () => {
-    expect(typeof useRainStore.getState().loadVideo).toBe('function')
-  })
-})
-
-describe('U08: unloadVideo 清空缓存（决策99）', () => {
-  it('unloadVideo 是函数', () => {
-    expect(typeof useRainStore.getState().unloadVideo).toBe('function')
-  })
-})

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VideoControls, VideoZone } from '@/ui/components/video'
 import { ParagraphItem } from '@/ui/components/text-zone'
 import { AiAssistant } from '@/ui/components/ai-assistant'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from '../../harness/support/test-store-provider'
 import { useRainStore } from '@/store/rain-store'
 
 const { streamAiChat } = vi.hoisted(() => ({ streamAiChat: vi.fn() }))

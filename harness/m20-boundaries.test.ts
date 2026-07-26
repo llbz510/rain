@@ -4,58 +4,90 @@
 // 锁定后禁止 AI 修改
 // ========================================
 
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { TAURI_COMMANDS } from '@/architecture/commands'
 import { PROGRESS_EVENT_NAME, type ProgressPayload } from '@/architecture/events'
+
+const repoRoot = process.cwd()
+
+function readRepoFile(path: string): string {
+  return readFileSync(resolve(repoRoot, path), 'utf8')
+}
+
+function sourceFiles(directory: string, extension: RegExp): string[] {
+  const rootPath = resolve(repoRoot, directory)
+  const files: string[] = []
+  const visit = (path: string): void => {
+    for (const entry of readdirSync(path)) {
+      const child = join(path, entry)
+      if (statSync(child).isDirectory()) visit(child)
+      else if (extension.test(entry)) files.push(child)
+    }
+  }
+  visit(rootPath)
+  return files
+}
+
+function registeredTauriCommands(): string[] {
+  const libSource = readRepoFile('src-tauri/src/lib.rs')
+  const handler = libSource.match(/tauri::generate_handler!\[([\s\S]*?)\]/)?.[1]
+  if (!handler) throw new Error('Could not find tauri::generate_handler! in src-tauri/src/lib.rs')
+  return Array.from(handler.matchAll(/(?:commands|e2e_config)::([a-zA-Z0-9_]+)/g), (match) => match[1])
+}
 
 // ===== 第一组：前后端边界约定 =====
 
 describe('M20-T01: Rust 后端导出的 Tauri command 列表（决策92-98）', () => {
-  it('包含且仅包含规定的 command', () => {
-    // Rust 后端职责：ASR/yt-dlp/文件I/O/长任务调度
-    // 不含 LLM 调用（那是前端的事）
+  it('真实 invoke_handler 包含且仅包含批准的 command', () => {
     const expectedCommands = [
-      'start_import',
       'cancel_import',
-      'check_ytdlp',
+      'check_ytdlp_command',
+      'get_runtime_capability',
       'probe_video_info',
       'generate_thumbnail',
       'start_asr',
+      'save_asr_atomically',
+      'assign_asr_sentences_atomically',
+      'transition_video_import_state',
+      'merge_import_atomically',
       'download_whisper_model',
       'list_whisper_models',
-      'convert_file_src',
+      'get_real_e2e_config',
     ]
-    for (const cmd of expectedCommands) {
-      expect(TAURI_COMMANDS).toContain(cmd)
-    }
+    const actualCommands = registeredTauriCommands()
+
+    expect(new Set(actualCommands).size).toBe(actualCommands.length)
+    expect([...actualCommands].sort()).toEqual([...expectedCommands].sort())
   })
 
   it('不包含 LLM 相关的 command（决策92：LLM 全部前端直连）', () => {
     const llmRelated = ['call_llm', 'stage2_process', 'ai_chat', 'merge_structure']
     for (const cmd of llmRelated) {
-      expect(TAURI_COMMANDS).not.toContain(cmd)
+      expect(registeredTauriCommands()).not.toContain(cmd)
     }
   })
 })
 
 describe('M20-T02: LLM 调用只在前端模块中（决策92）', () => {
-  it('llm 模块导出的函数不通过 Tauri invoke', async () => {
-    // 这个测试验证 llm 模块的导出函数列表
-    // 实现时 llm 模块应直接用 fetch/OpenAI SDK 调用，不用 invoke
-    const { LLM_FUNCTIONS } = await import('@/architecture/module-registry')
-    expect(LLM_FUNCTIONS).toContain('callStage2')
-    expect(LLM_FUNCTIONS).toContain('callMerge')
-    expect(LLM_FUNCTIONS).toContain('streamAiChat')
-    // 这些函数标记为 frontend-only
-    const { FRONTEND_ONLY_MODULES } = await import('@/architecture/module-registry')
-    expect(FRONTEND_ONLY_MODULES).toContain('llm')
+  it('真实 LLM 源码不调用 Tauri invoke', () => {
+    const llmSource = sourceFiles('src/llm', /\.ts$/)
+      .map((path) => readFileSync(path, 'utf8'))
+      .join('\n')
+
+    expect(llmSource).not.toMatch(/\btauriInvoke\s*\(/)
+    expect(llmSource).not.toMatch(/\binvoke\s*\(/)
   })
 })
 
 describe('M20-T03: 前端直连 SQL（决策93）', () => {
-  it('database 模块标记为 frontend-only（不经过 Rust IPC）', async () => {
-    const { FRONTEND_ONLY_MODULES } = await import('@/architecture/module-registry')
-    expect(FRONTEND_ONLY_MODULES).toContain('database')
+  it('只有数据库边界模块可以导入 Tauri SQL 插件', () => {
+    const importers = sourceFiles('src', /\.tsx?$/)
+      .filter((path) => readFileSync(path, 'utf8').includes('@tauri-apps/plugin-sql'))
+      .map((path) => path.replaceAll('\\', '/'))
+
+    expect(importers).toHaveLength(1)
+    expect(importers[0]).toMatch(/\/src\/models\/database\.ts$/)
   })
 })
 
@@ -85,11 +117,18 @@ describe('M20-T05: progress payload 格式（决策30/97）', () => {
     expect(typeof payload.retrying).toBe('boolean')
   })
 
-  it('stage 可选值：asr, stage2, merging', () => {
-    const validStages = ['asr', 'stage2', 'merging']
+  it('stage 可选值覆盖 Rust ASR 子阶段和前端 Stage2 阶段', () => {
+    const validStages: ProgressPayload['stage'][] = [
+      'asr',
+      'asr_extraction',
+      'asr_transcription',
+      'asr_finalization',
+      'stage2',
+      'merging',
+    ]
     for (const stage of validStages) {
       const payload: ProgressPayload = {
-        videoId: 'v1', stage: stage as any,
+        videoId: 'v1', stage,
         blockCurrent: 0, blockTotal: 0, percent: 0, retrying: false,
       }
       expect(validStages).toContain(payload.stage)

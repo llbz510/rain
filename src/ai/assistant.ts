@@ -10,11 +10,6 @@ export interface QuickAction {
   label: string
 }
 
-export interface AiChatSession {
-  abort(): void
-  isStreaming: boolean
-}
-
 interface AiContextInput {
   sentences: Sentence[]
   translation?: string
@@ -46,9 +41,8 @@ const ANALOGY_ACTIONS: QuickAction[] = [
   { id: 'analogy_limitation', label: '指出类比局限' },
 ]
 
-// 通用操作（2 种，决策10）
+// 当前已实现的通用文本操作。画面解释需要独立的截图与 vision 能力链路。
 const UNIVERSAL_ACTIONS: QuickAction[] = [
-  { id: 'explain_frame', label: '解释画面' },
   { id: 'summarize_section', label: '总结本节' },
 ]
 

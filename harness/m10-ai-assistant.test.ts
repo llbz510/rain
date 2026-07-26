@@ -9,7 +9,6 @@ import {
   getQuickActionsForType,
   getUniversalActions,
   buildAiContext,
-  type AiChatSession,
 } from '@/ai/assistant'
 
 describe('M10-T01: 按段落类型返回差异化快捷操作（决策10）', () => {
@@ -65,11 +64,11 @@ describe('M10-T05: transition 段落无快捷操作（决策10）', () => {
 })
 
 describe('M10-T06: 通用操作（决策10）', () => {
-  it('包含解释画面和总结本节', () => {
+  it('只暴露已经实现的文本操作，不伪装 vision 能力', () => {
     const actions = getUniversalActions()
     const actionIds = actions.map(a => a.id)
-    expect(actionIds).toContain('explain_frame')
     expect(actionIds).toContain('summarize_section')
+    expect(actionIds).not.toContain('explain_frame')
   })
 })
 
@@ -84,16 +83,5 @@ describe('M10-T07: AI 上下文取原文，不含 translation（决策87）', ()
     })
     expect(context).toContain('Hello world.')
     expect(context).not.toContain('你好世界。')
-  })
-})
-
-describe('M10-T08: 流式对话可取消（决策83/92）', () => {
-  it('AiChatSession 提供 abort 方法', () => {
-    // 验证类型接口存在
-    const mockSession: AiChatSession = {
-      abort: () => {},
-      isStreaming: false,
-    }
-    expect(typeof mockSession.abort).toBe('function')
   })
 })

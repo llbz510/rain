@@ -572,7 +572,7 @@ export function AddModelForm({ onClose, onSave }: { onClose?: () => void; onSave
               checked={supportsVision}
               onChange={(e) => setSupportsVision(e.target.checked)}
             />
-            支持画面（vision）—— 助手 LLM 角色只列勾选此项的
+            支持画面（vision）
           </label>
         )}
       </div>
@@ -616,7 +616,7 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
 
   const asrModels = models.filter((m) => ['asr-api', 'whisper-local', 'subtitle'].includes(m.type))
   const structuringModels = models.filter((m) => m.type === 'llm')
-  const assistantModels = models.filter((m) => m.type === 'llm' && m.supportsVision)
+  const assistantModels = models.filter((m) => m.type === 'llm')
 
   const roleRowStyle: React.CSSProperties = {
     display: 'flex',
@@ -709,7 +709,7 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
             </option>
           ))}
         </select>
-        <div style={roleDescStyle}>必须 vision（只列勾了 vision 的）</div>
+        <div style={roleDescStyle}>文本问答；画面能力单独校验</div>
       </div>
     </div>
   )

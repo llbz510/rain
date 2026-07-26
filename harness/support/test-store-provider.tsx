@@ -1,21 +1,11 @@
-// src/store/test-provider.tsx
+// harness/support/test-store-provider.tsx
 // ========================================
-// Test Store Provider — 设置 Zustand store 状态用于组件测试
+// Test Store Provider - 设置 Zustand store 状态用于组件测试
 // ========================================
 
-import React, { createContext, useContext, useEffect } from 'react'
-import { useRainStore } from './rain-store'
+import React, { useEffect } from 'react'
+import { useRainStore } from '@/store/rain-store'
 import type { Node, Note } from '@/models/types'
-
-interface TestStoreContextValue {
-  language: string
-}
-
-const TestStoreContext = createContext<TestStoreContextValue>({ language: 'zh' })
-
-export function useTestStoreContext() {
-  return useContext(TestStoreContext)
-}
 
 interface TestStoreProviderProps {
   children: React.ReactNode
@@ -60,14 +50,11 @@ export function TestStoreProvider({
   if (currentVideoId !== undefined) partial.currentVideoId = currentVideoId
   if (layoutMode !== undefined) partial.layoutMode = layoutMode
   if (currentPage !== undefined) partial.currentPage = currentPage
+  partial.currentVideoLanguage = language
 
   useEffect(() => {
     useRainStore.setState(partial)
   })
 
-  return (
-    <TestStoreContext.Provider value={{ language }}>
-      {children}
-    </TestStoreContext.Provider>
-  )
+  return <>{children}</>
 }

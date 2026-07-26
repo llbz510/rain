@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NotesPanel, ExcerptButton } from '@/ui/components/notes'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from './support/test-store-provider'
 import type { Note } from '@/models/types'
 
 const mockNotes: Note[] = [

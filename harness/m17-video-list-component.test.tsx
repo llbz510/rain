@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { VideoList, VideoCard } from '@/ui/components/video-list'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from './support/test-store-provider'
 import type { Video } from '@/models/types'
 
 const readyVideo: Video = {

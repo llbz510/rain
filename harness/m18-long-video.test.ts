@@ -1,153 +1,182 @@
 // harness/m18-long-video.test.ts
 // ========================================
-// M18 Harness: 长视频分段处理
-// 锁定后禁止 AI 修改
+// M18 Harness: current Stage2 block and deterministic merge behavior
+// Harness migration: 2026-07-26
 // ========================================
 
-import { describe, it, expect } from 'vitest'
-import type { Sentence } from '@/models/types'
+import { describe, expect, it, vi } from 'vitest'
 import {
-  shouldChunk,
-  chunkSentences,
-  buildChunkContext,
-  validateChunkJsonIntegrity,
-  handleChunkFailure,
-  canSkipMerge,
-} from '@/pipeline/long-video'
+  createDatabase,
+  insertSentences,
+  insertVideo,
+  type Database,
+} from '@/models/database'
+import type { Sentence, Video } from '@/models/types'
+import {
+  buildMergeBlockId,
+  buildStage2Blocks,
+  runStage2Stage,
+} from '@/pipeline/stage2-runner'
+import type {
+  Stage2BlockOutput,
+  Stage2InputBlock,
+} from '@/pipeline/stage2-contract'
 
-function makeSentences(count: number): Sentence[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `s${i}`,
-    nodeId: '',
-    text: `Sentence number ${i}. `,
-    startTime: i * 10,
-    endTime: (i + 1) * 10,
-    sortOrder: i,
-  }))
+const video: Video = {
+  id: 'video-long',
+  title: 'Long lecture',
+  source: 'local',
+  filePath: 'D:\\courses\\long.mp4',
+  thumbnail: '',
+  duration: 8,
+  language: 'en',
+  status: 'processing',
+  stage: 'stage2',
+  createdAt: 1,
+  position: 0,
+  lastStudiedAt: 1,
+}
+const sentences: Sentence[] = [
+  { id: 's1', nodeId: video.id, text: 'Original sentence one.', startTime: 0, endTime: 2, sortOrder: 0 },
+  { id: 's2', nodeId: video.id, text: 'Original sentence two.', startTime: 2, endTime: 4, sortOrder: 1 },
+  { id: 's3', nodeId: video.id, text: 'Original sentence three.', startTime: 4, endTime: 6, sortOrder: 2 },
+  { id: 's4', nodeId: video.id, text: 'Original sentence four.', startTime: 6, endTime: 8, sortOrder: 3 },
+]
+const settings = {
+  baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  apiKey: 'test-key',
+  model: 'qwen3.5-omni-flash',
 }
 
-describe('M18-T01: 不触发分块 — token ≤ 窗口×33%', () => {
-  it('短文本不分块', () => {
-    const sentences = makeSentences(10)
-    const windowSize = 100000  // 100K token 窗口
-    const threshold = 0.33
-    expect(shouldChunk(sentences, windowSize, threshold)).toBe(false)
+function validOutput(block: Stage2InputBlock): Stage2BlockOutput {
+  const first = block.sentences[0].id
+  const last = block.sentences.at(-1)!.id
+  const chapterId = `${block.blockId}:node:chapter`
+  const sectionId = `${block.blockId}:node:section`
+  return {
+    blockId: block.blockId,
+    coveredSentenceIds: block.sentences.map((sentence) => sentence.id),
+    nodes: [
+      {
+        id: chapterId,
+        parentId: null,
+        kind: 'chapter',
+        title: 'Chapter',
+        startSentenceId: first,
+        endSentenceId: last,
+      },
+      {
+        id: sectionId,
+        parentId: chapterId,
+        kind: 'section',
+        title: 'Section',
+        startSentenceId: first,
+        endSentenceId: last,
+      },
+      {
+        id: `${block.blockId}:node:paragraph`,
+        parentId: sectionId,
+        kind: 'paragraph',
+        title: 'Paragraph',
+        type: 'concept',
+        startSentenceId: first,
+        endSentenceId: last,
+      },
+    ],
+  }
+}
+
+async function stage2Db(): Promise<Database> {
+  const db = await createDatabase(':memory:')
+  await insertVideo(db, video)
+  await insertSentences(db, sentences)
+  return db
+}
+
+describe('M18 / AC-LV-05: 确定性分块', () => {
+  it('短输入保持单块，超出预算时只在句子边界分块', () => {
+    expect(buildStage2Blocks(video.id, sentences, 10_000)).toHaveLength(1)
+
+    const blocks = buildStage2Blocks(video.id, sentences, 32)
+    expect(blocks.length).toBeGreaterThan(1)
+    expect(blocks.flatMap((block) => block.sentences.map((sentence) => sentence.id)))
+      .toEqual(sentences.map((sentence) => sentence.id))
+    expect(new Set(blocks.flatMap((block) => block.sentences.map((sentence) => sentence.id))).size)
+      .toBe(sentences.length)
+  })
+
+  it('单句超过预算时在调用模型前失败', async () => {
+    const callStage2 = vi.fn()
+
+    await expect(runStage2Stage({
+      video,
+      sentences,
+      settings,
+      db: await stage2Db(),
+      maxBlockTokens: 15,
+      callStage2,
+    })).rejects.toThrow(/s1.*token budget/i)
+    expect(callStage2).not.toHaveBeenCalled()
   })
 })
 
-describe('M18-T02: 触发分块 — token > 窗口×33%', () => {
-  it('长文本触发分块', () => {
-    const sentences = makeSentences(5000)  // 大量句子
-    const windowSize = 8000  // 小窗口
-    const threshold = 0.33
-    expect(shouldChunk(sentences, windowSize, threshold)).toBe(true)
-  })
-})
+describe('M18 / AC-LV-05: 校验、重试与确定性合并', () => {
+  it('模型连续返回截断或非法结果时重试三次后失败', async () => {
+    const callStage2 = vi.fn().mockResolvedValue('{"blockId":')
 
-describe('M18-T03: 每块目标 ≈ 窗口的 25%', () => {
-  it('分块大小合理', () => {
-    const sentences = makeSentences(1000)
-    const windowSize = 8000
-    const threshold = 0.33
-    const chunks = chunkSentences(sentences, windowSize, threshold)
-    // 每块不应超过窗口的 33%（触发线）
-    for (const chunk of chunks) {
-      expect(chunk.length).toBeGreaterThan(0)
-    }
-    // 至少分了 2 块
-    expect(chunks.length).toBeGreaterThanOrEqual(2)
-  })
-})
-
-describe('M18-T04: 分块只在句子边界切', () => {
-  it('每个块包含完整句子', () => {
-    const sentences = makeSentences(100)
-    const windowSize = 2000
-    const chunks = chunkSentences(sentences, windowSize, 0.33)
-
-    // 所有块的句子加起来等于原始句子
-    const allChunkedIds = chunks.flat().map(s => s.id)
-    const originalIds = sentences.map(s => s.id)
-    expect(allChunkedIds.sort()).toEqual(originalIds.sort())
-  })
-})
-
-describe('M18-T05: 每块 Stage2 输入包含前情摘要（Q4）', () => {
-  it('第二块及之后的块包含前情上下文', () => {
-    const previousBlockOutput = {
-      chapters: [{
-        title: '第一章', start: 0, end: 100,
-        sections: [{
-          title: '第一节', start: 0, end: 100,
-          paragraphs: [{
-            title: '段落1', type: 'concept', start: 0, end: 100,
-            sentences: [{ id: 's1', text: '内容。', start: 0, end: 100 }],
-          }],
-        }],
-      }],
-    }
-    const context = buildChunkContext(previousBlockOutput)
-    // 上下文包含前置块标题
-    expect(context).toContain('第一章')
-    expect(context).toContain('第一节')
-    // 包含末段信息
-    expect(context).toContain('段落1')
-  })
-})
-
-describe('M18-T06: 不重叠 — 句子不重复', () => {
-  it('每个句子只出现在一个块中', () => {
-    const sentences = makeSentences(200)
-    const chunks = chunkSentences(sentences, 3000, 0.33)
-
-    const allIds = chunks.flat().map(s => s.id)
-    const uniqueIds = new Set(allIds)
-    expect(uniqueIds.size).toBe(allIds.length)
-  })
-})
-
-describe('M18-T07: 合并输入只含元数据（Q5）', () => {
-  it('合并不包含完整句子文本', () => {
-    // 这个测试验证合并函数的输入构建
-    // 具体实现中会有 buildMergeInput 函数
-    // 此处通过检查函数签名存在来约束
-    expect(typeof buildChunkContext).toBe('function')
-  })
-})
-
-describe('M18-T08: 溢出重试 — 单块失败对半切', () => {
-  it('失败块被拆成两个更小的块', () => {
-    const failedChunk = makeSentences(50)
-    const retryChunks = handleChunkFailure(failedChunk)
-    expect(retryChunks.length).toBe(2)
-    // 两个子块加起来等于原块
-    const totalSentences = retryChunks[0].length + retryChunks[1].length
-    expect(totalSentences).toBe(50)
-  })
-})
-
-describe('M18-T09: JSON 完整性校验', () => {
-  it('完整 JSON 通过校验', () => {
-    const validJson = '{"chapters": [{"title": "章", "start": 0, "end": 100, "sections": []}]}'
-    expect(validateChunkJsonIntegrity(validJson)).toBe(true)
+    await expect(runStage2Stage({
+      video,
+      sentences,
+      settings,
+      db: await stage2Db(),
+      maxBlockTokens: 10_000,
+      callStage2,
+    })).rejects.toThrow(/invalid structured output after 3 attempts/i)
+    expect(callStage2).toHaveBeenCalledTimes(3)
   })
 
-  it('不完整 JSON 不通过（截断）', () => {
-    const truncatedJson = '{"chapters": [{"title": "章", "start": 0, '
-    expect(validateChunkJsonIntegrity(truncatedJson)).toBe(false)
-  })
-})
+  it('多块结果在本地确定性合并', async () => {
+    const blocks = buildStage2Blocks(video.id, sentences, 32)
+    const callStage2 = vi.fn(async (_prompt: string, payload: string) =>
+      validOutput(JSON.parse(payload) as Stage2InputBlock))
+    const result = await runStage2Stage({
+      video,
+      sentences,
+      settings,
+      db: await stage2Db(),
+      maxBlockTokens: 32,
+      callStage2,
+    })
 
-describe('M18-T10: 合并失败不影响已入库各块（决策90）', () => {
-  it('canSkipMerge 返回 true 表示可跳过合并', () => {
-    expect(typeof canSkipMerge).toBe('function')
-    expect(canSkipMerge()).toBe(true)
+    expect(callStage2).toHaveBeenCalledTimes(blocks.length)
+    expect(result.sentences.map(({ id, text }) => ({ id, text }))).toEqual(
+      sentences.map(({ id, text }) => ({ id, text })),
+    )
+    expect(new Set(result.sentences.map((sentence) => sentence.id)).size).toBe(sentences.length)
+    const mergeBlockId = buildMergeBlockId(video.id, sentences)
+    expect(result.nodes.every((node) => node.id.startsWith(`${mergeBlockId}:node:`))).toBe(true)
   })
-})
 
-describe('M18-T11: 合并失败可跳过（决策90）', () => {
-  it('跳过合并后分块结果可直接使用', () => {
-    // 验证跳过合并的标志位
-    expect(canSkipMerge()).toBe(true)
+  it('调用模型时只发送当前块的原始句子，不构造影子摘要合同', async () => {
+    const payloads: Stage2InputBlock[] = []
+    const callStage2 = vi.fn(async (_prompt: string, payload: string) => {
+      const parsed = JSON.parse(payload) as Stage2InputBlock
+      payloads.push(parsed)
+      return validOutput(parsed)
+    })
+
+    await runStage2Stage({
+      video,
+      sentences,
+      settings,
+      db: await stage2Db(),
+      maxBlockTokens: 32,
+      callStage2,
+    })
+
+    expect(payloads.flatMap((payload) => payload.sentences.map(({ id, text }) => ({ id, text }))))
+      .toEqual(sentences.map(({ id, text }) => ({ id, text })))
+    expect(payloads.every((payload) =>
+      Object.keys(payload).sort().join(',') === 'blockId,sentences,videoId')).toBe(true)
   })
 })

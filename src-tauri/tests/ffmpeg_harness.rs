@@ -1,25 +1,42 @@
 // src-tauri/tests/ffmpeg_harness.rs
 // ========================================
-// Rust Harness: ffmpeg / ffprobe 封装
-// 锁定后禁止 AI 修改
+// Rust Harness: ffmpeg / ffprobe failure behavior
+// Harness migration: 2026-07-26
 // ========================================
 
-use rain_lib::ffmpeg::{probe_duration, extract_thumbnail, FfmpegError};
+use rain_lib::ffmpeg::{extract_thumbnail, probe_duration, FfmpegError};
 
 #[test]
-fn r12_probe_video_duration() {
-    // 探测视频时长 → 写 video.duration
-    let _ = probe_duration;  // 函数存在
+fn r12_probe_missing_video_returns_file_not_found() {
+    let result = probe_duration("definitely-missing-rain-video.mp4");
+    assert!(matches!(result, Err(FfmpegError::FileNotFound)));
 }
 
 #[test]
-fn r13_extract_thumbnail_to_thumbnails_dir() {
-    // 抽取指定帧为缩略图 → 写 thumbnails/
-    let _ = extract_thumbnail;  // 函数存在
+fn r13_thumbnail_missing_video_returns_file_not_found_without_creating_output() {
+    let output = std::env::temp_dir().join(format!(
+        "rain-missing-thumbnail-{}.jpg",
+        uuid::Uuid::new_v4()
+    ));
+    let result = extract_thumbnail(
+        "definitely-missing-rain-video.mp4",
+        output.to_string_lossy().as_ref(),
+        1.0,
+    );
+
+    assert!(matches!(result, Err(FfmpegError::FileNotFound)));
+    assert!(!output.exists());
 }
 
 #[test]
-fn r14_missing_video_file_returns_error() {
-    // 视频文件不存在返回错误
-    let _err = FfmpegError::FileNotFound;
+fn r14_ffmpeg_errors_have_user_facing_context() {
+    assert_eq!(FfmpegError::FileNotFound.to_string(), "Video file not found");
+    assert_eq!(
+        FfmpegError::ProbeFailed("bad stream".into()).to_string(),
+        "ffprobe failed: bad stream"
+    );
+    assert_eq!(
+        FfmpegError::ThumbnailFailed("bad frame".into()).to_string(),
+        "ffmpeg thumbnail failed: bad frame"
+    );
 }

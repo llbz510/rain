@@ -47,6 +47,7 @@ interface RainState {
   notes: Note[]
   currentVideoFilePath: string
   currentVideoTitle: string
+  currentVideoLanguage: string
 
   // Actions
   reset: () => void
@@ -88,6 +89,7 @@ const initialState = {
   notes: [] as Note[],
   currentVideoFilePath: '',
   currentVideoTitle: '',
+  currentVideoLanguage: 'other',
 }
 
 const runtimeSettingsInitializer = createRuntimeSettingsInitializer(loadPersistedRuntimeSettings)
@@ -147,6 +149,7 @@ export const useRainStore = create<RainState>((set, get) => ({
         playPosition: video?.position ?? 0,
         currentVideoFilePath: video?.filePath ?? '',
         currentVideoTitle: video?.title ?? '',
+        currentVideoLanguage: video?.language || 'other',
       })
     } catch {
       set({ currentVideoId: videoId, currentPage: 'study' })
@@ -165,6 +168,7 @@ export const useRainStore = create<RainState>((set, get) => ({
       playPosition: 0,
       currentVideoFilePath: '',
       currentVideoTitle: '',
+      currentVideoLanguage: 'other',
     })
   },
 

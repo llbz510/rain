@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AiAssistant, QuickActions, ChatInput } from '@/ui/components/ai-assistant'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from './support/test-store-provider'
 
 function renderWithStore(ui: React.ReactElement) {
   return render(<TestStoreProvider>{ui}</TestStoreProvider>)
@@ -72,9 +72,12 @@ describe('U40: Enter 发送，Alt+Enter 换行（决策80）', () => {
 })
 
 describe('U41: 流式中停止按钮可中断（决策83）', () => {
-  it('流式状态显示停止按钮', () => {
-    renderWithStore(<AiAssistant messages={[]} isStreaming={true} />)
-    expect(screen.getByRole('button', { name: /停止/ })).toBeInTheDocument()
+  it('流式状态点击停止按钮触发 onStop', async () => {
+    const user = userEvent.setup()
+    const onStop = vi.fn()
+    renderWithStore(<AiAssistant messages={[]} isStreaming={true} onStop={onStop} />)
+    await user.click(screen.getByRole('button', { name: /停止/ }))
+    expect(onStop).toHaveBeenCalledTimes(1)
   })
 
   it('非流式状态无停止按钮', () => {

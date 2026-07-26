@@ -1,4 +1,3 @@
-pub mod asr;
 pub mod asr_persistence;
 pub mod commands;
 pub mod e2e_config;
@@ -20,7 +19,6 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .manage(Arc::new(scheduler::ImportScheduler::new()))
         .invoke_handler(tauri::generate_handler![
-            commands::start_import,
             commands::cancel_import,
             commands::check_ytdlp_command,
             commands::get_runtime_capability,
@@ -34,7 +32,6 @@ pub fn run() {
             commands::download_whisper_model,
             commands::list_whisper_models,
             e2e_config::get_real_e2e_config,
-            // convert_file_src 用纯函数，前端直接调用
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

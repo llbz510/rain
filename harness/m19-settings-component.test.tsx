@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SettingsPage, ModelPoolList, AddModelForm, RoleSelector } from '@/ui/components/settings'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from './support/test-store-provider'
 
 function renderWithStore(ui: React.ReactElement) {
   return render(<TestStoreProvider>{ui}</TestStoreProvider>)
@@ -45,16 +45,16 @@ describe('U56: 角色选择下拉（决策82）', () => {
   })
 })
 
-describe('U57: 助手角色只列 vision 模型（决策82）', () => {
-  it('助手下拉只显示勾了 vision 的', () => {
+describe('U57 / AC-LV-12: 助手文本能力不强制 vision', () => {
+  it('助手下拉显示所有 LLM，并保留 vision 元数据供视觉能力另行判断', () => {
     const models = [
       { id: 'm1', alias: '有Vision', type: 'llm', supportsVision: true },
       { id: 'm2', alias: '无Vision', type: 'llm', supportsVision: false },
     ]
     renderWithStore(<RoleSelector models={models} />)
-    const assistantSelect = screen.getByLabelText(/助手|assistant/i)
-    // 助手下拉的 option 不应包含"无Vision"
-    expect(assistantSelect).toBeInTheDocument()
+    const assistantSelect = screen.getByLabelText(/助手|assistant/i) as HTMLSelectElement
+    const options = Array.from(assistantSelect.options).map((option) => option.textContent)
+    expect(options).toEqual(expect.arrayContaining(['有Vision', '无Vision']))
   })
 })
 

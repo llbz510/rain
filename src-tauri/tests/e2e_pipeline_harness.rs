@@ -26,10 +26,7 @@ fn temp_thumbnail_path() -> String {
 #[test]
 fn e01_probe_sample_video_duration() {
     let path = fixture_path();
-    if !Path::new(&path).exists() {
-        eprintln!("SKIP: test-fixtures/sample.mp4 not found");
-        return;
-    }
+    assert!(Path::new(&path).exists(), "required fixture is missing: {path}");
     let duration = ffmpeg::probe_duration(&path).expect("probe_duration failed");
     assert!(
         duration >= 1.5 && duration <= 2.5,
@@ -41,10 +38,7 @@ fn e01_probe_sample_video_duration() {
 #[test]
 fn e02_probe_file_stem_as_title() {
     let path = fixture_path();
-    if !Path::new(&path).exists() {
-        eprintln!("SKIP: test-fixtures/sample.mp4 not found");
-        return;
-    }
+    assert!(Path::new(&path).exists(), "required fixture is missing: {path}");
     let stem = Path::new(&path)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -55,10 +49,10 @@ fn e02_probe_file_stem_as_title() {
 #[test]
 fn e03_generate_thumbnail_creates_file() {
     let video_path = fixture_path();
-    if !Path::new(&video_path).exists() {
-        eprintln!("SKIP: test-fixtures/sample.mp4 not found");
-        return;
-    }
+    assert!(
+        Path::new(&video_path).exists(),
+        "required fixture is missing: {video_path}"
+    );
     let thumb_path = temp_thumbnail_path();
     let _ = std::fs::remove_file(&thumb_path);
 

@@ -158,7 +158,7 @@ export function getModelsForRole(role: ModelRole): ModelPoolEntry[] {
     case 'structuring':
       return models.filter(m => m.type === 'llm')
     case 'assistant':
-      return models.filter(m => m.type === 'llm' && m.supportsVision)
+      return models.filter(m => m.type === 'llm')
   }
 }
 

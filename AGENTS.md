@@ -2,9 +2,16 @@
 
 > 新会话/新 AI 开发者读本文件即可了解环境与构建命令。
 
-## 新会话必读：当前项目状态
+## 新会话必读：项目控制面
 
-任何新 AI / 开发者进入本项目后，必须先读 `docs/PROJECT_STATE.md`，再相信 PRD、旧计划、旧截图或旧 evidence。
+任何新 AI / 开发者进入本项目后，必须按以下顺序阅读：
+
+1. `docs/development/control-map.md`：不同问题应相信哪份事实源；
+2. `docs/PROJECT_STATE.md`：当前可验证状态和已知风险；
+3. 与任务有关的 `acceptance-standard.md`、`harness-coverage.md` 和 `module-map.md`；
+4. 与任务有关的 PRD/spec、代码、测试和证据。
+
+不要直接根据 PRD、旧计划、旧截图或旧 evidence 判断当前实现已经完成。
 
 `docs/PROJECT_STATE.md` 是当前项目事实来源，记录：
 
@@ -15,6 +22,8 @@
 - 每轮会话结束前必须同步更新的维护清单。
 
 如果本轮会话修改了项目文件，交付前必须同步更新 `docs/PROJECT_STATE.md`。
+
+每个代码改动必须指出对应 AC、实现模块和验证方式。没有 AC 的新产品行为先标记为 `Proposed`，不得由 AI 静默决定。
 
 ## 环境前置依赖
 
@@ -79,9 +88,12 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 ## Harness 系统
 
 本项目采用 **harness-gated development**：
-- 所有测试在 `harness/` 目录（前端）和 `src-tauri/tests/` 目录（Rust）
-- harness 文件**锁定后禁止 AI 修改**
+- 产品 Harness 在 `harness/`（前端）和 `src-tauri/tests/`（Rust）；实现级回归测试还包括 `src/__tests__/`
+- Harness 默认锁定，功能实现者不得为了让代码通过而静默降低或删除 AC
+- 只有用户明确批准 **Harness Migration** 后才能修改锁定文件；迁移必须记录旧合同、替代裁判、对应 AC、退役影子模块和验证结果
+- 修改 Harness 时优先让测试调用真实公开接口并断言结果、状态或副作用；函数/常量存在、对象自我赋值和恒真表达式不算验收
 - AI 开发者在 feature 分支实现代码，必须让 harness 全绿才能合并
+- 当前迁移记录见 `docs/development/harness-migration-2026-07-26.md`
 - 详细设计见 `docs/superpowers/specs/2026-07-07-harness-gated-development-design.md`
 
 ## 已知坑

@@ -1,6 +1,4 @@
-/* src/index.css — 暗色主题设计系统（Task 2）
-   把 src/ui/design-tokens.ts 的 JS 令牌映射到 CSS 变量。
-   JS 是真相源，CSS 与之对齐；注释标注每个变量的来源。 */
+/* src/index.css - 应用实际加载的视觉令牌真相源。 */
 
 :root {
   /* ===== 暗色主题中性色（决策63）===== */

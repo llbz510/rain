@@ -91,8 +91,8 @@ describe('M19-T05: 结构化 LLM 角色只列 LLM 模型（决策82）', () => {
   })
 })
 
-describe('M19-T06: 助手 LLM 只列勾了 vision 的模型（决策82）', () => {
-  it('getModelsForRole("assistant") 只返回 supportsVision=true 的 LLM', () => {
+describe('M19-T06 / AC-LV-12: 文本助手和 vision 是独立能力', () => {
+  it('getModelsForRole("assistant") 返回所有 LLM，不把 vision 当成文本问答前提', () => {
     addModelToPool({
       type: 'llm', provider: 'openai', apiKey: 'sk-1',
       modelName: 'gpt-4o', alias: '有Vision', supportsVision: true,
@@ -103,9 +103,11 @@ describe('M19-T06: 助手 LLM 只列勾了 vision 的模型（决策82）', () =
     })
 
     const assistantModels = getModelsForRole('assistant')
-    for (const m of assistantModels) {
-      expect(m.supportsVision).toBe(true)
-    }
+    expect(assistantModels).toEqual(expect.arrayContaining([
+      expect.objectContaining({ alias: '有Vision', type: 'llm', supportsVision: true }),
+      expect.objectContaining({ alias: '无Vision', type: 'llm', supportsVision: false }),
+    ]))
+    expect(assistantModels.every((model) => model.type === 'llm')).toBe(true)
   })
 })
 

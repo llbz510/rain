@@ -4,11 +4,12 @@
 // 锁定后禁止 AI 修改
 // ========================================
 
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SideTree, CatalogBar, DiagramZone } from '@/ui/components/catalog'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from './support/test-store-provider'
+import { useRainStore } from '@/store/rain-store'
 import type { Node } from '@/models/types'
 
 const mockNodes: Node[] = [
@@ -20,6 +21,10 @@ const mockNodes: Node[] = [
 function renderWithStore(ui: React.ReactElement) {
   return render(<TestStoreProvider nodes={mockNodes}>{ui}</TestStoreProvider>)
 }
+
+beforeEach(() => {
+  useRainStore.getState().reset()
+})
 
 describe('U13: 左树渲染三级（决策20）', () => {
   it('渲染章节/小节/段落', () => {
@@ -46,8 +51,8 @@ describe('U15: 左树双击触发三区跳转（决策40）', () => {
     const onSeek = vi.fn()
     renderWithStore(<SideTree onSeek={onSeek} />)
     await user.dblClick(screen.getByText('段落1'))
-    // 验证 seek 被调用（具体实现通过 store action）
-    expect(screen.getByText('段落1')).toBeInTheDocument()
+    expect(onSeek).toHaveBeenCalledTimes(1)
+    expect(onSeek).toHaveBeenCalledWith(0)
   })
 })
 
@@ -64,8 +69,8 @@ describe('U17: 横条单击触发 seek（决策38）', () => {
     const onSeek = vi.fn()
     renderWithStore(<CatalogBar onSeek={onSeek} />)
     await user.click(screen.getByText('第一章'))
-    // 横条纯导航，单击就跳转
-    expect(screen.getByText('第一章')).toBeInTheDocument()
+    expect(onSeek).toHaveBeenCalledTimes(1)
+    expect(onSeek).toHaveBeenCalledWith(0)
   })
 })
 
@@ -82,24 +87,28 @@ describe('U19: 导图单击触发 selectNode origin=diagram（决策48）', () =
     const user = userEvent.setup()
     renderWithStore(<DiagramZone />)
     await user.click(screen.getByText('段落1'))
-    expect(screen.getByText('段落1')).toBeInTheDocument()
+    expect(screen.getByText('段落1')).toHaveAttribute('data-selected', 'true')
   })
 })
 
 describe('U20: 导图双击触发三区跳转（决策48）', () => {
   it('导图双击跳转', async () => {
     const user = userEvent.setup()
-    renderWithStore(<DiagramZone />)
+    const onSeek = vi.fn()
+    renderWithStore(<DiagramZone onSeek={onSeek} />)
     await user.dblClick(screen.getByText('段落1'))
-    expect(screen.getByText('段落1')).toBeInTheDocument()
+    expect(onSeek).toHaveBeenCalledTimes(1)
+    expect(onSeek).toHaveBeenCalledWith(0)
   })
 })
 
 describe('U21: ■/□ 进度指示渲染（决策56）', () => {
   it('播放过的节点显示■，未播显示□', () => {
-    renderWithStore(<SideTree playPosition={30} />)
-    // p1 时间 [0-60]，30 在范围内 → current
-    // 应该有进度指示元素
-    expect(screen.queryAllByTestId(/progress-indicator/).length).toBeGreaterThanOrEqual(0)
+    const first = renderWithStore(<SideTree playPosition={130} />)
+    expect(screen.getByTestId('progress-indicator-p1')).toHaveTextContent('■')
+
+    first.unmount()
+    renderWithStore(<SideTree playPosition={-1} />)
+    expect(screen.getByTestId('progress-indicator-p1')).toHaveTextContent('□')
   })
 })

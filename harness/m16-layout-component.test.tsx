@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LayoutSwitch } from '@/ui/components/layout-switch'
-import { TestStoreProvider } from '@/store/test-provider'
+import { TestStoreProvider } from './support/test-store-provider'
 
 function renderWithStore(ui: React.ReactElement) {
   return render(<TestStoreProvider>{ui}</TestStoreProvider>)

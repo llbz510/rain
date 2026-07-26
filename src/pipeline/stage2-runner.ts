@@ -41,7 +41,6 @@ export interface RunStage2StageInput {
   signal?: AbortSignal
   maxBlockTokens?: number
   callStage2?: Stage2ModelCaller
-  callMerge?: Stage2ModelCaller
 }
 
 export interface RunStage2StageResult {
