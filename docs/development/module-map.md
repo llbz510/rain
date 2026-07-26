@@ -108,7 +108,7 @@ cancelImport(videoId)
 
 布局状态只决定区域可见性，不拥有学习事实。生产学习页在三种布局间切换时必须保留同一个 media 实例；隐藏视频不得卸载它，否则控制栏会失去真实播放对象并重置播放状态。M16 占位组件只裁判局部布局契约，生产行为由 `study-layout.test.tsx` 裁判。
 
-数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接调用 `exec/query`。
+数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。`src/models/database-adapter.ts` 是内部 adapter seam：公共 `Database` 只含两种 adapter 都真实支持的 interface，SQLite 的 `exec/query` 与内存表读写不会互相伪装。检查点编码和读写归 `src/models/database-checkpoints.ts`。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接导入这些内部模块。
 
 当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
 
@@ -135,7 +135,7 @@ cancelImport(videoId)
 | 热点 | 当前规模 | 混合的职责 | 控制策略 |
 | --- | ---: | --- | --- |
 | `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
-| `src/models/database.ts` | 约 966 行；schema 114 行 | 公共入口、两种 adapter、映射、CRUD、事务；schema 已独立 | 保持 `@/models/database` 稳定；按 `database-control.md` 的 AC/裁判顺序渐进拆分，不把行数当作拆分目标 |
+| `src/models/database.ts` | 约 898 行；schema 114 行；adapter 32 行；检查点 85 行 | 公共入口、两种 adapter 实现、映射、CRUD和多数导入事务；schema、adapter interface 与检查点已独立 | 保持 `@/models/database` 稳定；按 `database-control.md` 的 AC/裁判顺序继续拆分导入持久化，不把行数当作拆分目标 |
 | `src-tauri/src/commands.rs` | 约 796 行 | command、参数处理、部分系统行为 | 保持 command 薄，行为下沉到 Rust 模块 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
 | `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |

@@ -6,7 +6,14 @@
 // 公开 API（Database 接口 + 所有导出函数签名）两种后端完全一致。
 // ========================================
 
-import type { Video, VideoStatus, Node, Sentence, Note, ImportCheckpoint } from './types'
+import type { Video, VideoStatus, Node, Sentence, Note } from './types'
+import {
+  isSqlDatabase,
+  type Database,
+  type MemoryDatabaseAdapter,
+  type SqlDatabaseAdapter,
+  type TableRow,
+} from './database-adapter'
 import {
   DATABASE_SCHEMA_SQL,
   getDatabaseTableColumns,
@@ -16,23 +23,16 @@ import {
 // 运行时通过 createDatabase 内的动态 import() 加载。
 import type TauriSqlPlugin from '@tauri-apps/plugin-sql'
 
-export interface Database {
-  listTables(): Promise<string[]>
-  getTableColumns(table: string): Promise<string[]>
-  exec(sql: string, params?: any[]): Promise<void>
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>
-}
-
-interface TableRow {
-  [key: string]: any
-}
+export type { Database } from './database-adapter'
+export { getImportCheckpoint, saveImportCheckpoint } from './database-checkpoints'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）
 // jsdom 测试 / 非 Tauri 开发环境的 fallback
 // ========================================
 
-class MemoryDatabase implements Database {
+class MemoryDatabase implements MemoryDatabaseAdapter {
+  readonly adapterKind = 'memory'
   private tables: Map<string, string[]> = new Map()
   private data: Map<string, TableRow[]> = new Map()
 
@@ -55,22 +55,20 @@ class MemoryDatabase implements Database {
     return this.tables.get(table) ?? []
   }
 
-  async exec(sql: string, params: any[] = []): Promise<void> {
-    // 内存路径不通过 SQL 操作，仅占位以实现接口
-  }
-
-  async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-    return []
-  }
-
-  // 内部方法：获取表数据
-  _getTable(tableName: string): TableRow[] {
+  readTable(tableName: string): TableRow[] {
     return this.data.get(tableName) ?? []
   }
 
-  // 内部方法：设置表数据
-  _setTable(tableName: string, rows: TableRow[]): void {
+  replaceTable(tableName: string, rows: TableRow[]): void {
     this.data.set(tableName, rows)
+  }
+
+  _getTable(tableName: string): TableRow[] {
+    return this.readTable(tableName)
+  }
+
+  _setTable(tableName: string, rows: TableRow[]): void {
+    this.replaceTable(tableName, rows)
   }
 }
 
@@ -86,7 +84,8 @@ function isTauriEnvironment(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
-class TauriSqlDatabase implements Database {
+class TauriSqlDatabase implements SqlDatabaseAdapter {
+  readonly adapterKind = 'sqlite'
   private db: TauriSqlPlugin
 
   constructor(db: TauriSqlPlugin) {
@@ -249,11 +248,6 @@ function rowToNote(row: TableRow, sentenceIds: string[]): Note {
     createdAt: row.created_at,
     sortOrder: row.sort_order,
   }
-}
-
-// 辅助：判断 Database 实例是否为 Tauri 后端
-function isTauriDb(db: Database): db is TauriSqlDatabase {
-  return db instanceof TauriSqlDatabase
 }
 
 // ===== 导出函数 =====
@@ -421,6 +415,10 @@ export async function getNotesByVideoId(db: Database, videoId: string): Promise<
       .map(ns => ns.sentence_id)
     return rowToNote(row, sentenceIds)
   })
+}
+
+function isTauriDb(db: Database): db is SqlDatabaseAdapter {
+  return isSqlDatabase(db)
 }
 
 export async function updateNoteContent(db: Database, noteId: string, content: string): Promise<void> {
@@ -683,72 +681,6 @@ export async function determineRecoveryAction(db: Database, videoId: string): Pr
     return 'rerun_asr'
   }
 }
-
-
-export async function saveImportCheckpoint(db: Database, checkpoint: ImportCheckpoint): Promise<void> {
-  const completedBlocksJson = checkpoint.completedBlockOutputs
-    ? JSON.stringify({ version: 2, blocks: checkpoint.completedBlockOutputs })
-    : JSON.stringify(checkpoint.completedBlocks)
-  if (isTauriDb(db)) {
-    await db.exec(
-      'INSERT INTO import_checkpoint (video_id, stage, completed_blocks_json, error_message, updated_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(video_id) DO UPDATE SET stage = excluded.stage, completed_blocks_json = excluded.completed_blocks_json, error_message = excluded.error_message, updated_at = excluded.updated_at',
-      [checkpoint.videoId, checkpoint.stage, completedBlocksJson, checkpoint.errorMessage ?? null, checkpoint.updatedAt]
-    )
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('import_checkpoint')
-  const row = {
-    video_id: checkpoint.videoId,
-    stage: checkpoint.stage,
-    completed_blocks_json: completedBlocksJson,
-    error_message: checkpoint.errorMessage ?? null,
-    updated_at: checkpoint.updatedAt,
-  }
-  const existingIndex = table.findIndex(item => item.video_id === checkpoint.videoId)
-  if (existingIndex >= 0) table[existingIndex] = row
-  else table.push(row)
-  memDb._setTable('import_checkpoint', table)
-}
-
-export async function getImportCheckpoint(db: Database, videoId: string): Promise<ImportCheckpoint | null> {
-  let row: TableRow | undefined
-  if (isTauriDb(db)) {
-    row = (await db.query<TableRow>('SELECT * FROM import_checkpoint WHERE video_id = $1', [videoId]))[0]
-  } else {
-    row = (db as unknown as MemoryDatabase)._getTable('import_checkpoint').find(item => item.video_id === videoId)
-  }
-  if (!row) return null
-  let completedBlocks: string[] = []
-  let completedBlockOutputs: unknown[] | undefined
-  try {
-    const parsed: unknown = JSON.parse(row.completed_blocks_json)
-    if (Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')) {
-      completedBlocks = parsed
-    } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const encoded = parsed as { version?: unknown; blocks?: unknown }
-      if (encoded.version === 2 && Array.isArray(encoded.blocks)) {
-        completedBlockOutputs = encoded.blocks
-        completedBlocks = encoded.blocks.flatMap((value) => {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-          const blockId = (value as { blockId?: unknown }).blockId
-          return typeof blockId === 'string' ? [blockId] : []
-        })
-      }
-    }
-  } catch {
-    completedBlocks = []
-  }
-  return {
-    videoId: row.video_id,
-    stage: row.stage,
-    completedBlocks,
-    completedBlockOutputs,
-    errorMessage: row.error_message ?? undefined,
-    updatedAt: row.updated_at,
-  }
-}
-
 export async function getSentencesByVideoId(db: Database, videoId: string): Promise<Sentence[]> {
   if (isTauriDb(db)) {
     const rows = await db.query<TableRow>(

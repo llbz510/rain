@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the database-control slice: `5ae5755 fix: preserve study media across layouts`
+Current working base before the database-adapter slice: `47a82cc refactor: control database schema`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. `src/__tests__/live-qwen.test.ts` is intentionally skipped without a live Key, but it and the legacy default Qwen health path still hard-code `qwen3.5-omni-flash`, while the current schema v2 verified configuration is `qwen3-omni-flash`. The skipped smoke test is therefore not a valid judge for the current verified fingerprint until it reads the selected runtime configuration.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. The exported `Database.exec/query` methods are real only for the Tauri SQL adapter; the memory adapter keeps no-op implementations for legacy interface compatibility. Production callers currently do not use them directly and must continue using the business operations exported by `@/models/database`. A future adapter-seam migration must replace this non-substitutable interface before internal repository modules rely on raw calls.
+17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active and checkpoint persistence has moved behind it. Most legacy CRUD and import functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
 
 ## What changed in the 2026-07-26 project-control baseline session
 
@@ -1004,6 +1004,40 @@ git diff --check
 ```
 
 Observed result: the full frontend suite passed 62 files / 391 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. Rust and the real-video E2E were not rerun because this slice changes TypeScript schema definition and adapter initialization only.
+
+## What changed in the 2026-07-27 database-adapter and checkpoint slice
+
+Continued the database-control sequence after commit `47a82cc refactor: control database schema`:
+
+- Added `src/models/database-adapter.ts` as the internal discriminated adapter seam.
+- Reduced the public `Database` interface to metadata operations that both adapters actually implement. `SqlDatabaseAdapter` owns `exec/query`; `MemoryDatabaseAdapter` owns `readTable/replaceTable`.
+- Removed the no-op `exec/query` methods from the memory adapter, closing the non-substitutable interface risk recorded by the previous audit.
+- Added `src/models/database-checkpoints.ts` and moved Stage2 checkpoint encoding, legacy/v2 decoding, upsert and lookup behind the new seam.
+- Kept `getImportCheckpoint` and `saveImportCheckpoint` re-exported from `@/models/database`, so Stage2, E2E and tests did not change their public imports.
+- Added `src/__tests__/database-boundary.test.ts`. It proves the memory adapter does not advertise raw SQL and scans production source to prevent direct imports of database internal modules.
+- Retained a private compatibility bridge for legacy CRUD still inside `database.ts`; deleting it before those responsibilities move would create a broad rewrite.
+- `database.ts` is now about 898 lines. State transitions, recovery decisions and atomic ASR/final merge remain there and are the next controlled part of the same responsibility group.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/database-boundary.test.ts src/__tests__/stage2-runner.test.ts src/__tests__/pipeline-asr.test.ts src/__tests__/pipeline-recovery.test.ts src/__tests__/database-recovery.test.ts harness/m03-video-import.test.ts harness/m15-settings-recovery.test.ts harness/m15-schema-crud.test.ts harness/m20-boundaries.test.ts
+npx.cmd tsc --noEmit
+cargo.exe test --manifest-path src-tauri/Cargo.toml --lib persistence
+```
+
+Observed result: the focused frontend set passed 9 files / 111 tests and TypeScript passed; Rust persistence passed 7 tests covering stale state, rollback, graph validation and exact sentence assignment.
+
+Final verification:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: the full frontend suite passed 63 files / 393 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. The real-video E2E was not rerun because this refactor keeps public calls and Rust commands unchanged.
 
 ## Maintenance checklist for every future session
 
