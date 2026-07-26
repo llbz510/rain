@@ -1,0 +1,126 @@
+{
+    "schemaVersion":  2,
+    "evidenceId":  "rain-real-e2e-20260726-195652",
+    "generatedAt":  "2026-07-26T12:38:49.1161175Z",
+    "video":  {
+                  "path":  "D:\\xiazaiwenjian\\bilidown\\【华中科技大学】电子技术基础 张林（全138讲）电子信息工程专业必修课\\1.2.1 信号及其放大.mp4",
+                  "sha256":  "3870B5BD62E574685AC99A8E44295F5E44AC44B76343666742C1C4CA48365F8A",
+                  "probe":  "probe.json"
+              },
+    "databasePath":  "D:\\gongju\\shengcan\\rain\\evidence\\rain-real-e2e-20260726-195652\\rain-e2e.db",
+    "runtime":  {
+                    "llmBaseUrl":  "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "llmModel":  "qwen3-omni-flash",
+                    "whisperBackend":  "cuda",
+                    "whisperModel":  "ggml-large-v3.bin"
+                },
+    "timings":  {
+                    "asrSeconds":  1408,
+                    "pipelineSeconds":  2459,
+                    "structuringSeconds":  1050
+                },
+    "asr":  {
+                "sentenceCount":  1953,
+                "manualReviewSamples":  [
+                                            {
+                                                "endTime":  13.04,
+                                                "id":  "whisper-143d47aa-0067-45f6-b894-851b47d988b4",
+                                                "startTime":  0,
+                                                "text":  "虚论这一章实际上是"
+                                            },
+                                            {
+                                                "endTime":  14.18,
+                                                "id":  "whisper-8e3eee07-88e7-4148-85e9-7c69429ffbbf",
+                                                "startTime":  13.04,
+                                                "text":  "之所以叫虚论呢"
+                                            },
+                                            {
+                                                "endTime":  18.66,
+                                                "id":  "whisper-68118c88-6686-4b27-b28a-125c56dcee1a",
+                                                "startTime":  14.18,
+                                                "text":  "它不是课程内容的最核心的内容部分"
+                                            },
+                                            {
+                                                "endTime":  20.72,
+                                                "id":  "whisper-cf66bbc6-26df-4d4b-b8d2-b0fee55ef7a4",
+                                                "startTime":  18.66,
+                                                "text":  "只是一个引则或者是引言"
+                                            },
+                                            {
+                                                "endTime":  24.16,
+                                                "id":  "whisper-4bc11cbf-0fa6-4034-b1d7-60561430d79e",
+                                                "startTime":  20.72,
+                                                "text":  "那么要学这门课程里面"
+                                            },
+                                            {
+                                                "endTime":  24.84,
+                                                "id":  "whisper-2e230b40-3d09-4855-9b78-736689a8c115",
+                                                "startTime":  24.16,
+                                                "text":  "我们需要"
+                                            },
+                                            {
+                                                "endTime":  27.14,
+                                                "id":  "whisper-65eb909c-8b08-49d5-aa10-d5c20c975b9e",
+                                                "startTime":  24.84,
+                                                "text":  "首先要准备些什么知识"
+                                            },
+                                            {
+                                                "endTime":  29.3,
+                                                "id":  "whisper-5aecc67e-df95-452e-b137-0564fe7b8fd2",
+                                                "startTime":  27.14,
+                                                "text":  "要理解一些什么基本的概念"
+                                            },
+                                            {
+                                                "endTime":  32.1,
+                                                "id":  "whisper-9322529c-c0eb-4f89-985d-b9016739e106",
+                                                "startTime":  29.3,
+                                                "text":  "在这个虚论里面先给大家提出来"
+                                            },
+                                            {
+                                                "endTime":  34.12,
+                                                "id":  "whisper-070933be-be68-4fdc-9d8a-7893e0107e31",
+                                                "startTime":  32.1,
+                                                "text":  "所以虚论这一章呢"
+                                            }
+                                        ],
+                "detectedLanguage":  "zh"
+            },
+    "structuring":  {
+                        "blockCount":  12
+                    },
+    "validation":  {
+                       "sentenceCoverage":  "computed-by-validator",
+                       "noDemoSentences":  "computed-by-validator",
+                       "noDemoIds":  "computed-by-validator"
+                   },
+    "cancellation":  {
+                         "result":  "passed",
+                         "artifact":  "cancellation-proof.json"
+                     },
+    "restart":  {
+                    "result":  "passed",
+                    "artifact":  "restart-proof.json"
+                },
+    "secretsDetected":  false,
+    "artifacts":  {
+                      "capabilities":  "capabilities.json",
+                      "screenshots":  [
+                                          "screenshots/study-ready.png"
+                                      ],
+                      "probe":  "probe.json",
+                      "structuringBlocks":  "structuring-blocks.json",
+                      "database":  "database-summary.json",
+                      "runtimeGates":  "runtime-gates.json",
+                      "transcript":  "transcript.json",
+                      "appEvents":  "app-events.json",
+                      "uiState":  "ui-state.json",
+                      "cudaRuntimeLog":  "logs/tauri-driver.ui-proof.err.log"
+                  },
+    "appEventsRecoveredFrom":  "restart-proof.json",
+    "uiCapturedAt":  "2026-07-26T13:12:38.525Z",
+    "evidencePhases":  {
+                           "pipelineGeneratedAt":  "2026-07-26T12:38:49.1161175Z",
+                           "uiProofCapturedAt":  "2026-07-26T13:12:38.525Z",
+                           "cudaProof":  "ui-proof-asr-capability"
+                       }
+}

@@ -1,0 +1,64 @@
+{
+    "checks":  [
+                   {
+                       "checkedAt":  1785067063787,
+                       "fingerprint":  "cap-v1-387a7859",
+                       "message":  "ASR 能力检查通过：短语音样本产生 1 条有效转写。",
+                       "modelAlias":  "Whisper ggml-large-v3.bin",
+                       "modelId":  "rain-e2e-asr",
+                       "role":  "asr",
+                       "status":  "Compatible"
+                   },
+                   {
+                       "checkedAt":  1785067067447,
+                       "fingerprint":  "cap-v1-a8e72c1b",
+                       "message":  "结构化能力检查通过：Stage2 契约及 sentence ID 覆盖有效。",
+                       "modelAlias":  "qwen3-omni-flash",
+                       "modelId":  "rain-e2e-llm",
+                       "role":  "structuring",
+                       "status":  "Compatible"
+                   },
+                   {
+                       "checkedAt":  1785067067675,
+                       "fingerprint":  "cap-v1-1c990fe5",
+                       "message":  "文本助手能力检查通过：流式响应和指令遵循有效；不包含 vision 能力。",
+                       "modelAlias":  "qwen3-omni-flash",
+                       "modelId":  "rain-e2e-llm",
+                       "role":  "assistant",
+                       "status":  "Compatible"
+                   }
+               ],
+    "source":  "rain-app-automation",
+    "verifiedRecords":  [
+                            {
+                                "checkedAt":  1785069527880,
+                                "evidenceId":  "rain-real-e2e-20260726-195652",
+                                "fingerprint":  "cap-v1-387a7859",
+                                "message":  "Full Rain E2E verified asr through production runtime gates.",
+                                "modelAlias":  "Whisper ggml-large-v3.bin",
+                                "modelId":  "rain-e2e-asr",
+                                "role":  "asr",
+                                "status":  "Verified"
+                            },
+                            {
+                                "checkedAt":  1785069527880,
+                                "evidenceId":  "rain-real-e2e-20260726-195652",
+                                "fingerprint":  "cap-v1-a8e72c1b",
+                                "message":  "Full Rain E2E verified structuring through production runtime gates.",
+                                "modelAlias":  "qwen3-omni-flash",
+                                "modelId":  "rain-e2e-llm",
+                                "role":  "structuring",
+                                "status":  "Verified"
+                            },
+                            {
+                                "checkedAt":  1785069527880,
+                                "evidenceId":  "rain-real-e2e-20260726-195652",
+                                "fingerprint":  "cap-v1-1c990fe5",
+                                "message":  "Full Rain E2E verified assistant through production runtime gates.",
+                                "modelAlias":  "qwen3-omni-flash",
+                                "modelId":  "rain-e2e-llm",
+                                "role":  "assistant",
+                                "status":  "Verified"
+                            }
+                        ]
+}

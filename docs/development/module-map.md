@@ -108,7 +108,9 @@ cancelImport(videoId)
 
 结构化探针必须复用生产 `STAGE2_BLOCK_SYSTEM_PROMPT`、`buildStage2Blocks`、输出归一化和 `validateStage2BlockOutput`。不得另建一份更宽松的测试 schema，否则探针通过不能证明生产 Stage2 可用。
 
-真实 E2E Runner 必须经 `VideoImportController` 进入导入流程，不得直接调用 `runPipeline`。证据 schema v2 由 `scripts/validate-evidence.ps1` 负责裁判三角色能力、负向门禁、生产入口、取消/重试和最终落库；旧 schema v1 只用于验证历史证据，不能为新的模型配置签发 `Verified`。
+真实 E2E Runner 必须经 `VideoImportController` 进入导入流程，不得直接调用 `runPipeline`。完整运行结束后必须通过生产 Store 的 `loadVideo` 打开同一隔离数据库中的视频；证据 schema v2 由 `scripts/validate-evidence.ps1` 负责裁判三角色能力、负向门禁、生产入口、取消/重试、最终落库，以及 WebDriver 采集的学习页、播放器和段落 DOM 状态。截图只能作为可视附件，不能单独证明 UI 就绪。
+
+`ui-proof` 重放只允许复用已有 schema v2 数据库补拍 UI 与短 ASR/CUDA 运行证据，不得重签 LLM 能力或改写长流水线结果。分阶段证据必须在 manifest 中记录生成时间和来源；若事件只能从已提交的重启证据恢复，只保留事件名称并明确 `recoveredFrom`，不得伪造时间戳。
 
 ## 5. 当前热点和控制策略
 
@@ -146,7 +148,7 @@ cancelImport(videoId)
 剩余工作：
 
 - 在线 URL 导入尚未经过真实验收，相关逻辑暂时仍在页面中。
-- 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。下一步是用真实外部模型和完整 E2E 补齐本轮通用能力路径的 Evidence，而不是继续增加旁路。
+- 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。`ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash`（结构化、文本助手）已有 schema v2 Evidence；下一个模型配置仍须独立探针和完整 E2E，不得继承这个 `Verified` 结论。
 - 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
 
 ## 8. Harness Migration 结果

@@ -4,6 +4,9 @@ param(
   [string]$LlmBaseUrl = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_BASE_URL)) { 'https://dashscope.aliyuncs.com/compatible-mode/v1' } else { $env:RAIN_E2E_LLM_BASE_URL }),
   [string]$LlmModel = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_MODEL)) { 'qwen3.5-omni-flash' } else { $env:RAIN_E2E_LLM_MODEL }),
   [string]$EvidenceRoot = 'evidence',
+  [ValidateSet('full', 'ui-proof')]
+  [string]$RunMode = 'full',
+  [string]$ExistingEvidenceManifest = '',
   [int]$DriverPort = 4444,
   [int]$NativeDriverPort = 4445,
   [int]$MaxMinutes = 240,
@@ -24,7 +27,7 @@ if ($localToolPaths.Count -gt 0) {
 }
 
 function Write-JsonFile([string]$Path, $Value) {
-  $json = $Value | ConvertTo-Json -Depth 100
+  $json = ConvertTo-Json -InputObject $Value -Depth 100
   [System.IO.File]::WriteAllText($Path, $json, [System.Text.UTF8Encoding]::new($false))
 }
 
@@ -160,12 +163,25 @@ function Save-WebDriverScreenshot([string]$SessionId, [string]$Path) {
   [System.IO.File]::WriteAllBytes($Path, [Convert]::FromBase64String([string]$base64))
 }
 
-$llmApiKey = $env:RAIN_E2E_LLM_API_KEY
-if ([string]::IsNullOrWhiteSpace($llmApiKey)) { $llmApiKey = $env:RAIN_QWEN_API_KEY }
-if ([string]::IsNullOrWhiteSpace($llmApiKey)) { throw 'RAIN_E2E_LLM_API_KEY is required for live LLM evidence.' }
+$existingManifest = $null
+if ($RunMode -eq 'ui-proof') {
+  if ([string]::IsNullOrWhiteSpace($ExistingEvidenceManifest)) { throw 'ExistingEvidenceManifest is required for ui-proof mode.' }
+  $manifestPath = (Resolve-Path -LiteralPath $ExistingEvidenceManifest).Path
+  $existingManifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ([int]$existingManifest.schemaVersion -ne 2) { throw 'ui-proof mode requires a schema v2 manifest.' }
+  $video = (Resolve-Path -LiteralPath ([string]$existingManifest.video.path)).Path
+  $LlmBaseUrl = [string]$existingManifest.runtime.llmBaseUrl
+  $LlmModel = [string]$existingManifest.runtime.llmModel
+  $WhisperBackend = [string]$existingManifest.runtime.whisperBackend
+  $llmApiKey = ''
+} else {
+  $llmApiKey = $env:RAIN_E2E_LLM_API_KEY
+  if ([string]::IsNullOrWhiteSpace($llmApiKey)) { $llmApiKey = $env:RAIN_QWEN_API_KEY }
+  if ([string]::IsNullOrWhiteSpace($llmApiKey)) { throw 'RAIN_E2E_LLM_API_KEY is required for live LLM evidence.' }
+  $video = Find-RealVideo
+}
 if ([string]::IsNullOrWhiteSpace($LlmBaseUrl) -or $LlmBaseUrl -notmatch '^https?://') { throw 'LlmBaseUrl must be an absolute HTTP(S) URL.' }
 if ([string]::IsNullOrWhiteSpace($LlmModel)) { throw 'LlmModel is required for live LLM evidence.' }
-$video = Find-RealVideo
 $modelPath = Find-WhisperModel
 $hash = (Get-FileHash -LiteralPath $video -Algorithm SHA256).Hash.ToUpperInvariant()
 if ($hash -ne $expectedHash) { throw "Unexpected video hash: $hash" }
@@ -211,9 +227,14 @@ if ($selectedWhisperBackend -eq 'cuda') {
   }
 }
 
-$runId = Get-Date -Format 'yyyyMMdd-HHmmss'
-$evidenceId = "rain-real-e2e-$runId"
-$root = New-Item -ItemType Directory -Force -Path (Join-Path $EvidenceRoot $evidenceId)
+if ($RunMode -eq 'ui-proof') {
+  $evidenceId = [string]$existingManifest.evidenceId
+  $root = Get-Item -LiteralPath (Split-Path -Parent $manifestPath)
+} else {
+  $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $evidenceId = "rain-real-e2e-$runId"
+  $root = New-Item -ItemType Directory -Force -Path (Join-Path $EvidenceRoot $evidenceId)
+}
 $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'tmp')
 $dbPath = Join-Path $root.FullName 'rain-e2e.db'
 $screenshots = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'screenshots')
@@ -221,6 +242,7 @@ $logs = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'log
 
 $env:RAIN_TEMP_DIR = $tmp.FullName
 $env:RAIN_E2E_MODE = '1'
+$env:RAIN_E2E_RUN_MODE = $RunMode
 $env:RAIN_E2E_VIDEO_PATH = $video
 $env:RAIN_E2E_WHISPER_MODEL_PATH = $modelPath
 $env:RAIN_E2E_DB_PATH = $dbPath
@@ -247,8 +269,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Tauri debug build failed' }
 $appBinary = Join-Path $env:CARGO_TARGET_DIR 'debug\rain.exe'
 if (-not (Test-Path -LiteralPath $appBinary)) { throw "Rain debug binary not found: $appBinary" }
 
-$driverLog = Join-Path $logs.FullName 'tauri-driver.log'
-$driverErr = Join-Path $logs.FullName 'tauri-driver.err.log'
+$driverLogName = if ($RunMode -eq 'ui-proof') { 'tauri-driver.ui-proof.log' } else { 'tauri-driver.log' }
+$driverErrName = if ($RunMode -eq 'ui-proof') { 'tauri-driver.ui-proof.err.log' } else { 'tauri-driver.err.log' }
+$driverLog = Join-Path $logs.FullName $driverLogName
+$driverErr = Join-Path $logs.FullName $driverErrName
 $driverArgs = @('--port', [string]$DriverPort, '--native-port', [string]$NativeDriverPort, '--native-driver', $edgeDriver)
 $driverProcess = Start-Process -FilePath $tauriDriver -ArgumentList $driverArgs -RedirectStandardOutput $driverLog -RedirectStandardError $driverErr -WindowStyle Hidden -PassThru
 $sessionId = $null
@@ -269,48 +293,99 @@ try {
   } while ((Get-Date) -lt $deadline)
   if ($lastStatus -ne 'passed') { throw "Rain E2E did not finish before timeout. lastStatus=$lastStatus" }
 
+  $result = Invoke-WebDriverScript $sessionId 'return window.__RAIN_E2E_RESULT__'
+  $uiState = Invoke-WebDriverScript $sessionId @'
+const study = document.querySelector('[data-testid="study-interface"]');
+const player = document.querySelector('[data-testid="video-player"]');
+const paragraphs = document.querySelectorAll('[data-testid^="paragraph-"]');
+return {
+  source: 'rain-webdriver-dom',
+  page: study ? 'study' : 'other',
+  videoId: window.__RAIN_E2E_RESULT__?.videoId || '',
+  studyInterfaceVisible: Boolean(study && study.getBoundingClientRect().width > 0 && study.getBoundingClientRect().height > 0),
+  videoPlayerVisible: Boolean(player && player.getBoundingClientRect().width > 0 && player.getBoundingClientRect().height > 0),
+  paragraphCount: paragraphs.length,
+  capturedAt: new Date().toISOString()
+};
+'@
+  if ($uiState.page -ne 'study' -or $uiState.studyInterfaceVisible -ne $true -or $uiState.videoPlayerVisible -ne $true -or [int]$uiState.paragraphCount -le 0) {
+    throw 'Production study UI was not ready for evidence capture.'
+  }
   $readyScreenshot = Join-Path $screenshots.FullName 'study-ready.png'
   Save-WebDriverScreenshot $sessionId $readyScreenshot
-  $result = Invoke-WebDriverScript $sessionId 'return window.__RAIN_E2E_RESULT__'
 
-  Write-JsonFile (Join-Path $root.FullName 'transcript.json') $result.transcript
-  Write-JsonFile (Join-Path $root.FullName 'structuring-blocks.json') @($result.structuringBlocks)
-  Write-JsonFile (Join-Path $root.FullName 'database-summary.json') $result.database
-  Write-JsonFile (Join-Path $root.FullName 'cancellation-proof.json') $result.cancellation
-  Write-JsonFile (Join-Path $root.FullName 'restart-proof.json') $result.restart
-  Write-JsonFile (Join-Path $root.FullName 'app-events.json') @($result.events)
-  Write-JsonFile (Join-Path $root.FullName 'capabilities.json') $result.capabilities
-  Write-JsonFile (Join-Path $root.FullName 'runtime-gates.json') $result.runtimeGates
+  Write-JsonFile (Join-Path $root.FullName 'ui-state.json') $uiState
 
-  $sentences = @($result.transcript.sentences)
-  $manualSamples = @($sentences | Select-Object -First 10)
-  $manifest = [ordered]@{
-    schemaVersion = 2
-    evidenceId = $evidenceId
-    generatedAt = (Get-Date).ToUniversalTime().ToString('o')
-    video = @{ path = $video; sha256 = $hash; probe = 'probe.json' }
-    databasePath = $dbPath
-    runtime = $result.runtime
-    timings = $result.timings
-    asr = @{ detectedLanguage = $result.transcript.detectedLanguage; sentenceCount = $sentences.Count; manualReviewSamples = $manualSamples }
-    structuring = @{ blockCount = @($result.structuringBlocks).Count }
-    validation = @{ sentenceCoverage = 'computed-by-validator'; noDemoSentences = 'computed-by-validator'; noDemoIds = 'computed-by-validator' }
-    cancellation = @{ result = 'passed'; artifact = 'cancellation-proof.json' }
-    restart = @{ result = 'passed'; artifact = 'restart-proof.json' }
-    secretsDetected = $false
-    artifacts = @{
-      transcript = 'transcript.json'
-      structuringBlocks = 'structuring-blocks.json'
-      database = 'database-summary.json'
-      probe = 'probe.json'
-      screenshots = @('screenshots/study-ready.png')
-      appEvents = 'app-events.json'
-      capabilities = 'capabilities.json'
-      runtimeGates = 'runtime-gates.json'
+  if ($RunMode -eq 'ui-proof') {
+    $appEventsPath = Join-Path $root.FullName ([string]$existingManifest.artifacts.appEvents)
+    $existingEvents = @(
+      Get-Content -LiteralPath $appEventsPath -Raw -Encoding UTF8 |
+        ConvertFrom-Json |
+        Where-Object { $_.PSObject.Properties.Name -contains 'event' }
+    )
+    if ($existingEvents.Count -eq 0) {
+      $restartProofPath = Join-Path $root.FullName ([string]$existingManifest.restart.artifact)
+      $restartProof = Get-Content -LiteralPath $restartProofPath -Raw -Encoding UTF8 | ConvertFrom-Json
+      $existingEvents = @($restartProof.events | ForEach-Object {
+        [pscustomobject]@{ event = [string]$_; recoveredFrom = [string]$existingManifest.restart.artifact }
+      })
+      $existingManifest | Add-Member -NotePropertyName appEventsRecoveredFrom -NotePropertyValue ([string]$existingManifest.restart.artifact) -Force
     }
+    $combinedEvents = [object[]](@($existingEvents) + @($result.events))
+    Write-JsonFile -Path $appEventsPath -Value $combinedEvents
+    if ($null -eq $existingManifest.artifacts.uiState) {
+      $existingManifest.artifacts | Add-Member -NotePropertyName uiState -NotePropertyValue 'ui-state.json'
+    }
+    $existingManifest.artifacts | Add-Member -NotePropertyName cudaRuntimeLog -NotePropertyValue "logs/$driverErrName" -Force
+    $existingManifest | Add-Member -NotePropertyName uiCapturedAt -NotePropertyValue ([string]$uiState.capturedAt) -Force
+    $existingManifest | Add-Member -NotePropertyName evidencePhases -NotePropertyValue ([ordered]@{
+      pipelineGeneratedAt = [string]$existingManifest.generatedAt
+      uiProofCapturedAt = [string]$uiState.capturedAt
+      cudaProof = 'ui-proof-asr-capability'
+    }) -Force
+    Write-JsonFile $manifestPath $existingManifest
+  } else {
+    Write-JsonFile (Join-Path $root.FullName 'transcript.json') $result.transcript
+    Write-JsonFile (Join-Path $root.FullName 'structuring-blocks.json') @($result.structuringBlocks)
+    Write-JsonFile (Join-Path $root.FullName 'database-summary.json') $result.database
+    Write-JsonFile (Join-Path $root.FullName 'cancellation-proof.json') $result.cancellation
+    Write-JsonFile (Join-Path $root.FullName 'restart-proof.json') $result.restart
+    Write-JsonFile (Join-Path $root.FullName 'app-events.json') @($result.events)
+    Write-JsonFile (Join-Path $root.FullName 'capabilities.json') $result.capabilities
+    Write-JsonFile (Join-Path $root.FullName 'runtime-gates.json') $result.runtimeGates
+
+    $sentences = @($result.transcript.sentences)
+    $manualSamples = @($sentences | Select-Object -First 10)
+    $manifest = [ordered]@{
+      schemaVersion = 2
+      evidenceId = $evidenceId
+      generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+      video = @{ path = $video; sha256 = $hash; probe = 'probe.json' }
+      databasePath = $dbPath
+      runtime = $result.runtime
+      timings = $result.timings
+      asr = @{ detectedLanguage = $result.transcript.detectedLanguage; sentenceCount = $sentences.Count; manualReviewSamples = $manualSamples }
+      structuring = @{ blockCount = @($result.structuringBlocks).Count }
+      validation = @{ sentenceCoverage = 'computed-by-validator'; noDemoSentences = 'computed-by-validator'; noDemoIds = 'computed-by-validator' }
+      cancellation = @{ result = 'passed'; artifact = 'cancellation-proof.json' }
+      restart = @{ result = 'passed'; artifact = 'restart-proof.json' }
+      secretsDetected = $false
+      artifacts = @{
+        transcript = 'transcript.json'
+        structuringBlocks = 'structuring-blocks.json'
+        database = 'database-summary.json'
+        probe = 'probe.json'
+        screenshots = @('screenshots/study-ready.png')
+        appEvents = 'app-events.json'
+        capabilities = 'capabilities.json'
+        runtimeGates = 'runtime-gates.json'
+        uiState = 'ui-state.json'
+        cudaRuntimeLog = 'logs/tauri-driver.err.log'
+      }
+    }
+    $manifestPath = Join-Path $root.FullName 'manifest.json'
+    Write-JsonFile $manifestPath $manifest
   }
-  $manifestPath = Join-Path $root.FullName 'manifest.json'
-  Write-JsonFile $manifestPath $manifest
   & powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest $manifestPath -ExpectedWhisperBackend $selectedWhisperBackend
   if ($LASTEXITCODE -ne 0) { throw 'Evidence validation failed' }
   Write-Output "EVIDENCE_MANIFEST=$manifestPath"

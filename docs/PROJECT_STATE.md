@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-26 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Recent control commits: `94154bc feat: gate local imports by model capability` and `b699d1a feat: verify and gate text assistants`
+Current working base: `fb16dfb feat: gate verified evidence by model capability`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -15,23 +15,29 @@ The verified real input video is:
 
 `D:\xiazaiwenjian\bilidown\【华中科技大学】电子技术基础 张林（全138讲）电子信息工程专业必修课\1.2.1 信号及其放大.mp4`
 
-Curated evidence committed in this branch:
+Current schema v2 canonical evidence committed in this branch:
 
-`evidence/rain-real-e2e-20260720-024848/`
+`evidence/rain-real-e2e-20260726-195652/`
 
 Important evidence facts:
 
 - Whisper backend: `cuda`
 - Whisper model: `ggml-large-v3.bin`
-- Qwen model: `qwen3.5-omni-flash`
-- Qwen base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- Structuring/text-assistant model: `qwen3-omni-flash`
+- OpenAI-compatible base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - ASR sentence count: 1953
-- Qwen block count: 12
+- Structuring block count: 12
 - Database status/stage: `ready` / `ready`
 - Database node count: 59
-- ASR timing: 413 seconds
-- Qwen timing: 1061 seconds
-- Pipeline timing: 1475 seconds
+- ASR timing: 1408 seconds
+- Structuring timing: 1050 seconds
+- Pipeline timing: 2459 seconds
+- Role status: the same configuration fingerprint passed ASR, structuring and text-assistant `Compatible` checks and was then recorded as `Verified`
+- Runtime gates: missing ASR/structuring capability was rejected by `VideoImportController`; missing assistant capability was rejected before chat
+- UI proof: WebDriver captured the production study page with the matching video, visible player and 21 rendered paragraphs
+- Scope: this proves the named configuration and text assistant only; it does not verify other compatible models or vision
+
+The previous schema v1 evidence at `evidence/rain-real-e2e-20260720-024848/` remains valid historical evidence for its recorded configuration, but it is not the current schema v2 capability proof.
 
 Fresh verification performed before repair commit `a9c5c26` (recorded from the repair session transcript; full test logs were not committed as separate artifacts):
 
@@ -114,7 +120,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate, learning-page assistant gate, and schema v2 Evidence Harness are implemented. `AC-LV-12` remains Partial pending an actual external-model run and refreshed full E2E evidence; implementation readiness is not itself `Verified` evidence.
+13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate, learning-page assistant gate, and schema v2 Evidence Harness are implemented. `AC-LV-12` has Strong + Evidence for the exact `ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash` structuring/text-assistant configuration. Other model fingerprints remain merely `Compatible` or `Unavailable` until they receive their own complete evidence.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 
 ## What changed in the 2026-07-26 project-control baseline session
@@ -676,9 +682,9 @@ The project is more controllable than at the start of the Harness review, but it
 
 - The local-video path `AC-LV-01` through `AC-LV-11` has named owners, mostly Strong behavioral judges, and real evidence where unit tests are insufficient.
 - Shadow registries, tautological tests, test-only production helpers and obsolete commands were removed in the approved Harness Migration.
-- `AC-LV-12` is intentionally still `Partial`; the control documents do not claim multi-model support is complete.
+- `AC-LV-12` now has `Strong + Evidence` for one exact configuration fingerprint; multi-model support is not generalized beyond independently checked and evidenced configurations.
 - URL import, universal vision explanation and advanced tree editing remain explicit Gap/Proposed work instead of being represented by placeholder success paths.
-- The role gate, three production-path probes and both local-video/assistant runtime gates now form a coherent capability path. The next `AC-LV-12` work is Evidence: a live generic assistant probe and refreshed full E2E, not another implementation path.
+- The role gate, three production-path probes and both local-video/assistant runtime gates now form a coherent capability path. The first schema v2 full E2E closes that loop for `ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash` structuring/text assistant; another model must repeat the same loop.
 
 The immediate `settings.tsx` hotspot has been resolved by behavior-preserving extraction. The public file is now a 10-line barrel; page composition, preflight, model-pool actions, add-model form, role selection and shared presentation resources have separate owners under `src/ui/components/settings/`. New settings behavior should enter the matching component, while capability decisions and probes remain in `src/settings/`.
 
@@ -707,6 +713,56 @@ powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -Evid
 ```
 
 Observed result: evidence contract tests passed 15/15; TypeScript and production build passed; the full frontend suite passed 56 files / 373 tests with 1 live-key test skipped; Rust passed 50 library tests plus all executable Harness groups, with the existing real Whisper transcription test ignored; the canonical historical CUDA evidence still passes as schema v1. A new paid, multi-hour real E2E was deliberately not started without explicit confirmation, so `AC-LV-12` remains Partial and no new configuration is yet `Verified`.
+
+## What changed in the 2026-07-26 schema v2 real E2E session
+
+The user explicitly authorized a real run with DashScope `qwen3-omni-flash`. The API Key was supplied only through the child-process environment for the full run, removed afterward, and was not written to source, documentation, manifest, events, logs or curated artifacts.
+
+The full production path completed against the real lecture video and isolated SQLite database:
+
+- ASR: local `ggml-large-v3.bin`, CUDA runtime confirmed by both `use gpu = 1` and `using CUDA0 backend`;
+- structuring: DashScope `qwen3-omni-flash`, 12 model output blocks with exact coverage of 1953 persisted sentences;
+- text assistant: exact streamed capability token passed; vision was not tested or granted;
+- gates: missing ASR/structuring evidence was rejected through `VideoImportController`, and missing assistant evidence was rejected through `decideModelRoleAssignment`;
+- recovery: cancellation and retry completed through the production import controller;
+- persistence: the matching video reached `ready`, with 1953 sentences and 59 nodes;
+- timing: ASR 1408 seconds, structuring 1050 seconds, total pipeline 2459 seconds.
+
+The first screenshot attempt exposed a Harness false positive: the validator accepted a valid PNG even though the app was still showing stale list/cancel state. That evidence was not accepted. The fix:
+
+- routes the production database singleton to the isolated E2E database;
+- requires the Runner to call the production Store `loadVideo`;
+- waits for the real `StudyInterface`, video player and persisted paragraph content;
+- records WebDriver DOM state in `ui-state.json`;
+- makes schema v2 validation fail unless the DOM video ID matches the database and `study_ui_ready` follows import and assistant completion;
+- supports a no-paid-LLM `ui-proof` replay that reuses the completed database and reruns only the short real ASR/CUDA probe.
+
+The final screenshot and DOM proof show the production study page, visible player and 21 rendered paragraphs. During UI replay, the original `app-events.json` was accidentally emptied. The ordered event names were recoverable from the already-written `restart-proof.json`; they were restored without invented timestamps and are marked `recoveredFrom`. Replay events retain their real timestamps. The manifest discloses both evidence phases and the recovery source.
+
+Canonical evidence:
+
+`evidence/rain-real-e2e-20260726-195652/manifest.json`
+
+Independent validation:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest evidence/rain-real-e2e-20260726-195652/manifest.json -ExpectedWhisperBackend cuda
+```
+
+Observed result: `ok: true`, schema v2, CUDA, `qwen3-omni-flash`, 1953 sentences and 12 structuring blocks. This promotes only the exact recorded configuration to `Verified`; other OpenAI-compatible models and vision remain outside this evidence.
+
+Final verification for this session:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+cargo test --manifest-path src-tauri/Cargo.toml
+powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest evidence/rain-real-e2e-20260720-024848/manifest.json -ExpectedWhisperBackend cuda
+powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest evidence/rain-real-e2e-20260726-195652/manifest.json -ExpectedWhisperBackend cuda
+git diff --check
+```
+
+Observed result: frontend passed 57 files / 377 tests with 1 live-key test skipped; production build passed with existing Vite chunking warnings; Rust passed 51 library tests and every executable Harness group, with the existing real Whisper transcription test ignored; both historical schema v1 and current schema v2 CUDA evidence passed. The evidence validator's secret scan reported no secret-like value.
 
 ## Maintenance checklist for every future session
 

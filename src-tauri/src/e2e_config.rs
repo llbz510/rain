@@ -7,6 +7,7 @@ const DEFAULT_LLM_MODEL: &str = "qwen3.5-omni-flash";
 #[serde(rename_all = "camelCase")]
 pub struct RealE2eConfig {
     pub enabled: bool,
+    pub run_mode: String,
     pub evidence_id: String,
     pub video_path: String,
     pub whisper_model_path: String,
@@ -25,11 +26,18 @@ where
         return Ok(None);
     }
 
+    let run_mode = get_env("RAIN_E2E_RUN_MODE").unwrap_or_else(|| "full".to_string());
+    if run_mode != "full" && run_mode != "ui-proof" {
+        return Err("RAIN_E2E_RUN_MODE must be full or ui-proof".to_string());
+    }
     let evidence_id = required_env(&get_env, "RAIN_E2E_EVIDENCE_ID")?;
     let video_path = required_env(&get_env, "RAIN_E2E_VIDEO_PATH")?;
     let whisper_model_path = required_env(&get_env, "RAIN_E2E_WHISPER_MODEL_PATH")?;
-    let llm_api_key =
-        required_env_with_fallback(&get_env, "RAIN_E2E_LLM_API_KEY", "RAIN_QWEN_API_KEY")?;
+    let llm_api_key = if run_mode == "full" {
+        required_env_with_fallback(&get_env, "RAIN_E2E_LLM_API_KEY", "RAIN_QWEN_API_KEY")?
+    } else {
+        String::new()
+    };
     let database_path = required_env(&get_env, "RAIN_E2E_DB_PATH")?;
     let llm_base_url = get_env("RAIN_E2E_LLM_BASE_URL")
         .or_else(|| get_env("RAIN_E2E_QWEN_BASE_URL"))
@@ -49,6 +57,7 @@ where
 
     Ok(Some(RealE2eConfig {
         enabled: true,
+        run_mode,
         evidence_id,
         video_path,
         whisper_model_path,
@@ -153,6 +162,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.evidence_id, "rain-real-e2e-test");
+        assert_eq!(config.run_mode, "full");
         assert_eq!(config.video_path, "D:\\video.mp4");
         assert_eq!(config.whisper_model_path, "D:\\ggml-large-v3.bin");
         assert_eq!(config.llm_base_url, "https://models.example.test/v1");
@@ -180,5 +190,24 @@ mod tests {
         assert_eq!(config.llm_base_url, "https://legacy.example.test/v1");
         assert_eq!(config.llm_model, "legacy-model");
         assert_eq!(config.llm_api_key, "sk-secret");
+    }
+
+    #[test]
+    fn e2e_ui_proof_mode_reuses_evidence_without_an_api_key() {
+        let config = read(&[
+            ("RAIN_E2E_MODE", "1"),
+            ("RAIN_E2E_RUN_MODE", "ui-proof"),
+            ("RAIN_E2E_EVIDENCE_ID", "rain-real-e2e-test"),
+            ("RAIN_E2E_VIDEO_PATH", "D:\\video.mp4"),
+            ("RAIN_E2E_WHISPER_MODEL_PATH", "D:\\ggml-large-v3.bin"),
+            ("RAIN_E2E_LLM_BASE_URL", "https://models.example.test/v1"),
+            ("RAIN_E2E_LLM_MODEL", "generic-model"),
+            ("RAIN_E2E_DB_PATH", "D:\\rain-e2e.db"),
+        ])
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(config.run_mode, "ui-proof");
+        assert_eq!(config.llm_api_key, "");
     }
 }

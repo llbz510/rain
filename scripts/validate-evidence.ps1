@@ -71,15 +71,16 @@ function Assert-Runtime($Runtime, [int]$SchemaVersion) {
   if ([string]$Runtime.whisperModel -notmatch '^ggml-large-v3\.bin$') { throw "unexpected whisper model: $($Runtime.whisperModel)" }
 }
 
-function Assert-CudaRuntimeEvidence($Runtime) {
+function Assert-CudaRuntimeEvidence($Runtime, $Artifacts, [int]$SchemaVersion) {
   if ([string]$Runtime.whisperBackend -ne 'cuda' -and $ExpectedWhisperBackend -ne 'cuda') { return }
   if ([string]$Runtime.whisperBackend -ne 'cuda') { throw 'CUDA evidence requested but manifest does not report CUDA' }
-  $logPath = Resolve-ArtifactPath 'logs/tauri-driver.err.log' 'missing tauri stderr log for CUDA proof'
+  $runtimeLog = if ($SchemaVersion -eq 2) { [string]$Artifacts.cudaRuntimeLog } else { 'logs/tauri-driver.err.log' }
+  $logPath = Resolve-ArtifactPath $runtimeLog 'missing tauri stderr log for CUDA proof'
   $log = Get-Content -LiteralPath $logPath -Raw -Encoding UTF8
   $hasCudaBackend = $log -match 'using CUDA\d+ backend' -or $log -match 'whisper_backend_init_gpu:.*CUDA'
   $hasGpuEnabled = $log -match 'use gpu\s*=\s*1'
   if (-not ($hasCudaBackend -and $hasGpuEnabled)) {
-    throw 'missing strong CUDA runtime evidence in tauri-driver.err.log'
+    throw "missing strong CUDA runtime evidence in $runtimeLog"
   }
 }
 function Assert-Transcript($Transcript, $Manifest) {
@@ -278,6 +279,24 @@ function Assert-RuntimeGateEvidence($GateEvidence, [string[]]$AppEvents) {
   ) 'schema v2 runtime gates'
 }
 
+function Assert-UiEvidence($UiEvidence, $Database, [string[]]$AppEvents) {
+  if ([string]$UiEvidence.source -ne 'rain-webdriver-dom') {
+    throw 'UI evidence must come from rain-webdriver-dom'
+  }
+  if ([string]$UiEvidence.page -ne 'study' -or $UiEvidence.studyInterfaceVisible -ne $true) {
+    throw 'UI evidence did not capture the production study page'
+  }
+  if ($UiEvidence.videoPlayerVisible -ne $true) {
+    throw 'UI evidence did not capture the production video player'
+  }
+  Assert-PositiveNumber $UiEvidence.paragraphCount 'UI evidence has no rendered paragraphs'
+  Require-Value $UiEvidence.capturedAt 'UI evidence missing capture timestamp'
+  if ([string]$UiEvidence.videoId -ne [string]$Database.videoId) {
+    throw 'UI evidence video does not match database proof'
+  }
+  Assert-EventSubsequence $AppEvents @('import_complete', 'assistant_stream_complete', 'study_ui_ready') 'study UI'
+}
+
 function Assert-Screenshots($Artifacts) {
   $screenshots = @($Artifacts.screenshots)
   if ($screenshots.Count -le 0) { throw 'missing screenshot evidence' }
@@ -300,7 +319,7 @@ if ($schemaVersion -notin @(1, 2)) { throw "unsupported evidence schemaVersion: 
 Assert-VideoProof $manifest.video
 if ($manifest.secretsDetected -ne $false) { throw 'evidence contains a secret' }
 Assert-Runtime $manifest.runtime $schemaVersion
-Assert-CudaRuntimeEvidence $manifest.runtime
+Assert-CudaRuntimeEvidence $manifest.runtime $manifest.artifacts $schemaVersion
 Assert-PositiveNumber $manifest.timings.asrSeconds 'missing ASR timing evidence'
 if ($schemaVersion -eq 2) {
   Assert-PositiveNumber $manifest.timings.structuringSeconds 'missing structuring timing evidence'
@@ -336,8 +355,10 @@ Assert-ProofArtifact $manifest.restart 'restart' @('start_import', 'import_cance
 if ($schemaVersion -eq 2) {
   $capabilityPath = Resolve-ArtifactPath ([string]$manifest.artifacts.capabilities) 'missing capability artifact path'
   $runtimeGatesPath = Resolve-ArtifactPath ([string]$manifest.artifacts.runtimeGates) 'missing runtime gate artifact path'
+  $uiStatePath = Resolve-ArtifactPath ([string]$manifest.artifacts.uiState) 'missing UI study-page artifact path'
   Assert-CapabilityEvidence (Read-JsonArtifact $capabilityPath) $manifest
   Assert-RuntimeGateEvidence (Read-JsonArtifact $runtimeGatesPath) $appEvents
+  Assert-UiEvidence (Read-JsonArtifact $uiStatePath) $database $appEvents
 }
 Assert-Screenshots $manifest.artifacts
 

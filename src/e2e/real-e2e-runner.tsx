@@ -28,9 +28,11 @@ import {
   type RuntimeModel,
 } from '@/settings/model-pool'
 import { checkStructuringModelCapability } from '@/settings/structuring-capability'
+import { useRainStore } from '@/store/rain-store'
 
 interface RealE2eConfig {
   enabled: boolean
+  runMode: 'full' | 'ui-proof'
   evidenceId: string
   videoPath: string
   whisperModelPath: string
@@ -162,6 +164,28 @@ async function waitForVideoStatus(
   )
 }
 
+async function loadVideoIntoStudyPage(videoId: string): Promise<void> {
+  await useRainStore.getState().loadVideo(videoId)
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const state = useRainStore.getState()
+    const study = document.querySelector<HTMLElement>('[data-testid="study-interface"]')
+    const paragraph = document.querySelector<HTMLElement>('[data-testid^="paragraph-"]')
+    if (
+      state.currentPage === 'study'
+      && state.currentVideoId === videoId
+      && state.nodeTree.length > 0
+      && state.sentences.length > 0
+      && study
+      && paragraph
+    ) {
+      return
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 100))
+  }
+  throw new Error('Production StudyInterface did not render persisted E2E content')
+}
+
 function publish(result: RealE2eResult, setStatus: (status: RealE2eStatus) => void): void {
   window.__RAIN_E2E_RESULT__ = result
   setStatus(result.status)
@@ -205,6 +229,35 @@ async function runRealE2e(
   }
 
   const db = await createDatabase(config.databasePath)
+  if (config.runMode === 'ui-proof') {
+    const asrModel = runtimeModelFromPoolEntry({
+      id: 'rain-e2e-asr',
+      alias: `Whisper ${basename(config.whisperModelPath)}`,
+      type: 'whisper-local',
+      provider: 'local',
+      modelName: config.whisperModelPath,
+      supportsVision: false,
+    })
+    requireCompatible(await checkAsrModelCapability(asrModel))
+    pushEvent(result, 'ui_replay_asr_capability')
+    const videoId = `${config.evidenceId}-video`
+    const video = await getVideoById(db, videoId)
+    if (video?.status !== 'ready') {
+      throw new Error(`UI proof requires a ready evidence video; actual=${video?.status ?? 'missing'}`)
+    }
+    const sentences = await getSentencesByVideoId(db, videoId)
+    const nodes = await getNodesByVideoId(db, videoId)
+    if (sentences.length === 0 || nodes.length === 0) {
+      throw new Error('UI proof requires persisted sentences and nodes')
+    }
+    result.videoId = videoId
+    await loadVideoIntoStudyPage(videoId)
+    pushEvent(result, 'study_ui_ready', videoId)
+    result.status = 'passed'
+    publish(result, setStatus)
+    return
+  }
+
   const asrPoolModel: ModelPoolEntry = {
     id: 'rain-e2e-asr',
     alias: `Whisper ${basename(config.whisperModelPath)}`,
@@ -366,7 +419,6 @@ async function runRealE2e(
   timings.asrSeconds ??= timings.pipelineSeconds
   timings.structuringSeconds ??= 1
 
-  result.status = 'passed'
   result.videoId = videoId
   result.transcript = toTranscript(sentences)
   result.structuringBlocks = structuringBlocks
@@ -417,6 +469,9 @@ async function runRealE2e(
     llmModel: config.llmModel,
     llmBaseUrl: config.llmBaseUrl,
   }
+  await loadVideoIntoStudyPage(videoId)
+  pushEvent(result, 'study_ui_ready', videoId)
+  result.status = 'passed'
   publish(result, setStatus)
 }
 

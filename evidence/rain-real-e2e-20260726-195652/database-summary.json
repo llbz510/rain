@@ -1,0 +1,12 @@
+{
+    "databasePath":  "D:\\gongju\\shengcan\\rain\\evidence\\rain-real-e2e-20260726-195652\\rain-e2e.db",
+    "evidenceSource":  "rain-app-query",
+    "nodeCount":  34,
+    "queriedAt":  "2026-07-26T12:38:47.880Z",
+    "rawStage":  null,
+    "sentenceCount":  1953,
+    "stage":  "ready",
+    "status":  "ready",
+    "structuringBlockCount":  12,
+    "videoId":  "rain-real-e2e-20260726-195652-video"
+}

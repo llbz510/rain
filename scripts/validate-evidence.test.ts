@@ -42,6 +42,7 @@ function createEvidence(overrides: Record<string, unknown> = {}, cleanTranscript
     { at: '2026-07-19T00:00:03.000Z', event: 'retry_import' },
     { at: '2026-07-19T00:00:04.000Z', event: 'import_complete' },
     { at: '2026-07-19T00:00:05.000Z', event: 'assistant_stream_complete' },
+    { at: '2026-07-19T00:00:06.000Z', event: 'study_ui_ready' },
   ]
   const checkedAt = 1_784_419_200_000
   const checks = [
@@ -106,6 +107,15 @@ function createEvidence(overrides: Record<string, unknown> = {}, cleanTranscript
       responseContract: 'RAIN_ASSISTANT_OK',
     },
   })
+  writeJson(join(dir, 'ui-state.json'), {
+    source: 'rain-webdriver-dom',
+    page: 'study',
+    videoId: 'real-local-video',
+    studyInterfaceVisible: true,
+    videoPlayerVisible: true,
+    paragraphCount: 1,
+    capturedAt: '2026-07-19T00:00:06.000Z',
+  })
   writeJson(join(dir, 'app-events.json'), events)
   writeFileSync(join(dir, 'screenshots', 'study-ready.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/eylmE8AAAAASUVORK5CYII=', 'base64'))
   writeFileSync(join(dir, 'logs', 'tauri-driver.err.log'), 'whisper_backend_init_gpu: using CUDA0 backend\nwhisper_init_from_file_with_params_no_state: use gpu = 1\n', 'utf8')
@@ -141,6 +151,8 @@ function createEvidence(overrides: Record<string, unknown> = {}, cleanTranscript
       appEvents: 'app-events.json',
       capabilities: 'capabilities.json',
       runtimeGates: 'runtime-gates.json',
+      uiState: 'ui-state.json',
+      cudaRuntimeLog: 'logs/tauri-driver.err.log',
     },
     ...overrides,
   }
@@ -192,6 +204,30 @@ describe('evidence validator', () => {
     writeJson(capabilityPath, capabilityEvidence)
 
     expect(() => runValidator(manifestPath)).toThrow(/assistant|role/i)
+  })
+
+  it('rejects schema v2 evidence without WebDriver study-page proof', () => {
+    const manifestPath = createEvidence({}, true)
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    delete manifest.artifacts.uiState
+    writeJson(manifestPath, manifest)
+
+    expect(() => runValidator(manifestPath)).toThrow(/UI|study/i)
+  })
+
+  it('rejects a screenshot captured while the app is still on the video list', () => {
+    const manifestPath = createEvidence({}, true)
+    writeJson(join(dirname(manifestPath), 'ui-state.json'), {
+      source: 'rain-webdriver-dom',
+      page: 'list',
+      videoId: 'real-local-video',
+      studyInterfaceVisible: false,
+      videoPlayerVisible: false,
+      paragraphCount: 0,
+      capturedAt: '2026-07-19T00:00:06.000Z',
+    })
+
+    expect(() => runValidator(manifestPath)).toThrow(/study|UI/i)
   })
 
   it('accepts a schema v2 generic OpenAI-compatible runtime instead of requiring Qwen', () => {
@@ -346,6 +382,14 @@ describe('real E2E runner GPU preference', () => {
     expect(appRunner).toContain('checkStructuringModelCapability')
     expect(appRunner).toContain('checkAssistantModelCapability')
     expect(appRunner).toContain('createVideoImportController')
+    expect(appRunner).toContain('loadVideo')
     expect(appRunner).not.toMatch(/\brunPipeline\s*\(/)
+  })
+
+  it('routes the production database singleton to the isolated E2E database', () => {
+    const singleton = readFileSync(join(repoRoot, 'src', 'models', 'db-singleton.ts'), 'utf8')
+
+    expect(singleton).toContain('get_real_e2e_config')
+    expect(singleton).toContain('databasePath')
   })
 })

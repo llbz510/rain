@@ -28,10 +28,10 @@
 | AC-LV-06 | `pipeline-asr.test.ts`、M03 Harness | Strong | M03 通过真实数据库状态转换和控制器检查批准路径，不再直接给对象赋值 |
 | AC-LV-07 | `asr-abort.test.ts`、Pipeline 测试、取消证据 | Strong + Evidence | 真实证据包含取消事件链；UI 到 Rust 的时序风险仍需 E2E 保持 |
 | AC-LV-08 | `pipeline-recovery.test.ts`、Stage2 检查点测试、重试证据 | Strong + Evidence | 已覆盖复用 ASR 和重跑坏检查点 |
-| AC-LV-09 | `validate-evidence.ps1`、数据库摘要、学习页截图 | Evidence | 这是“真实可用”声明的主要裁判；普通单元测试不能替代 |
+| AC-LV-09 | `validate-evidence.ps1`、数据库摘要、WebDriver DOM 状态、学习页截图 | Evidence | schema v2 同时要求真实数据库内容与生产学习页、播放器、段落可见；普通单元测试或仅有 PNG 不能替代 |
 | AC-LV-10 | `video-list-page-recovery.test.tsx`、`video-list-import.test.tsx` | Strong | 覆盖事件驱动 UI 和持久化终态；真实事件链由 E2E 补充 |
-| AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、截图和秘密 |
-| AC-LV-12 | 上述能力/运行时测试、`validate-evidence.test.ts`、`validate-evidence.ps1`、真实 E2E Runner | Partial（待 Evidence） | 三角色探针、角色门禁、导入门禁和文本助手门禁均复用生产接口。证据 schema v2 要求三角色 `Compatible` 检查、同配置 `Verified` 记录、缺少能力时的负向门禁事件，以及通过 `VideoImportController` 的真实取消/重试/落库流程；通用 OpenAI-compatible endpoint/model 不再被固定 Qwen 名称限制。旧 schema v1 证据继续按原固定运行时规则验证。当前唯一验收缺口是尚未实际运行一次新的 schema v2 外部模型 + 完整视频 E2E，因此不能把任何新配置宣称为 `Verified` |
+| AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、生产学习页 DOM、截图和秘密；schema v2 不再把“任意 PNG”当作 UI 已就绪 |
+| AC-LV-12 | 上述能力/运行时测试、`validate-evidence.test.ts`、`validate-evidence.ps1`、真实 E2E Runner、`rain-real-e2e-20260726-195652` | Strong + Evidence（限定已验证组合） | 三角色探针、角色门禁、导入门禁和文本助手门禁均复用生产接口。schema v2 已真实验证 `ggml-large-v3.bin` CUDA ASR + DashScope `qwen3-omni-flash` 结构化与文本助手：三角色先通过 `Compatible`，再由完整视频、负向门禁、取消/重试、落库和生产学习页证据签发同配置 `Verified`。该结论只覆盖此配置指纹和文本助手，不推广到其他 OpenAI-compatible 模型或 vision；其他配置仍需各自探针和完整 E2E。旧 schema v1 证据继续按原固定运行时规则验证 |
 
 ## 3. 架构 Harness 审计
 

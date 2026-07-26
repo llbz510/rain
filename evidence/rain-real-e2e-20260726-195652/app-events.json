@@ -1,0 +1,84 @@
+[
+    {
+        "event":  "capability_checks_complete",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_gate_rejected_missing_capabilities",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "assistant_gate_rejected_missing_capabilities",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "start_import",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:asr",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:asr",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "cancel_import",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_cancelled",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "retry_import",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:asr",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:asr",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:asr",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:stage2",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:stage2",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:merging",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_progress:merging",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "import_complete",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "event":  "assistant_stream_complete",
+        "recoveredFrom":  "restart-proof.json"
+    },
+    {
+        "at":  "2026-07-26T13:12:38.336Z",
+        "detail":  null,
+        "event":  "ui_replay_asr_capability"
+    },
+    {
+        "at":  "2026-07-26T13:12:38.421Z",
+        "detail":  "rain-real-e2e-20260726-195652-video",
+        "event":  "study_ui_ready"
+    }
+]

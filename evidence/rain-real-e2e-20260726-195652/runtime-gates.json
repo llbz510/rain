@@ -1,0 +1,22 @@
+{
+    "assistant":  {
+                      "implementation":  "decideModelRoleAssignment+streamAiChat",
+                      "rejectedWithoutCapabilities":  true,
+                      "requiredRoles":  [
+                                            "assistant"
+                                        ],
+                      "responseContract":  "RAIN_ASSISTANT_OK",
+                      "result":  "passed",
+                      "textOnly":  true
+                  },
+    "import":  {
+                   "implementation":  "VideoImportController",
+                   "rejectedWithoutCapabilities":  true,
+                   "requiredRoles":  [
+                                         "asr",
+                                         "structuring"
+                                     ],
+                   "result":  "passed"
+               },
+    "source":  "rain-app-automation"
+}

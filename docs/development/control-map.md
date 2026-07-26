@@ -91,7 +91,7 @@ Rain 正式支持模型池中的多种配置。模型是否可用于某个角色
 - `Verified`：除能力检查外，还通过 Rain 完整真实 E2E，可作为已验证配置展示。
 - `Unavailable`：能力检查失败，不得被分配给该角色。
 
-当前 `ggml-large-v3.bin` + `qwen3.5-omni-flash` + DashScope endpoint 是首个 `Verified` 组合，但不是永久白名单。
+当前 `ggml-large-v3.bin`（CUDA）+ `qwen3-omni-flash`（结构化与文本助手）+ DashScope endpoint 是 schema v2 证据下首个 `Verified` 组合，但不是永久白名单，也不代表 vision 已验证。
 
 各角色最低能力：
 

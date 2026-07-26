@@ -1,0 +1,25 @@
+{
+    "elapsedSeconds":  2459,
+    "events":  [
+                   "capability_checks_complete",
+                   "import_gate_rejected_missing_capabilities",
+                   "assistant_gate_rejected_missing_capabilities",
+                   "start_import",
+                   "import_progress:asr",
+                   "import_progress:asr",
+                   "cancel_import",
+                   "import_cancelled",
+                   "retry_import",
+                   "import_progress:asr",
+                   "import_progress:asr",
+                   "import_progress:asr",
+                   "import_progress:stage2",
+                   "import_progress:stage2",
+                   "import_progress:merging",
+                   "import_progress:merging",
+                   "import_complete",
+                   "assistant_stream_complete"
+               ],
+    "result":  "passed",
+    "source":  "rain-app-automation"
+}

@@ -57,7 +57,7 @@ interface RainState {
   pushUndo: (action: UndoAction) => void
   popUndo: () => UndoAction | undefined
   switchLayoutMode: (mode: LayoutMode) => void
-  loadVideo: (videoId: string) => void
+  loadVideo: (videoId: string) => Promise<void>
   unloadVideo: () => void
   setPage: (page: 'list' | 'study' | 'settings') => void
   loadRuntimeSettings: () => Promise<void>
