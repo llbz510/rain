@@ -27,6 +27,7 @@ interface RainState {
   selectedNodeId: string | null
   selectionOrigin: SelectionOrigin | null
   playPosition: number
+  isPlaying: boolean
   layoutMode: LayoutMode
   undoStack: UndoAction[]
   subtitleOn: boolean
@@ -81,6 +82,7 @@ const initialState = {
   selectedNodeId: null as string | null,
   selectionOrigin: null as SelectionOrigin | null,
   playPosition: 0,
+  isPlaying: false,
   layoutMode: 'follow' as LayoutMode,
   undoStack: [] as UndoAction[],
   subtitleOn: true,
@@ -163,6 +165,7 @@ export const useRainStore = create<RainState>((set, get) => ({
         sentences,
         notes,
         playPosition: video?.position ?? 0,
+        isPlaying: false,
         currentVideoFilePath: video?.filePath ?? '',
         currentVideoTitle: video?.title ?? '',
         currentVideoLanguage: video?.language || 'other',
@@ -184,6 +187,7 @@ export const useRainStore = create<RainState>((set, get) => ({
       selectedNodeId: null,
       selectionOrigin: null,
       playPosition: 0,
+      isPlaying: false,
       currentVideoFilePath: '',
       currentVideoTitle: '',
       currentVideoLanguage: 'other',

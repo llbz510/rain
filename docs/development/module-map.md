@@ -103,7 +103,7 @@ cancelImport(videoId)
 - 页面只展示持久化状态和瞬时进度，不自行发明终态。
 - Evidence 记录一次运行，不成为应用运行时状态。
 
-学习页必须先完整读取同一 Video ID 的 Video、Node、Sentence 和 Note，再一次性切换到 `study`。加载失败不得把部分缓存或空数组包装成成功页面。`playPosition` 是视频、句子高亮和目录当前位置的唯一会话事实；持久化的 `Video.position` 是跨会话最远进度，两者语义不同。
+学习页必须先完整读取同一 Video ID 的 Video、Node、Sentence 和 Note，再一次性切换到 `study`。加载失败不得把部分缓存或空数组包装成成功页面。`playPosition` 是视频、句子高亮和目录当前位置的唯一会话事实；`isPlaying` 是视频区、控制栏和随播滚动共享的播放状态，不能再由组件维护第二份。持久化的 `Video.position` 是跨会话最远进度，与这两个瞬时会话状态语义不同。
 
 当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
 

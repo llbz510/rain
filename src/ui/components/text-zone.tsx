@@ -3,7 +3,7 @@
 // M07 文本区组件（决策5/41/43/44/86）
 // ========================================
 
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useRainStore } from '@/store/rain-store'
 import { shouldShowTranslation } from '@/ui/text-zone'
 import { getCurrentHighlightedSentence } from '@/ui/text-zone'
@@ -17,11 +17,19 @@ interface ParagraphItemProps {
 
 export function ParagraphItem({ paragraph, sentences, onSeek }: ParagraphItemProps) {
   const playPosition = useRainStore((s) => s.playPosition)
+  const isPlaying = useRainStore((s) => s.isPlaying)
   const translationOn = useRainStore((s) => s.translationOn)
   const language = useRainStore((s) => s.currentVideoLanguage)
+  const highlightedSentenceRef = useRef<HTMLSpanElement>(null)
 
   const highlightedId = getCurrentHighlightedSentence(sentences, playPosition)
   const showTrans = shouldShowTranslation(language, translationOn)
+
+  useEffect(() => {
+    if (isPlaying && highlightedId) {
+      highlightedSentenceRef.current?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [highlightedId, isPlaying])
 
   return (
     <div data-testid={`paragraph-${paragraph.id}`}>
@@ -33,6 +41,7 @@ export function ParagraphItem({ paragraph, sentences, onSeek }: ParagraphItemPro
         {sentences.map((s) => (
           <span
             key={s.id}
+            ref={highlightedId === s.id ? highlightedSentenceRef : undefined}
             data-highlighted={highlightedId === s.id ? 'true' : 'false'}
             style={{ cursor: 'pointer' }}
             onDoubleClick={() => onSeek?.(s.startTime)}

@@ -12,6 +12,8 @@ vi.mock('@/llm/client', async (importOriginal) => ({
 
 import { StudyInterface } from '@/pages/StudyInterface'
 
+const originalScrollIntoView = Element.prototype.scrollIntoView
+
 const assistantModel: ModelPoolEntry = {
   id: 'assistant',
   alias: 'Study Assistant',
@@ -74,6 +76,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   act(() => useRainStore.getState().reset())
+  if (originalScrollIntoView) {
+    Element.prototype.scrollIntoView = originalScrollIntoView
+  } else {
+    Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
+  }
 })
 
 describe('AC-ST-02 real study navigation', () => {
@@ -121,5 +128,55 @@ describe('AC-ST-02 real study navigation', () => {
     expect(video.paused).toBe(true)
     expect(play).not.toHaveBeenCalled()
     expect(pause).not.toHaveBeenCalled()
+  })
+})
+
+describe('AC-ST-03 playback synchronization', () => {
+  it('drives sentence highlight, catalog state and follow scrolling from video timeupdate', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    configureStudy()
+    useRainStore.setState({
+      nodeTree: [
+        { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter', type: null, startTime: 0, endTime: 20, text: null, sortOrder: 0 },
+        { id: 'section-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'section', title: 'Section', type: null, startTime: 0, endTime: 20, text: null, sortOrder: 0 },
+        { id: 'paragraph-1', videoId: 'video-1', parentId: 'section-1', kind: 'paragraph', title: 'First paragraph', type: 'concept', startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'paragraph-2', videoId: 'video-1', parentId: 'section-1', kind: 'paragraph', title: 'Second paragraph', type: 'example', startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+      ],
+      sentences: [
+        { id: 'sentence-1', nodeId: 'paragraph-1', text: 'First sentence.', startTime: 0, endTime: 10, sortOrder: 0 },
+        { id: 'sentence-2', nodeId: 'paragraph-2', text: 'Second sentence.', startTime: 10, endTime: 20, sortOrder: 1 },
+      ],
+    })
+    render(<StudyInterface />)
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+
+    fireEvent.play(video)
+    expect(useRainStore.getState().isPlaying).toBe(true)
+    scrollIntoView.mockClear()
+    video.currentTime = 10
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(10)
+      expect(screen.getByText('First sentence.')).toHaveAttribute('data-highlighted', 'false')
+      expect(screen.getByText('Second sentence.')).toHaveAttribute('data-highlighted', 'true')
+      expect(screen.getByTestId('progress-indicator-paragraph-1')).toHaveTextContent('■')
+      expect(screen.getByTestId('progress-indicator-paragraph-2')).toHaveTextContent('▶')
+      expect(scrollIntoView).toHaveBeenCalled()
+    })
+
+    fireEvent.pause(video)
+    expect(useRainStore.getState().isPlaying).toBe(false)
+    scrollIntoView.mockClear()
+    video.currentTime = 5
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(screen.getByText('First sentence.')).toHaveAttribute('data-highlighted', 'true')
+    })
+    expect(scrollIntoView).not.toHaveBeenCalled()
   })
 })

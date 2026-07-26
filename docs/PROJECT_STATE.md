@@ -816,6 +816,31 @@ git diff --check
 
 Observed result: focused navigation tests passed 4 files / 24 tests; TypeScript passed; the full frontend suite passed 59 files / 382 tests with 1 live-key test skipped; production build passed with the existing Vite chunking warnings.
 
+## What changed in the 2026-07-26 AC-ST-03 playback synchronization slice
+
+Continued the learning-page controls in acceptance order:
+
+- Extended `study-navigation.test.tsx` from a real video `timeupdate` through Store `playPosition`, sentence highlight and directory progress state.
+- Tested the exact 10-second boundary between adjacent sentences/paragraphs. Both text and directory use the same half-open `[start, end)` rule, so the previous item becomes complete and the next becomes current without overlap.
+- The red test showed that time/highlight/catalog synchronization already worked, but follow-mode text never scrolled because the text zone could not observe playback state.
+- Added `isPlaying` as the single Store playback state. `VideoZone` writes it on play, pause, ended and unmount; `VideoControls` reads it instead of maintaining a separate window-event state.
+- `ParagraphItem` scrolls only the currently highlighted sentence into view while playback is active. Seeking or time changes while paused update highlighting without taking over the user's scroll position.
+- Locked M05-M07 and Store Harness files were not modified.
+
+`AC-ST-03` is now `Strong`. The next controlled slice is `AC-ST-04`: separate single-click selection from full directory double-click navigation, resolve container nodes to their earliest leaf sentence, and position the corresponding text without changing playback state.
+
+Verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/study-navigation.test.tsx src/__tests__/study-playback.test.tsx harness/m05-catalog-component.test.tsx harness/m06-video-component.test.tsx harness/m07-text-component.test.tsx harness/store-zustand.test.tsx harness/store-zustand-phase2.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: focused playback synchronization tests passed 7 files / 48 tests, including unchanged locked M05-M07 and Store Harness; TypeScript passed; the full frontend suite passed 59 files / 383 tests with 1 live-key test skipped; production build passed with the existing Vite chunking warnings.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

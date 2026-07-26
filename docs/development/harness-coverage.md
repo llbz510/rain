@@ -39,7 +39,7 @@
 | --- | --- | --- | --- |
 | AC-ST-01 | `store-zustand-phase2.test.tsx`、`study-load.test.tsx`、schema v2 DOM/数据库证据 | Strong + Evidence | 成功路径从真实数据库一次加载同一视频的元数据、结构、句子和笔记；缺失视频、非 ready 状态和缺少段落/句子的假 ready 记录都会留在列表并显示错误，不再静默进入空学习页 |
 | AC-ST-02 | M07 组件 Harness、`study-playback.test.tsx`、`study-navigation.test.tsx` | Strong | 生产 `StudyInterface` 测试证明双击句子和点击通过 ID/时间校验的助手引用都会更新唯一 `playPosition` 与真实 media `currentTime`；播放和暂停状态均不被 seek 路径改变 |
-| AC-ST-03 | M05/M07 组件 Harness、`study-playback.test.tsx` | Partial | 句子高亮、目录进度和 video `timeupdate` 分别有测试，但未贯通同一个 `playPosition`，也未覆盖随播滚动 |
+| AC-ST-03 | M05/M07 组件 Harness、`study-playback.test.tsx`、`study-navigation.test.tsx` | Strong | 生产 `StudyInterface` 测试从真实 video `timeupdate` 贯通唯一 `playPosition`、半开区间句子高亮和目录当前态；播放时当前句滚入可视区，暂停时不强制滚动；播放状态由 Store 统一持有 |
 | AC-ST-04 | M05 组件 Harness | Partial | 单击选中与双击 `onSeek` 已分开；尚未证明最早叶子解析、文本滚动、目录上下文可见和播放状态保持，“触发回调”不能代表三区跳转完成 |
 | AC-ST-05 | M06 组件 Harness、数据库位置测试 | Partial | 数据库支持位置单调递增，VideoZone 能恢复位置；当前播放事件没有接入持久化和最近学习时间，缺少页面到数据库往返 |
 | AC-ST-06 | M08 数据库/组件 Harness | Partial | Note 插入和按视频读取是真实数据库行为；当前 Notes UI 编辑仅写 React 局部状态，摘注按钮只触发可选回调，引用也没有跳转行为 |
