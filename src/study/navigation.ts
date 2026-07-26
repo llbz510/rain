@@ -7,6 +7,25 @@ export interface NodeNavigationTarget {
   time: number
 }
 
+export interface SentenceNavigationTarget {
+  sentenceId: string
+  paragraphId: string
+  time: number
+}
+
+export function resolveSentenceNavigationTarget(
+  sentences: Sentence[],
+  sentenceId: string,
+): SentenceNavigationTarget | null {
+  const sentence = sentences.find((item) => item.id === sentenceId)
+  if (!sentence) return null
+  return {
+    sentenceId: sentence.id,
+    paragraphId: sentence.nodeId,
+    time: sentence.startTime,
+  }
+}
+
 export function resolveNodeNavigationTarget(
   nodes: Node[],
   sentences: Sentence[],

@@ -22,8 +22,9 @@ import { buildAssistantContext, type AssistantSource } from '@/ai/assistant-cont
 import type { Node, ParagraphType, Sentence } from '@/models/types'
 import { decideModelRoleAssignment } from '@/settings/model-capabilities'
 import { runtimeModelFromPoolEntry } from '@/settings/model-pool'
-import { resolveNodeNavigationTarget } from '@/study/navigation'
+import { resolveNodeNavigationTarget, resolveSentenceNavigationTarget } from '@/study/navigation'
 import { recordPlaybackProgress } from '@/study/session'
+import { createFreeNote, createParagraphExcerpt, saveNoteContent } from '@/study/notes'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -298,6 +299,36 @@ export function StudyInterface() {
     })
   }, [nodeTree, sentences])
 
+  const handleSentenceNavigate = useCallback((sentenceId: string) => {
+    const target = resolveSentenceNavigationTarget(sentences, sentenceId)
+    if (!target) return
+
+    navigationRequestIdRef.current += 1
+    useRainStore.setState({ playPosition: target.time })
+    setTextScrollTarget({
+      paragraphId: target.paragraphId,
+      requestId: navigationRequestIdRef.current,
+    })
+  }, [sentences])
+
+  const handleExcerpt = useCallback((paragraphId: string) => {
+    void createParagraphExcerpt(paragraphId).catch((error) => {
+      console.error('Unable to create excerpt note', error)
+    })
+  }, [])
+
+  const handleCreateFreeNote = useCallback(() => {
+    void createFreeNote().catch((error) => {
+      console.error('Unable to create free note', error)
+    })
+  }, [])
+
+  const handleSaveNote = useCallback((noteId: string, content: string) => {
+    void saveNoteContent(noteId, content).catch((error) => {
+      console.error('Unable to save note', error)
+    })
+  }, [])
+
   const setAiPanel = (panel: 'ai' | 'notes') => {
     useRainStore.setState({ aiPanelState: panel })
   }
@@ -347,7 +378,11 @@ export function StudyInterface() {
         )}
         {visibility.textZone && (
           <div style={flexFillStyle}>
-            <TextZone onSeek={handleSeek} scrollTarget={textScrollTarget} />
+            <TextZone
+              onSeek={handleSeek}
+              onExcerpt={handleExcerpt}
+              scrollTarget={textScrollTarget}
+            />
           </div>
         )}
         {visibility.diagramZone && (
@@ -387,7 +422,11 @@ export function StudyInterface() {
                 <ChatInput onSend={handleSendMessage} />
               </>
             ) : (
-              <NotesPanel />
+              <NotesPanel
+                onCreateNote={handleCreateFreeNote}
+                onSaveNote={handleSaveNote}
+                onSeekSentence={handleSentenceNavigate}
+              />
             )}
           </div>
         </aside>

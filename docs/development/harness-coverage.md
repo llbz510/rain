@@ -42,7 +42,7 @@
 | AC-ST-03 | M05/M07 组件 Harness、`study-playback.test.tsx`、`study-navigation.test.tsx` | Strong | 生产 `StudyInterface` 测试从真实 video `timeupdate` 贯通唯一 `playPosition`、半开区间句子高亮和目录当前态；播放时当前句滚入可视区，暂停时不强制滚动；播放状态由 Store 统一持有 |
 | AC-ST-04 | M05 组件 Harness、`study-navigation.test.tsx` | Strong | 生产 `StudyInterface` 测试证明单击只选中；双击章节/节/段落统一解析到子树最早句子，更新 Store 与真实 media、定位对应文本并保持播放/暂停状态；地图预览展示所选节点的真实首段内容 |
 | AC-ST-05 | M06 组件 Harness、M15 数据库 Harness、`study-progress.test.tsx` | Strong | 生产 `StudyInterface` 测试从真实 media `timeupdate` 写入真实数据库，证明 Store 当前时间可回退而持久化最远进度不下降；退出后重新加载会恢复 Store/media 位置，并在成功建立学习会话后更新 `lastStudiedAt` |
-| AC-ST-06 | M08 数据库/组件 Harness | Partial | Note 插入和按视频读取是真实数据库行为；当前 Notes UI 编辑仅写 React 局部状态，摘注按钮只触发可选回调，引用也没有跳转行为 |
+| AC-ST-06 | M08 数据库/组件 Harness、M15 数据库 Harness、`study-notes.test.tsx` | Strong | 生产 `StudyInterface` 测试证明整段摘注携带全部 sentence ID 落库，自由笔记与编辑内容经数据库保存且重开可读；持久化引用通过 Study Navigation 跳到真实 media 时间并保持播放状态 |
 | AC-ST-07 | `assistant-context.test.ts`、`study-playback.test.tsx`、能力测试、schema v2 证据 | Strong + Evidence（文本） | 文本上下文、门禁、停止、迟到 token、可信引用和真实文本探针已覆盖；vision 明确不在此 AC |
 | AC-ST-08 | M16 状态/组件 Harness | Strong | 布局可见性和切换已有生产状态机裁判；后续新增布局行为仍不得复制另一套状态 |
 

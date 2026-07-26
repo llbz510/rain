@@ -504,6 +504,19 @@ export async function getNotesByVideoId(db: Database, videoId: string): Promise<
   })
 }
 
+export async function updateNoteContent(db: Database, noteId: string, content: string): Promise<void> {
+  if (isTauriDb(db)) {
+    await db.exec('UPDATE note SET content = $1 WHERE id = $2', [content, noteId])
+    return
+  }
+  const memDb = db as unknown as MemoryDatabase
+  const table = memDb._getTable('note')
+  for (const row of table) {
+    if (row.id === noteId) row.content = content
+  }
+  memDb._setTable('note', table)
+}
+
 export async function updateVideoStatus(db: Database, id: string, status: string): Promise<void> {
   if (isTauriDb(db)) {
     await db.exec('UPDATE video SET status = $1 WHERE id = $2', [status, id])

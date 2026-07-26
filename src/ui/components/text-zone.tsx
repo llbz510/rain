@@ -8,16 +8,18 @@ import { useRainStore } from '@/store/rain-store'
 import { shouldShowTranslation } from '@/ui/text-zone'
 import { getCurrentHighlightedSentence } from '@/ui/text-zone'
 import { resolveNodeNavigationTarget } from '@/study/navigation'
+import { ExcerptButton } from '@/ui/components/notes'
 import type { Node, Sentence } from '@/models/types'
 
 interface ParagraphItemProps {
   paragraph: Node
   sentences: Sentence[]
   onSeek?: (time: number) => void
+  onExcerpt?: (paragraphId: string) => void
   scrollRequestId?: number
 }
 
-export function ParagraphItem({ paragraph, sentences, onSeek, scrollRequestId }: ParagraphItemProps) {
+export function ParagraphItem({ paragraph, sentences, onSeek, onExcerpt, scrollRequestId }: ParagraphItemProps) {
   const playPosition = useRainStore((s) => s.playPosition)
   const isPlaying = useRainStore((s) => s.isPlaying)
   const translationOn = useRainStore((s) => s.translationOn)
@@ -45,6 +47,13 @@ export function ParagraphItem({ paragraph, sentences, onSeek, scrollRequestId }:
       <div>
         <span data-type-badge={paragraph.type} />
         <span>{paragraph.title}</span>
+        {onExcerpt && (
+          <ExcerptButton
+            paragraphId={paragraph.id}
+            sentenceIds={sentences.map((sentence) => sentence.id)}
+            onExcerpt={() => onExcerpt(paragraph.id)}
+          />
+        )}
       </div>
       <div>
         {sentences.map((s) => (
@@ -73,9 +82,11 @@ export interface TextScrollTarget {
 
 export function TextZone({
   onSeek,
+  onExcerpt,
   scrollTarget,
 }: {
   onSeek?: (time: number) => void
+  onExcerpt?: (paragraphId: string) => void
   scrollTarget?: TextScrollTarget | null
 }) {
   const nodes = useRainStore((s) => s.nodeTree)
@@ -91,6 +102,7 @@ export function TextZone({
           paragraph={p}
           sentences={sentences.filter((s) => s.nodeId === p.id)}
           onSeek={onSeek}
+          onExcerpt={onExcerpt}
           scrollRequestId={scrollTarget?.paragraphId === p.id ? scrollTarget.requestId : undefined}
         />
       ))}

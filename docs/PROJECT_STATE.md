@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-26 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the AC-ST-05 slice: `154830f feat: control directory navigation`
+Current working base before the AC-ST-06 slice: `1018e6f feat: persist study progress`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -906,6 +906,38 @@ git diff --check
 ```
 
 Observed result: the full frontend suite passed 60 files / 387 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. No Rust test or real-video E2E was run because this slice reused the existing TypeScript database interface and changed no Rust or evidence contract.
+
+## What changed in the 2026-07-27 AC-ST-06 persisted notes slice
+
+Continued the learning-page controls in acceptance order:
+
+- Added `src/__tests__/study-notes.test.tsx` at the production `StudyInterface` seam with real database round trips and session reloads.
+- Added `src/study/notes.ts` as the Notes Workflow owner. Whole-paragraph excerpts collect every sentence ID in order, derive their content from those sentences, persist first and update Store only after success.
+- Added persisted free-note creation and explicit content saving. The database now exposes `updateNoteContent`; React textarea state is only a draft until the workflow saves it.
+- Connected paragraph excerpt controls to the production text zone and added production note creation/save controls without changing the locked M07/M08 Harness interfaces.
+- Extended Study Navigation with exact sentence-ID resolution. Reopened note citations update Store and the actual media time while preserving playback state and positioning the related paragraph.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+`AC-ST-06` is now `Strong`. All confirmed learning-page criteria `AC-ST-01` through `AC-ST-08` now have Strong coverage, with Evidence additionally required only where external runtime behavior cannot be proven locally. The next control step is a learning-page audit rather than silently inventing `AC-ST-09`.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/study-notes.test.tsx src/__tests__/study-navigation.test.tsx harness/m07-text-component.test.tsx harness/m08-notes-component.test.tsx harness/m08-notes.test.ts harness/m15-queries.test.ts
+npx.cmd tsc --noEmit
+```
+
+Observed result: focused production and locked compatibility coverage passed 6 files / 29 tests; TypeScript passed. Full-suite and production-build results are recorded below before commit.
+
+Final verification:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: the full frontend suite passed 61 files / 390 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. No Rust test or real-video E2E was run because this slice changed the TypeScript Notes Workflow, database interface and learning UI without changing Rust or external-runtime evidence contracts.
 
 ## Maintenance checklist for every future session
 
