@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assessModelCapability,
+  decideModelRoleAssignment,
   mergeCapabilityRecords,
   recordCapabilityCheck,
 } from '@/settings/model-capabilities'
@@ -125,5 +126,33 @@ describe('AC-LV-12 model capability records', () => {
       [priorAssistant, structuring],
       [nextAssistant],
     )).toEqual([structuring, nextAssistant])
+  })
+
+  it('allows role assignment only for a current Compatible or Verified record', () => {
+    expect(decideModelRoleAssignment(model, 'assistant', [])).toMatchObject({
+      allowed: false,
+      capability: { status: 'Unavailable' },
+    })
+
+    const compatible = recordCapabilityCheck({
+      model,
+      role: 'assistant',
+      ok: true,
+      message: 'Text role check passed',
+      checkedAt: 100,
+    })
+    expect(decideModelRoleAssignment(model, 'assistant', [compatible])).toMatchObject({
+      allowed: true,
+      capability: { status: 'Compatible' },
+    })
+
+    expect(decideModelRoleAssignment(
+      { ...model, apiKey: 'sk-changed-secret' },
+      'assistant',
+      [compatible],
+    )).toMatchObject({
+      allowed: false,
+      capability: { status: 'Unavailable', stale: true },
+    })
   })
 })

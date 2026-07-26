@@ -426,6 +426,90 @@ npm.cmd run build
 
 Observed result: targeted capability tests passed 4 files / 22 tests; TypeScript passed; full frontend suite passed 48 files / 336 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. Rust and real-video E2E were not rerun because this slice changed only frontend settings and control documents.
 
+## What changed in the 2026-07-26 role assignment gate session
+
+The prior model capability slice was committed on `master` as `a38ded7 feat: track model role capabilities`. The next `AC-LV-12` slice contains:
+
+- Added `decideModelRoleAssignment` as the single domain decision for whether a current model configuration may receive a role.
+- Only current `Compatible` or `Verified` records allow a new assignment; missing, failed or stale records return `Unavailable`.
+- Zustand now enforces this decision before changing `roleAssignment`, so callers cannot bypass the rule by skipping the UI.
+- Role selectors disable unavailable options and display the current assignment status and reason.
+- Existing saved/default assignments are deliberately preserved during migration. Automatically clearing them now would break Rain before executable full role checks exist.
+- Pipeline startup is not gated yet for the same reason. It becomes eligible for enforcement only after the corresponding real role checks can produce `Compatible`.
+
+Files in this slice:
+
+- `src/settings/model-capabilities.ts`
+- `src/settings/model-pool.ts`
+- `src/store/rain-store.ts`
+- `src/ui/components/settings.tsx`
+- `src/__tests__/model-capabilities.test.ts`
+- `src/__tests__/settings-role-assignment.test.tsx`
+- `docs/development/harness-coverage.md`
+- `docs/development/module-map.md`
+- `docs/PROJECT_STATE.md`
+
+Verification so far:
+
+```powershell
+npm.cmd test -- --run src/__tests__/model-capabilities.test.ts src/__tests__/settings-role-assignment.test.tsx harness/m19-settings-component.test.tsx harness/m19-settings.test.ts harness/store-zustand.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: 5 related files / 37 tests passed with no React test warnings; TypeScript passed; the full frontend suite passed 49 files / 341 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings; `git diff --check` passed with only normal Windows LF/CRLF notices. Rust and real-video E2E were not rerun because this slice changes only frontend model settings and control documents.
+
+## What changed in the 2026-07-26 structuring capability probe session
+
+Continued the `AC-LV-12` work after the role assignment gate:
+
+- Added `src/settings/structuring-capability.ts`, which sends two deterministic probe sentences through the real OpenAI-compatible Stage2 caller.
+- The probe reuses the production `STAGE2_BLOCK_SYSTEM_PROMPT`, `buildStage2Blocks`, `normalizeStage2BlockOutputCandidate` and `validateStage2BlockOutput` instead of maintaining a test-only schema.
+- A model receives `Compatible` for the structuring role only when the returned tree satisfies the Stage2 schema and covers both immutable sentence IDs exactly.
+- Errors become `Unavailable` records and are redacted before persistence; API Key plaintext is not placed in capability records.
+- Every saved LLM now has a model-pool “检查结构化” action. A passing check is persisted through Zustand and immediately unlocks that model in the structuring role selector.
+- The probe is provider-neutral at the contract layer and accepts any saved OpenAI-compatible endpoint/model configuration. The separate legacy Qwen connection button remains for now.
+
+New or additionally changed files:
+
+- `src/settings/structuring-capability.ts`
+- `src/pipeline/stage2-runner.ts`
+- `src/ui/components/settings.tsx`
+- `src/__tests__/structuring-capability.test.ts`
+- `src/__tests__/settings-connection.test.tsx`
+- `src/__tests__/settings-structuring-workflow.test.tsx`
+- `docs/development/harness-coverage.md`
+- `docs/development/module-map.md`
+- `docs/PROJECT_STATE.md`
+
+Verification so far:
+
+```powershell
+npm.cmd test -- --run src/__tests__/structuring-capability.test.ts src/__tests__/settings-connection.test.tsx src/__tests__/settings-role-assignment.test.tsx src/__tests__/settings-structuring-workflow.test.tsx src/__tests__/stage2-runner.test.ts harness/m19-settings-component.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: 6 related files / 43 tests passed; TypeScript passed; the full frontend suite passed 51 files / 346 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings; `git diff --check` passed with only normal Windows LF/CRLF notices. Tests inject the model caller and prove the production contract path, failure handling and settings workflow. No live external model was called in this session, so no concrete model configuration was promoted based on new real evidence. Rust and real-video E2E were not rerun because this slice changes frontend settings and shares an existing Stage2 prompt constant without changing Rust or the full import orchestration.
+
+## Current controllability audit on 2026-07-26
+
+The project is more controllable than at the start of the Harness review, but it is not uniformly clean:
+
+- The local-video path `AC-LV-01` through `AC-LV-11` has named owners, mostly Strong behavioral judges, and real evidence where unit tests are insufficient.
+- Shadow registries, tautological tests, test-only production helpers and obsolete commands were removed in the approved Harness Migration.
+- `AC-LV-12` is intentionally still `Partial`; the control documents do not claim multi-model support is complete.
+- URL import, universal vision explanation and advanced tree editing remain explicit Gap/Proposed work instead of being represented by placeholder success paths.
+- The role-gate and structuring-probe work forms one coherent capability slice and must remain separate from unrelated refactoring.
+
+The immediate code-organization risk is `src/ui/components/settings.tsx`, now approximately 1185 lines. It owns the page shell, preflight panel, model list, connection/capability actions, add-model form and role selector. Domain rules were kept out of this file, but continuing to add UI workflows here would create a new hotspot. The next code-health slice should be behavior-preserving extraction behind the same public exports, with existing M19 and `src/__tests__/settings-*.test.tsx` tests acting as regression judges.
+
+`src/models/database.ts` remains approximately 1034 lines and `src-tauri/src/commands.rs` approximately 796 lines. Their size alone is not permission to rewrite them: both require interface-level tests and responsibility-based extraction, one controlled slice at a time.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

@@ -5,8 +5,8 @@
 
 import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
-import { addModelToPool, applyRuntimeSettings, createRuntimeSettingsInitializer, listModels, loadRuntimeSettings as loadPersistedRuntimeSettings, removeModelFromPool, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
-import { mergeCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
+import { addModelToPool, applyRuntimeSettings, createRuntimeSettingsInitializer, listModels, loadRuntimeSettings as loadPersistedRuntimeSettings, removeModelFromPool, runtimeModelFromPoolEntry, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
+import { decideModelRoleAssignment, mergeCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
 
 export type LayoutMode = 'follow' | 'textExpand' | 'mapExpand'
 export type SelectionOrigin = 'tree' | 'diagram'
@@ -64,9 +64,13 @@ interface RainState {
   retryRuntimeSettings: () => Promise<void>
   addModel: (input: AddModelInput) => void
   removeModel: (id: string) => void
-  setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => void
+  setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => RoleAssignmentResult
   setCapabilityRecords: (records: ModelCapabilityRecord[]) => Promise<void>
 }
+
+export type RoleAssignmentResult =
+  | { ok: true }
+  | { ok: false; error: string }
 
 const initialState = {
   currentVideoId: null as string | null,
@@ -224,9 +228,24 @@ export const useRainStore = create<RainState>((set, get) => ({
   },
 
   setRoleModel: (role, modelId) => {
+    if (modelId) {
+      const model = get().modelPool.find((entry) => entry.id === modelId)
+      if (!model) {
+        return { ok: false, error: '未找到要分配的模型配置。' }
+      }
+      const decision = decideModelRoleAssignment(
+        runtimeModelFromPoolEntry(model),
+        role,
+        get().capabilityRecords,
+      )
+      if (!decision.allowed) {
+        return { ok: false, error: decision.capability.message }
+      }
+    }
     const roleAssignment = { ...get().roleAssignment, [role]: modelId }
     set({ roleAssignment })
     void saveRuntimeSettings(runtimeSettingsFromPool(roleAssignment, get().capabilityRecords)).catch(() => {})
+    return { ok: true }
   },
 
   setCapabilityRecords: async (records) => {

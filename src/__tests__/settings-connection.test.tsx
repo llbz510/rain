@@ -39,4 +39,23 @@ describe('model pool connection check', () => {
     render(<ModelPoolList models={[{ id: 'other', alias: 'Other', type: 'llm', supportsVision: false, canTest: false }]} onTestConnection={vi.fn()} />)
     expect(screen.queryByRole('button', { name: '测试 Other' })).toBeNull()
   })
+
+  it('offers the real structuring capability check for any LLM model', async () => {
+    const checkStructuring = vi.fn().mockResolvedValue({
+      ok: true,
+      message: '结构化能力检查通过',
+    })
+
+    render(
+      <ModelPoolList
+        models={[{ id: 'other', alias: 'Other', type: 'llm', supportsVision: false, canTest: false }]}
+        onCheckStructuring={checkStructuring}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '检查结构化 Other' }))
+
+    await waitFor(() => expect(checkStructuring).toHaveBeenCalledWith('other'))
+    expect(screen.getByRole('status')).toHaveTextContent('结构化能力检查通过')
+  })
 })

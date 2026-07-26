@@ -108,7 +108,7 @@ function toPoolEntry(model: RuntimeModel): ModelPoolEntry {
   }
 }
 
-function toRuntimeModel(model: ModelPoolEntry): RuntimeModel {
+export function runtimeModelFromPoolEntry(model: ModelPoolEntry): RuntimeModel {
   return {
     id: model.id,
     alias: model.alias,
@@ -308,7 +308,7 @@ export function runtimeSettingsFromPool(
   capabilities: ModelCapabilityRecord[] = [],
 ): RuntimeSettings {
   return {
-    models: listModels().map(toRuntimeModel),
+    models: listModels().map(runtimeModelFromPoolEntry),
     roles: { ...roles },
     capabilities: capabilities.map((record) => ({ ...record })),
   }

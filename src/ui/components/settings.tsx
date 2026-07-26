@@ -8,16 +8,18 @@ import React, { useState, useEffect } from 'react'
 import { useRainStore } from '@/store/rain-store'
 import { PROVIDER_PRESETS, WHISPER_SIZES } from '@/lib/provider-presets'
 import { isTauri } from '@/lib/tauri-env'
-import type { ModelType, RuntimeSettings } from '@/settings/model-pool'
+import { runtimeModelFromPoolEntry, type ModelRole, type ModelType, type RuntimeSettings } from '@/settings/model-pool'
 import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
 import { testQwenConnection, type QwenConnectionResult } from '@/llm/qwen-health'
 import type { LlmSettings } from '@/llm/types'
 import { runPreflightCheck, type PreflightReport, type PreflightStatus, type RunPreflightCheckInput } from '@/settings/preflight'
 import {
   assessModelCapability,
+  decideModelRoleAssignment,
   type ModelCapabilityRecord,
   type ModelCapabilityStatus,
 } from '@/settings/model-capabilities'
+import { checkStructuringModelCapability } from '@/settings/structuring-capability'
 
 // ── 共享类型 ──────────────────────────────────────
 
@@ -336,11 +338,12 @@ export interface ConnectionTestResult {
 interface ModelPoolListProps {
   models: ModelEntry[]
   onTestConnection?: (modelId: string) => Promise<ConnectionTestResult>
+  onCheckStructuring?: (modelId: string) => Promise<ConnectionTestResult>
 }
 
-export function ModelPoolList({ models, onTestConnection }: ModelPoolListProps) {
+export function ModelPoolList({ models, onTestConnection, onCheckStructuring }: ModelPoolListProps) {
   const removeModel = useRainStore((s) => s.removeModel)
-  const [connectionStatus, setConnectionStatus] = useState<{ modelId: string; message: string } | null>(null)
+  const [connectionStatus, setConnectionStatus] = useState<{ modelId: string; ok: boolean; message: string } | null>(null)
   const [testingModelId, setTestingModelId] = useState<string | null>(null)
 
   const handleTestConnection = async (model: ModelEntry) => {
@@ -349,9 +352,23 @@ export function ModelPoolList({ models, onTestConnection }: ModelPoolListProps) 
     setConnectionStatus(null)
     try {
       const result = await onTestConnection(model.id)
-      setConnectionStatus({ modelId: model.id, message: result.message })
+      setConnectionStatus({ modelId: model.id, ok: result.ok, message: result.message })
     } catch {
-      setConnectionStatus({ modelId: model.id, message: '连接测试失败，请检查 Qwen 配置。' })
+      setConnectionStatus({ modelId: model.id, ok: false, message: '连接测试失败，请检查模型配置。' })
+    } finally {
+      setTestingModelId(null)
+    }
+  }
+
+  const handleStructuringCheck = async (model: ModelEntry) => {
+    if (!onCheckStructuring || testingModelId) return
+    setTestingModelId(model.id)
+    setConnectionStatus(null)
+    try {
+      const result = await onCheckStructuring(model.id)
+      setConnectionStatus({ modelId: model.id, ok: result.ok, message: result.message })
+    } catch {
+      setConnectionStatus({ modelId: model.id, ok: false, message: '结构化能力检查失败，请检查模型配置。' })
     } finally {
       setTestingModelId(null)
     }
@@ -362,7 +379,7 @@ export function ModelPoolList({ models, onTestConnection }: ModelPoolListProps) 
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '160px 150px 1fr 150px',
+          gridTemplateColumns: '160px 150px 1fr 260px',
           gap: 8,
           padding: '0 8px 4px',
           fontSize: 12,
@@ -382,7 +399,7 @@ export function ModelPoolList({ models, onTestConnection }: ModelPoolListProps) 
             data-testid={`model-${m.id}`}
             style={{
               display: 'grid',
-              gridTemplateColumns: '160px 150px 1fr 150px',
+              gridTemplateColumns: '160px 150px 1fr 260px',
               gap: 8,
               alignItems: 'center',
               padding: 8,
@@ -402,10 +419,23 @@ export function ModelPoolList({ models, onTestConnection }: ModelPoolListProps) 
                   {testingModelId === m.id ? '测试中…' : `测试 ${m.alias}`}
                 </button>
               )}
-              {!m.canTest && <button aria-label="测试（仅 Qwen）" disabled style={s.miniBtn}>测试（仅 Qwen）</button>}              <button style={s.dangerBtn} onClick={() => removeModel(m.id)}>删除</button>
+              {!m.canTest && !onCheckStructuring && (
+                <button aria-label="测试（仅 Qwen）" disabled style={s.miniBtn}>测试（仅 Qwen）</button>
+              )}
+              {onCheckStructuring && m.type === 'llm' && (
+                <button
+                  aria-label={`检查结构化 ${m.alias}`}
+                  disabled={testingModelId !== null}
+                  onClick={() => void handleStructuringCheck(m)}
+                  style={s.miniBtn}
+                >
+                  {testingModelId === m.id ? '检查中…' : '检查结构化'}
+                </button>
+              )}
+              <button style={s.dangerBtn} onClick={() => removeModel(m.id)}>删除</button>
             </div>
             {connectionStatus?.modelId === m.id && (
-              <div role="status" style={{ gridColumn: '1 / -1', color: connectionStatus.message.includes('成功') ? COLORS.example : COLORS.fail }}>
+              <div role="status" style={{ gridColumn: '1 / -1', color: connectionStatus.ok ? COLORS.example : COLORS.fail }}>
                 {connectionStatus.message}
               </div>
             )}
@@ -669,10 +699,41 @@ interface RoleSelectorProps {
 export function RoleSelector({ models = [] }: RoleSelectorProps) {
   const setRoleModel = useRainStore((s) => s.setRoleModel)
   const roleAssignment = useRainStore((s) => s.roleAssignment)
+  const modelPool = useRainStore((s) => s.modelPool)
+  const capabilityRecords = useRainStore((s) => s.capabilityRecords)
+  const [assignmentError, setAssignmentError] = useState('')
 
   const asrModels = models.filter((m) => ['asr-api', 'whisper-local', 'subtitle'].includes(m.type))
   const structuringModels = models.filter((m) => m.type === 'llm')
   const assistantModels = models.filter((m) => m.type === 'llm')
+
+  function canAssign(modelId: string, role: ModelRole): boolean {
+    const model = modelPool.find((entry) => entry.id === modelId)
+    if (!model) return false
+    return decideModelRoleAssignment(
+      runtimeModelFromPoolEntry(model),
+      role,
+      capabilityRecords,
+    ).allowed
+  }
+
+  function roleStatus(role: ModelRole, fallback: string): string {
+    const modelId = roleAssignment[role]
+    if (!modelId) return fallback
+    const model = modelPool.find((entry) => entry.id === modelId)
+    if (!model) return 'Unavailable · 对应模型已不存在。'
+    const decision = decideModelRoleAssignment(
+      runtimeModelFromPoolEntry(model),
+      role,
+      capabilityRecords,
+    )
+    return `${decision.capability.status} · ${decision.capability.message}`
+  }
+
+  function assign(role: ModelRole, modelId: string | null) {
+    const result = setRoleModel(role, modelId)
+    setAssignmentError(result.ok ? '' : result.error)
+  }
 
   const roleRowStyle: React.CSSProperties = {
     display: 'flex',
@@ -692,6 +753,9 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
     fontSize: 12,
     color: COLORS.dimmer,
     marginLeft: 'auto',
+    maxWidth: 360,
+    textAlign: 'right',
+    lineHeight: 1.4,
   }
 
   const subStyle: React.CSSProperties = {
@@ -712,16 +776,16 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
           aria-label="ASR 语音识别"
           style={s.select}
           value={roleAssignment.asr ?? ''}
-          onChange={(e) => setRoleModel('asr', e.target.value || null)}
+          onChange={(e) => assign('asr', e.target.value || null)}
         >
           <option value="">用视频字幕（无需模型）</option>
           {asrModels.map((m) => (
-            <option key={m.id} value={m.id}>
+            <option key={m.id} value={m.id} disabled={!canAssign(m.id, 'asr')}>
               {m.alias}
             </option>
           ))}
         </select>
-        <div style={roleDescStyle}>三档：字幕 / API / 本地</div>
+        <div style={roleDescStyle}>{roleStatus('asr', '三档：字幕 / API / 本地')}</div>
       </div>
 
       {/* 结构化 LLM */}
@@ -734,16 +798,16 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
           aria-label="结构化 LLM"
           style={s.select}
           value={roleAssignment.structuring ?? ''}
-          onChange={(e) => setRoleModel('structuring', e.target.value || null)}
+          onChange={(e) => assign('structuring', e.target.value || null)}
         >
           <option value="">未选择</option>
           {structuringModels.map((m) => (
-            <option key={m.id} value={m.id}>
+            <option key={m.id} value={m.id} disabled={!canAssign(m.id, 'structuring')}>
               {m.alias}
             </option>
           ))}
         </select>
-        <div style={roleDescStyle}>纯文本，需大输出</div>
+        <div style={roleDescStyle}>{roleStatus('structuring', '纯文本，需大输出')}</div>
       </div>
 
       {/* 助手 assistant */}
@@ -756,17 +820,22 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
           aria-label="助手 assistant"
           style={s.select}
           value={roleAssignment.assistant ?? ''}
-          onChange={(e) => setRoleModel('assistant', e.target.value || null)}
+          onChange={(e) => assign('assistant', e.target.value || null)}
         >
           <option value="">未选择</option>
           {assistantModels.map((m) => (
-            <option key={m.id} value={m.id}>
+            <option key={m.id} value={m.id} disabled={!canAssign(m.id, 'assistant')}>
               {m.alias}
             </option>
           ))}
         </select>
-        <div style={roleDescStyle}>文本问答；画面能力单独校验</div>
+        <div style={roleDescStyle}>{roleStatus('assistant', '文本问答；画面能力单独校验')}</div>
       </div>
+      {assignmentError && (
+        <div role="alert" style={{ color: COLORS.fail, fontSize: 12, paddingTop: 8 }}>
+          {assignmentError}
+        </div>
+      )}
     </div>
   )
 }
@@ -849,6 +918,17 @@ export function SettingsPage() {
     const model = modelPool.find((entry) => entry.id === modelId)
     if (!model) return { ok: false, message: '未找到已保存的 Qwen 配置。' }
     return testSavedQwenConnection(model)
+  }
+
+  const handleStructuringCheck = async (modelId: string): Promise<ConnectionTestResult> => {
+    const model = modelPool.find((entry) => entry.id === modelId)
+    if (!model) return { ok: false, message: '未找到已保存的模型配置。' }
+    const record = await checkStructuringModelCapability(runtimeModelFromPoolEntry(model))
+    await setCapabilityRecords([record])
+    return {
+      ok: record.status === 'Compatible' || record.status === 'Verified',
+      message: record.message,
+    }
   }
 
   return (
@@ -957,7 +1037,11 @@ export function SettingsPage() {
                     ＋ 添加模型
                   </button>
                 </div>
-                <ModelPoolList models={models} onTestConnection={handleTestConnection} />
+                <ModelPoolList
+                  models={models}
+                  onTestConnection={handleTestConnection}
+                  onCheckStructuring={handleStructuringCheck}
+                />
               </section>
             </>
           )}

@@ -31,7 +31,7 @@
 | AC-LV-09 | `validate-evidence.ps1`、数据库摘要、学习页截图 | Evidence | 这是“真实可用”声明的主要裁判；普通单元测试不能替代 |
 | AC-LV-10 | `video-list-page-recovery.test.tsx`、`video-list-import.test.tsx` | Strong | 覆盖事件驱动 UI 和持久化终态；真实事件链由 E2E 补充 |
 | AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、截图和秘密 |
-| AC-LV-12 | `model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts`、`settings-preflight.test.tsx`、`qwen-health.test.ts` | Partial | 已覆盖配置 + 角色能力记录、三种状态、证据门槛、秘密不落入记录、持久化、合并、重启展示和配置变化失效；普通连接/文件预检不会冒充完整角色检查。预检仍绑定固定 Qwen，缺少通用角色检查，角色选择与运行入口尚未统一拦截 `Unavailable` |
+| AC-LV-12 | `model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts`、`settings-preflight.test.tsx`、`settings-role-assignment.test.tsx`、`structuring-capability.test.ts`、`settings-structuring-workflow.test.tsx`、`qwen-health.test.ts` | Partial | 已覆盖能力记录、三种状态、证据门槛、秘密隔离、持久化和失效；普通预检不会冒充完整角色检查；新角色分配由领域函数和 Store 拒绝 `Unavailable`。任意 LLM 可通过模型池运行使用生产 prompt、分块器、归一化和校验器的最小 Stage2 契约检查，成功后解锁结构化角色。现有旧分配暂不清空，Pipeline 入口尚未强制；ASR/助手仍缺少完整角色检查，预检的旧连通性部分仍绑定固定 Qwen |
 
 ## 3. 架构 Harness 审计
 

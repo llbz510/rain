@@ -36,7 +36,8 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
-| Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并和配置变化失效 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
+| Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
+| Structuring Capability Probe | 对任意 LLM 发送最小 Stage2 请求，并用生产契约判断能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
 | LLM Adapter | OpenAI-compatible 请求、流式和错误处理 | 产品状态机、SQLite | `src/llm/` |
 | Tauri Adapter | command/event 名称和前端调用封装 | 产品规则 | `src/lib/tauri-env.ts`、`src/architecture/` |
 | Rust Commands | 把前端请求翻译为 Rust 模块调用 | 承载全部媒体/Whisper 实现 | `src-tauri/src/commands.rs` |
@@ -98,13 +99,17 @@ cancelImport(videoId)
 
 模型能力记录是 SQLite 中的设置事实，Zustand 只缓存当前加载副本。记录不保存 API Key 明文；读取时必须按当前配置重新评估指纹，不能直接相信旧状态字符串。
 
+新的角色分配必须经过 `decideModelRoleAssignment`，UI 禁用只是提示层，Store 是当前不可绕过的写入门禁。迁移期间已有旧分配会保留，直到各角色存在可执行的完整能力检查后再启用运行入口门禁。
+
+结构化探针必须复用生产 `STAGE2_BLOCK_SYSTEM_PROMPT`、`buildStage2Blocks`、输出归一化和 `validateStage2BlockOutput`。不得另建一份更宽松的测试 schema，否则探针通过不能证明生产 Stage2 可用。
+
 ## 5. 当前热点和控制策略
 
 | 热点 | 当前规模 | 混合的职责 | 控制策略 |
 | --- | ---: | --- | --- |
-| `src/ui/components/settings.tsx` | 约 1039 行 | 页面、表单、预检、模型池、持久化 | 禁止继续加入新设置区；按现有接口逐块提取 |
+| `src/ui/components/settings.tsx` | 约 1185 行 | 页面、表单、预检、模型池、角色门禁、持久化 | 已达到立即治理阈值；停止加入新设置行为，保留公开导出并按职责提取组件 |
 | `src/models/database.ts` | 约 1034 行 | 接口、两种实现、schema、映射、CRUD、事务 | 先补调用级测试，再按数据库接口拆实现 |
-| `src-tauri/src/commands.rs` | 约 827 行 | command、参数处理、部分系统行为 | 保持 command 薄，行为下沉到 Rust 模块 |
+| `src-tauri/src/commands.rs` | 约 796 行 | command、参数处理、部分系统行为 | 保持 command 薄，行为下沉到 Rust 模块 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
 
 文件行数不是拆分理由；职责因为不同原因变化、需要不同测试，才是拆分理由。
@@ -134,7 +139,7 @@ cancelImport(videoId)
 剩余工作：
 
 - 在线 URL 导入尚未经过真实验收，相关逻辑暂时仍在页面中。
-- 模型能力记录、持久化和配置变化失效已实现；统一的非 Qwen 角色检查和 `Unavailable` 分配拦截仍待后续受控切片完成。
+- 模型能力记录、持久化、配置变化失效、新角色分配拦截和通用 LLM 结构化检查已实现；ASR/助手角色检查和 Pipeline 运行入口门禁仍待后续受控切片完成。
 - 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
 
 ## 8. Harness Migration 结果

@@ -17,6 +17,11 @@ export interface ModelCapabilityAssessment extends ModelCapabilityRecord {
   stale: boolean
 }
 
+export interface ModelRoleAssignmentDecision {
+  allowed: boolean
+  capability: ModelCapabilityAssessment
+}
+
 export interface RecordCapabilityCheckInput {
   model: RuntimeModel
   role: ModelRole
@@ -158,5 +163,17 @@ export function assessModelCapability(
     ...record,
     modelAlias: model.alias,
     stale: false,
+  }
+}
+
+export function decideModelRoleAssignment(
+  model: RuntimeModel,
+  role: ModelRole,
+  records: ModelCapabilityRecord[],
+): ModelRoleAssignmentDecision {
+  const capability = assessModelCapability(model, role, records)
+  return {
+    allowed: capability.status === 'Compatible' || capability.status === 'Verified',
+    capability,
   }
 }

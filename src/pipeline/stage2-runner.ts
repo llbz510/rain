@@ -18,7 +18,7 @@ const RETRY_MAX_DELAY_MS = 5_000
 const QWEN_MODEL = 'qwen3.5-omni-flash'
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 
-const BLOCK_SYSTEM_PROMPT = `Return JSON structure metadata only. Do not return transcript body text.
+export const STAGE2_BLOCK_SYSTEM_PROMPT = `Return JSON structure metadata only. Do not return transcript body text.
 The exact object keys are blockId, nodes, coveredSentenceIds. Each node contains only id, parentId,
 kind, title, optional paragraph type, startSentenceId and endSentenceId. Preserve immutable sentence IDs.
 Every sentence must be covered exactly once. Node IDs must begin with the supplied blockId followed by :node:.`
@@ -323,7 +323,7 @@ export async function runStage2Stage(input: RunStage2StageInput): Promise<RunSta
       ? saved
       : await requestValidatedOutput(
         blockCaller,
-        BLOCK_SYSTEM_PROMPT,
+        STAGE2_BLOCK_SYSTEM_PROMPT,
         JSON.stringify({
           blockId: block.blockId,
           videoId: block.videoId,
