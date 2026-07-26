@@ -57,7 +57,7 @@ interface RainState {
   pushUndo: (action: UndoAction) => void
   popUndo: () => UndoAction | undefined
   switchLayoutMode: (mode: LayoutMode) => void
-  loadVideo: (videoId: string) => Promise<void>
+  loadVideo: (videoId: string) => Promise<LoadVideoResult>
   unloadVideo: () => void
   setPage: (page: 'list' | 'study' | 'settings') => void
   loadRuntimeSettings: () => Promise<void>
@@ -69,6 +69,10 @@ interface RainState {
 }
 
 export type RoleAssignmentResult =
+  | { ok: true }
+  | { ok: false; error: string }
+
+export type LoadVideoResult =
   | { ok: true }
   | { ok: false; error: string }
 
@@ -143,10 +147,14 @@ export const useRainStore = create<RainState>((set, get) => ({
       const nodes = await getNodesByVideoId(db, videoId)
       const notes = await getNotesByVideoId(db, videoId)
 
+      if (!video) throw new Error('视频记录不存在')
+      if (video.status !== 'ready') throw new Error('视频尚未处理完成')
       const paragraphIds = nodes.filter((n) => n.kind === 'paragraph').map((n) => n.id)
+      if (paragraphIds.length === 0) throw new Error('目录中没有可学习的段落')
       const sentencePromises = paragraphIds.map((pid) => getSentencesByNodeId(db, pid))
       const sentenceArrays = await Promise.all(sentencePromises)
       const sentences = sentenceArrays.flat()
+      if (sentences.length === 0) throw new Error('视频没有可学习的转录内容')
 
       set({
         currentVideoId: videoId,
@@ -159,8 +167,10 @@ export const useRainStore = create<RainState>((set, get) => ({
         currentVideoTitle: video?.title ?? '',
         currentVideoLanguage: video?.language || 'other',
       })
-    } catch {
-      set({ currentVideoId: videoId, currentPage: 'study' })
+      return { ok: true }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: `无法打开视频：${reason}` }
     }
   },
 

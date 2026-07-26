@@ -165,7 +165,8 @@ async function waitForVideoStatus(
 }
 
 async function loadVideoIntoStudyPage(videoId: string): Promise<void> {
-  await useRainStore.getState().loadVideo(videoId)
+  const loadResult = await useRainStore.getState().loadVideo(videoId)
+  if (!loadResult.ok) throw new Error(loadResult.error)
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     const state = useRainStore.getState()

@@ -245,6 +245,7 @@ export function VideoListPage() {
   const [importUrl, setImportUrl] = useState('')
   const [urlError, setUrlError] = useState('')
   const [localImportError, setLocalImportError] = useState('')
+  const [openError, setOpenError] = useState('')
   const [pipelineProgress, setPipelineProgress] = useState<Record<string, { stage: 'asr' | 'stage2' | 'merging'; percent: number }>>({})
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
@@ -284,8 +285,10 @@ export function VideoListPage() {
   }, [db, sortBy, keyword])
 
   // 点 ready 卡 → 进入学习界面（store 接管 currentVideoId 切页）
-  const handleOpen = (videoId: string) => {
-    void useRainStore.getState().loadVideo(videoId)
+  const handleOpen = async (videoId: string) => {
+    setOpenError('')
+    const result = await useRainStore.getState().loadVideo(videoId)
+    if (!result.ok) setOpenError(result.error)
   }
 
   // 点非 ready 卡 → 触发处理管线
@@ -508,6 +511,7 @@ export function VideoListPage() {
       </header>
 
       <main style={mainStyle}>
+        {openError && <div role="alert" style={errorStyle}>{openError}</div>}
         {isEmpty ? (
           <div style={emptyStyle}>{getEmptyStateMessage()}</div>
         ) : (

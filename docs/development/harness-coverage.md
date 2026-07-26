@@ -33,7 +33,22 @@
 | AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、生产学习页 DOM、截图和秘密；schema v2 不再把“任意 PNG”当作 UI 已就绪 |
 | AC-LV-12 | 上述能力/运行时测试、`validate-evidence.test.ts`、`validate-evidence.ps1`、真实 E2E Runner、`rain-real-e2e-20260726-195652` | Strong + Evidence（限定已验证组合） | 三角色探针、角色门禁、导入门禁和文本助手门禁均复用生产接口。schema v2 已真实验证 `ggml-large-v3.bin` CUDA ASR + DashScope `qwen3-omni-flash` 结构化与文本助手：三角色先通过 `Compatible`，再由完整视频、负向门禁、取消/重试、落库和生产学习页证据签发同配置 `Verified`。该结论只覆盖此配置指纹和文本助手，不推广到其他 OpenAI-compatible 模型或 vision；其他配置仍需各自探针和完整 E2E。旧 schema v1 证据继续按原固定运行时规则验证 |
 
-## 3. 架构 Harness 审计
+## 3. 学习页核心流程
+
+| AC | 当前裁判 | 等级 | 当前结论与缺口 |
+| --- | --- | --- | --- |
+| AC-ST-01 | `store-zustand-phase2.test.tsx`、`study-load.test.tsx`、schema v2 DOM/数据库证据 | Strong + Evidence | 成功路径从真实数据库一次加载同一视频的元数据、结构、句子和笔记；缺失视频、非 ready 状态和缺少段落/句子的假 ready 记录都会留在列表并显示错误，不再静默进入空学习页 |
+| AC-ST-02 | M07 组件 Harness、`study-playback.test.tsx` | Partial | 句子和可信引用分别能发出 seek 时间，`VideoZone` 也能接受 `resumePosition`；尚未从 `StudyInterface` 证明一次用户操作真的改变 Store 和真实 media 时间并保持播放状态 |
+| AC-ST-03 | M05/M07 组件 Harness、`study-playback.test.tsx` | Partial | 句子高亮、目录进度和 video `timeupdate` 分别有测试，但未贯通同一个 `playPosition`，也未覆盖随播滚动 |
+| AC-ST-04 | M05 组件 Harness | Partial | 单击选中与双击 `onSeek` 已分开；尚未证明最早叶子解析、文本滚动、目录上下文可见和播放状态保持，“触发回调”不能代表三区跳转完成 |
+| AC-ST-05 | M06 组件 Harness、数据库位置测试 | Partial | 数据库支持位置单调递增，VideoZone 能恢复位置；当前播放事件没有接入持久化和最近学习时间，缺少页面到数据库往返 |
+| AC-ST-06 | M08 数据库/组件 Harness | Partial | Note 插入和按视频读取是真实数据库行为；当前 Notes UI 编辑仅写 React 局部状态，摘注按钮只触发可选回调，引用也没有跳转行为 |
+| AC-ST-07 | `assistant-context.test.ts`、`study-playback.test.tsx`、能力测试、schema v2 证据 | Strong + Evidence（文本） | 文本上下文、门禁、停止、迟到 token、可信引用和真实文本探针已覆盖；vision 明确不在此 AC |
+| AC-ST-08 | M16 状态/组件 Harness | Strong | 布局可见性和切换已有生产状态机裁判；后续新增布局行为仍不得复制另一套状态 |
+
+第一轮审计结论：现有 M05-M10 Harness 并非全部无效，但多数只裁判单个组件或函数。它们可以保留为局部裁判，不能独自签发跨 Store、媒体元素、SQLite 和多个区域的学习工作流完成状态。
+
+## 4. 架构 Harness 审计
 
 | 规则 | 当前裁判 | 等级 | 问题 |
 | --- | --- | --- | --- |
@@ -48,7 +63,7 @@
 
 2026-07-26 经用户批准完成两轮 Harness Migration。旧的影子注册表、假导入队列、未接入树编辑、视觉令牌复制品、旧 ASR 标准化和恒真 Rust 测试已被真实接口行为测试替代或明确退役；详见 `harness-migration-2026-07-26.md`。
 
-## 4. 当前不设“已完成”门禁的能力
+## 5. 当前不设“已完成”门禁的能力
 
 | 能力 | 状态 | 处理规则 |
 | --- | --- | --- |
@@ -56,7 +71,7 @@
 | 在线 URL 完整导入 | Gap | 进入验收范围前，不得用空 `start_import` command 或字幕/API 标准化函数表示已实现 |
 | Vision 解释当前画面 | Gap | 必须有截图、图像请求和模型能力验证后才能加入完成门禁 |
 
-## 5. 变更时如何查表
+## 6. 变更时如何查表
 
 例如修改取消逻辑：
 

@@ -764,6 +764,33 @@ git diff --check
 
 Observed result: frontend passed 57 files / 377 tests with 1 live-key test skipped; production build passed with existing Vite chunking warnings; Rust passed 51 library tests and every executable Harness group, with the existing real Whisper transcription test ignored; both historical schema v1 and current schema v2 CUDA evidence passed. The evidence validator's secret scan reported no secret-like value.
 
+## What changed in the 2026-07-26 learning-page control baseline
+
+Started the second controlled workflow after the local-video pipeline:
+
+- Added `AC-ST-01` through `AC-ST-08` for atomic study loading, real seek, playback focus, directory navigation, progress persistence, notes, text assistant behavior and layout stability.
+- Audited the existing M05-M10 Harness by behavior rather than test-file presence. Most catalog/text/note checks are useful local judges but remain Partial for cross-Store, media and SQLite workflows.
+- Kept advanced tree editing and vision outside the accepted scope.
+- Identified the first concrete false green: `loadVideo` caught every database/content failure and still changed `currentPage` to `study`, so a damaged `ready` record produced an empty learning page.
+- Changed `loadVideo` to return `LoadVideoResult`, reject missing/non-ready videos and ready records without paragraphs or sentences, and update the study cache only after all reads pass.
+- Updated `VideoListPage` to remain on the list and show the returned error. The real E2E Runner now also fails immediately when production loading is rejected.
+- Added `src/__tests__/study-load.test.tsx`, which uses the real in-memory database and production video-list/Store path to cover missing, non-ready and incomplete-ready records.
+
+`AC-ST-01` is now `Strong + Evidence`. The next controlled slice is `AC-ST-02`: prove that a sentence or trusted citation action traverses `StudyInterface`, Store and the actual media element while preserving playback state.
+
+Verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/study-load.test.tsx harness/store-zustand-phase2.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest evidence/rain-real-e2e-20260726-195652/manifest.json -ExpectedWhisperBackend cuda
+git diff --check
+```
+
+Observed result: focused loading tests passed 2 files / 6 tests; TypeScript passed; the full frontend suite passed 58 files / 380 tests with 1 live-key test skipped; production build passed with the existing Vite chunking warnings; canonical schema v2 CUDA evidence still passed; `git diff --check` reported no whitespace errors.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

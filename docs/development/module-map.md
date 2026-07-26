@@ -37,6 +37,9 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
 | Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择 | 定义能力裁决、直接实现模型请求、承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
+| Study Session | 原子加载一个 ready 视频、统一播放位置、协调跳转、进度保存和学习页错误 | SQLite 细节、具体面板渲染、模型 HTTP 请求 | `src/store/rain-store.ts` 中现有加载动作；后续学习行为应收敛到小型流程接口 |
+| Study Navigation | 把句子、节点和可信引用解析为同一时间线跳转，保持播放状态并通知相关区域定位 | 保存笔记、调用 LLM、直接读写 SQL | 当前分散在 `StudyInterface.tsx`、目录/文本/视频组件；`AC-ST-02` 至 `AC-ST-04` 的受控迁移目标 |
+| Notes Workflow | 创建摘注/自由笔记、编辑持久化、解析引用跳转 | 维护 React 局部草稿作为最终事实、修改目录结构 | 当前尚未形成生产流程模块；数据库接口在 `src/models/database.ts`，UI 在 `src/ui/components/notes.tsx` |
 | Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
 | ASR Capability Probe | 定位内置短语音并复用生产 Whisper 转写模块，只有有效非空句子才能签发 `Compatible` | 写入业务 Video/Sentence、替代完整导入证据、支持尚未实现的 ASR API | `src/settings/asr-capability.ts`、`src/pipeline/asr-runner.ts` |
 | Structuring Capability Probe | 为模型池动作和运行前预检发送最小 Stage2 请求，并用生产契约判断任意 OpenAI-compatible LLM 能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
@@ -99,6 +102,12 @@ cancelImport(videoId)
 - Pipeline 决定导入状态如何前进。
 - 页面只展示持久化状态和瞬时进度，不自行发明终态。
 - Evidence 记录一次运行，不成为应用运行时状态。
+
+学习页必须先完整读取同一 Video ID 的 Video、Node、Sentence 和 Note，再一次性切换到 `study`。加载失败不得把部分缓存或空数组包装成成功页面。`playPosition` 是视频、句子高亮和目录当前位置的唯一会话事实；持久化的 `Video.position` 是跨会话最远进度，两者语义不同。
+
+当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
+
+学习导航需要一个可由页面、文本、目录、引用共同调用的深模块接口。调用方只表达“跳到句子/节点/时间”，模块隐藏最早叶子解析、Store 更新、media seek、播放状态保持和区域定位。不要继续在每个 UI 回调里复制一半跳转语义。
 
 模型能力记录是 SQLite 中的设置事实，Zustand 只缓存当前加载副本。记录不保存 API Key 明文；读取时必须按当前配置重新评估指纹，不能直接相信旧状态字符串。
 
