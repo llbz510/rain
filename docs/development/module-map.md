@@ -36,6 +36,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
+| Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并和配置变化失效 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
 | LLM Adapter | OpenAI-compatible 请求、流式和错误处理 | 产品状态机、SQLite | `src/llm/` |
 | Tauri Adapter | command/event 名称和前端调用封装 | 产品规则 | `src/lib/tauri-env.ts`、`src/architecture/` |
 | Rust Commands | 把前端请求翻译为 Rust 模块调用 | 承载全部媒体/Whisper 实现 | `src-tauri/src/commands.rs` |
@@ -95,6 +96,8 @@ cancelImport(videoId)
 - 页面只展示持久化状态和瞬时进度，不自行发明终态。
 - Evidence 记录一次运行，不成为应用运行时状态。
 
+模型能力记录是 SQLite 中的设置事实，Zustand 只缓存当前加载副本。记录不保存 API Key 明文；读取时必须按当前配置重新评估指纹，不能直接相信旧状态字符串。
+
 ## 5. 当前热点和控制策略
 
 | 热点 | 当前规模 | 混合的职责 | 控制策略 |
@@ -131,7 +134,7 @@ cancelImport(videoId)
 剩余工作：
 
 - 在线 URL 导入尚未经过真实验收，相关逻辑暂时仍在页面中。
-- 模型能力状态尚未按 DEC-001 实现。
+- 模型能力记录、持久化和配置变化失效已实现；统一的非 Qwen 角色检查和 `Unavailable` 分配拦截仍待后续受控切片完成。
 - 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
 
 ## 8. Harness Migration 结果

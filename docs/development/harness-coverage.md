@@ -31,7 +31,7 @@
 | AC-LV-09 | `validate-evidence.ps1`、数据库摘要、学习页截图 | Evidence | 这是“真实可用”声明的主要裁判；普通单元测试不能替代 |
 | AC-LV-10 | `video-list-page-recovery.test.tsx`、`video-list-import.test.tsx` | Strong | 覆盖事件驱动 UI 和持久化终态；真实事件链由 E2E 补充 |
 | AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、截图和秘密 |
-| AC-LV-12 | `model-pool.test.ts`、`preflight.test.ts`、`qwen-health.test.ts` | Partial | DEC-001 已确认采用多模型能力契约；现有预检仍绑定固定 Qwen 运行时，缺少统一角色能力状态和配置变化失效测试 |
+| AC-LV-12 | `model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts`、`settings-preflight.test.tsx`、`qwen-health.test.ts` | Partial | 已覆盖配置 + 角色能力记录、三种状态、证据门槛、秘密不落入记录、持久化、合并、重启展示和配置变化失效；普通连接/文件预检不会冒充完整角色检查。预检仍绑定固定 Qwen，缺少通用角色检查，角色选择与运行入口尚未统一拦截 `Unavailable` |
 
 ## 3. 架构 Harness 审计
 

@@ -394,6 +394,38 @@ Observed result:
 
 No new real-video E2E was run in this migration. The local-video production pipeline was not changed; current curated evidence remains the latest real-run proof.
 
+## What changed in the 2026-07-26 model capability contract session
+
+Selected the first controlled implementation slice for `AC-LV-12` and DEC-001:
+
+- Added `CONTEXT.md` as the active domain-language source for model configuration, role, capability check and the three exact status terms.
+- Added `src/settings/model-capabilities.ts` to own capability records, evidence requirements, record validation, merging and stale-result assessment.
+- A normal successful check records `Compatible`; only a successful check with an evidence ID may record `Verified`; failures record `Unavailable`.
+- Capability fingerprints change when the role, endpoint, model name, API Key or other material model configuration changes. Persisted stale results are displayed as `Unavailable`.
+- Capability records are stored separately under `model_capabilities`, contain no API Key plaintext, survive settings reload, and are loaded into Zustand.
+- Preflight results are persisted through the store and prior checks for unrelated model-role pairs are preserved.
+- The settings preflight panel displays persisted capability status before another check is run.
+- File-existence and simple connection preflight checks deliberately do not create `Compatible`; ASR transcription, Stage2 contract and assistant cancellation need their own real role checks.
+
+This does not complete `AC-LV-12`. The preflight implementation still has a fixed DashScope/Qwen check, and role selection/runtime entry points do not yet uniformly reject `Unavailable` assignments. The coverage matrix therefore remains `Partial`.
+
+Files changed in this `master` session:
+
+- Control plane: `AGENTS.md`, `CONTEXT.md`, `docs/development/control-map.md`, `docs/development/harness-coverage.md`, `docs/development/module-map.md`, this file.
+- Implementation: `src/settings/model-capabilities.ts`, `src/settings/model-pool.ts`, `src/settings/preflight.ts`, `src/store/rain-store.ts`, `src/ui/components/settings.tsx`.
+- Verification: `src/__tests__/model-capabilities.test.ts`, `src/__tests__/model-pool.test.ts`, `src/__tests__/preflight.test.ts`, `src/__tests__/settings-preflight.test.tsx`.
+
+Verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/model-capabilities.test.ts src/__tests__/model-pool.test.ts src/__tests__/preflight.test.ts src/__tests__/settings-preflight.test.tsx
+npx.cmd tsc --noEmit
+npm.cmd test
+npm.cmd run build
+```
+
+Observed result: targeted capability tests passed 4 files / 22 tests; TypeScript passed; full frontend suite passed 48 files / 336 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. Rust and real-video E2E were not rerun because this slice changed only frontend settings and control documents.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

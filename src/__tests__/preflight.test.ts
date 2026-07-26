@@ -50,6 +50,23 @@ describe('Rain preflight check', () => {
     })
 
     expect(report.ready).toBe(true)
+    expect(report.capabilities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'asr',
+        status: 'Unavailable',
+        message: expect.stringContaining('真实转写能力检查'),
+      }),
+      expect.objectContaining({
+        role: 'structuring',
+        status: 'Unavailable',
+        message: expect.stringContaining('Stage2 结构契约检查'),
+      }),
+      expect.objectContaining({
+        role: 'assistant',
+        status: 'Unavailable',
+        message: expect.stringContaining('停止或取消能力检查'),
+      }),
+    ]))
     expect(report.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'runtime', status: 'ok', message: expect.stringContaining('cuda') }),
       expect.objectContaining({ id: 'whisper', status: 'ok', message: expect.stringContaining('ggml-large-v3.bin') }),

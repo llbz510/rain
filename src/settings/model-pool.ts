@@ -2,6 +2,7 @@
 
 import { getDb } from '@/models/db-singleton'
 import { deleteSetting, getSetting, setSetting } from '@/models/database'
+import { parseCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
 
 export type ModelType = 'llm' | 'asr-api' | 'whisper-local' | 'subtitle'
 export type ModelRole = 'asr' | 'structuring' | 'assistant'
@@ -41,6 +42,7 @@ export interface RuntimeModel {
 export interface RuntimeSettings {
   models: RuntimeModel[]
   roles: Record<ModelRole, string | null>
+  capabilities?: ModelCapabilityRecord[]
 }
 
 const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
@@ -82,6 +84,7 @@ const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
     },
   ],
   roles: { asr: 'whisper-large-v3', structuring: 'qwen-main', assistant: 'qwen-main' },
+  capabilities: [],
 }
 
 const pool: Map<string, ModelPoolEntry> = new Map()
@@ -122,6 +125,7 @@ function cloneRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
   return {
     models: settings.models.map((model) => ({ ...model })),
     roles: { ...settings.roles },
+    capabilities: settings.capabilities?.map((record) => ({ ...record })),
   }
 }
 
@@ -184,6 +188,7 @@ export async function saveRuntimeSettings(settings: RuntimeSettings): Promise<vo
   await Promise.all((Object.keys(settings.roles) as ModelRole[]).map((role) =>
     setSetting(db, `role_${role}`, settings.roles[role] ?? '')
   ))
+  await setSetting(db, 'model_capabilities', JSON.stringify(settings.capabilities ?? []))
 }
 interface ParsedStoredModel {
   model: RuntimeModel
@@ -290,7 +295,8 @@ export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
     const savedRole = await getSetting(db, `role_${role}`)
     roles[role] = savedRole === null ? DEFAULT_RUNTIME_SETTINGS.roles[role] : savedRole || null
   }
-  return { models: models.map(({ model }) => model), roles }
+  const capabilities = parseCapabilityRecords(await getSetting(db, 'model_capabilities'))
+  return { models: models.map(({ model }) => model), roles, capabilities }
 }
 export function applyRuntimeSettings(settings: RuntimeSettings): ModelPoolEntry[] {
   replaceModelPool(settings.models.map(toPoolEntry))
@@ -299,8 +305,13 @@ export function applyRuntimeSettings(settings: RuntimeSettings): ModelPoolEntry[
 
 export function runtimeSettingsFromPool(
   roles: RuntimeSettings['roles'],
+  capabilities: ModelCapabilityRecord[] = [],
 ): RuntimeSettings {
-  return { models: listModels().map(toRuntimeModel), roles: { ...roles } }
+  return {
+    models: listModels().map(toRuntimeModel),
+    roles: { ...roles },
+    capabilities: capabilities.map((record) => ({ ...record })),
+  }
 }
 
 export function getDefaultRuntimeSettings(): RuntimeSettings {

@@ -7,6 +7,7 @@ import {
   loadRuntimeSettings,
   saveRuntimeSettings,
 } from '@/settings/model-pool'
+import { recordCapabilityCheck } from '@/settings/model-capabilities'
 
 afterEach(() => {
   resetDb()
@@ -33,6 +34,32 @@ describe('runtime model settings', () => {
     const db = await getDb()
     expect(await getSetting(db, 'api_key.qwen-main')).toBe('dummy-model-key')
     expect(await getSetting(db, 'model_pool')).not.toContain('dummy-model-key')
+  })
+
+  it('persists capability records without storing API keys in them', async () => {
+    const capability = recordCapabilityCheck({
+      model: qwenModel,
+      role: 'structuring',
+      ok: true,
+      message: '结构化检查通过',
+      checkedAt: 100,
+    })
+
+    await saveRuntimeSettings({ models: [qwenModel], roles, capabilities: [capability] })
+
+    const db = await getDb()
+    const stored = await getSetting(db, 'model_capabilities')
+    expect(stored).not.toContain('dummy-model-key')
+    expect((await loadRuntimeSettings()).capabilities).toEqual([capability])
+  })
+
+  it('ignores malformed persisted capability records', async () => {
+    const db = await getDb()
+    await setSetting(db, 'model_capabilities', JSON.stringify([
+      { modelId: 'qwen-main', role: 'structuring', status: 'probably' },
+    ]))
+
+    expect((await loadRuntimeSettings()).capabilities).toEqual([])
   })
 
   it('migrates a legacy model record without retaining secret copies', async () => {

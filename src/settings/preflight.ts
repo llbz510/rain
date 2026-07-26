@@ -2,6 +2,11 @@ import type { LlmSettings } from '@/llm/types'
 import { testQwenConnection, type QwenConnectionResult } from '@/llm/qwen-health'
 import { tauriInvoke, isTauri as detectTauri } from '@/lib/tauri-env'
 import type { RuntimeModel, RuntimeSettings } from '@/settings/model-pool'
+import {
+  assessModelCapability,
+  recordCapabilityCheck,
+  type ModelCapabilityRecord,
+} from '@/settings/model-capabilities'
 
 export type PreflightStatus = 'ok' | 'warning' | 'error' | 'skipped'
 export type PreflightCheckId = 'runtime' | 'roles' | 'whisper' | 'qwen' | 'assistant' | 'database' | 'ytdlp'
@@ -16,6 +21,7 @@ export interface PreflightCheck {
 export interface PreflightReport {
   ready: boolean
   checks: PreflightCheck[]
+  capabilities: ModelCapabilityRecord[]
 }
 
 export type PreflightInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>
@@ -77,12 +83,34 @@ function hasBlockingError(checks: PreflightCheck[]): boolean {
   return checks.some((check) => check.status === 'error')
 }
 
+function preflightCapabilityRecord(
+  model: RuntimeModel,
+  role: 'asr' | 'structuring' | 'assistant',
+  preflightPassed: boolean,
+  preflightMessage: string,
+  fullCheckRequiredMessage: string,
+  existing: ModelCapabilityRecord[],
+): ModelCapabilityRecord {
+  const prior = assessModelCapability(model, role, existing)
+  if (preflightPassed && prior.checkedAt > 0 && !prior.stale) {
+    const { stale: _stale, ...record } = prior
+    return record
+  }
+  return recordCapabilityCheck({
+    model,
+    role,
+    ok: false,
+    message: preflightPassed ? fullCheckRequiredMessage : preflightMessage,
+  })
+}
+
 export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<PreflightReport> {
   const isTauri = input.isTauri ?? detectTauri
   const invoke = input.invoke ?? tauriInvoke
   const checkDatabaseWrite = input.checkDatabaseWrite ?? defaultDatabaseWriteCheck
   const checkQwen = input.testQwen ?? testQwenConnection
   const checks: PreflightCheck[] = []
+  const existingCapabilities = input.runtimeSettings.capabilities ?? []
 
   const desktopAvailable = isTauri()
   if (!desktopAvailable) {
@@ -296,8 +324,47 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
     }
   }
 
+  const whisperCheck = checks.find((check) => check.id === 'whisper')
+  const qwenCheck = checks.find((check) => check.id === 'qwen')
+  const assistantCheck = checks.find((check) => check.id === 'assistant')
+  const capabilities: ModelCapabilityRecord[] = []
+
+  if (asrModel && whisperCheck) {
+    capabilities.push(preflightCapabilityRecord(
+      asrModel,
+      'asr',
+      whisperCheck.status === 'ok',
+      whisperCheck.message,
+      'Whisper 模型文件预检通过；尚未执行真实转写能力检查。',
+      existingCapabilities,
+    ))
+  }
+  if (structuringModel && qwenCheck) {
+    capabilities.push(preflightCapabilityRecord(
+      structuringModel,
+      'structuring',
+      qwenCheck.status === 'ok',
+      qwenCheck.message,
+      'Qwen 连接预检通过；尚未执行 Stage2 结构契约检查。',
+      existingCapabilities,
+    ))
+  }
+  if (assistantModel && assistantCheck) {
+    const sharesCheckedConfiguration = assistantModel.id === structuringModel?.id
+    const assistantPreflightPassed = sharesCheckedConfiguration && qwenCheck?.status === 'ok'
+    capabilities.push(preflightCapabilityRecord(
+      assistantModel,
+      'assistant',
+      assistantPreflightPassed,
+      sharesCheckedConfiguration ? (qwenCheck?.message ?? assistantCheck.message) : '助手模型尚未执行独立的文本能力检查。',
+      '文本连接预检通过；尚未执行助手停止或取消能力检查。',
+      existingCapabilities,
+    ))
+  }
+
   return {
     ready: !hasBlockingError(checks),
     checks,
+    capabilities,
   }
 }

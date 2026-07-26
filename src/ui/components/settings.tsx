@@ -13,6 +13,11 @@ import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
 import { testQwenConnection, type QwenConnectionResult } from '@/llm/qwen-health'
 import type { LlmSettings } from '@/llm/types'
 import { runPreflightCheck, type PreflightReport, type PreflightStatus, type RunPreflightCheckInput } from '@/settings/preflight'
+import {
+  assessModelCapability,
+  type ModelCapabilityRecord,
+  type ModelCapabilityStatus,
+} from '@/settings/model-capabilities'
 
 // ── 共享类型 ──────────────────────────────────────
 
@@ -171,6 +176,7 @@ type PreflightRunner = (input: RunPreflightCheckInput) => Promise<PreflightRepor
 interface PreflightPanelProps {
   runtimeSettings: RuntimeSettings
   runCheck?: PreflightRunner
+  onCapabilityRecords?: (records: ModelCapabilityRecord[]) => void | Promise<void>
 }
 
 const STATUS_LABELS: Record<PreflightStatus, string> = {
@@ -187,16 +193,44 @@ const STATUS_COLORS: Record<PreflightStatus, string> = {
   skipped: COLORS.dimmer,
 }
 
-export function PreflightPanel({ runtimeSettings, runCheck = runPreflightCheck }: PreflightPanelProps) {
+const CAPABILITY_COLORS: Record<ModelCapabilityStatus, string> = {
+  Compatible: COLORS.example,
+  Verified: COLORS.concept,
+  Unavailable: COLORS.fail,
+}
+
+const ROLE_LABELS = {
+  asr: 'ASR',
+  structuring: '结构化',
+  assistant: '助手',
+} as const
+
+export function PreflightPanel({
+  runtimeSettings,
+  runCheck = runPreflightCheck,
+  onCapabilityRecords,
+}: PreflightPanelProps) {
   const [report, setReport] = useState<PreflightReport | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
+  const visibleCapabilities = report?.capabilities ?? (runtimeSettings.capabilities ?? []).map((record) => {
+    const model = runtimeSettings.models.find((candidate) => candidate.id === record.modelId)
+    if (!model) {
+      return {
+        ...record,
+        status: 'Unavailable' as const,
+        message: '对应模型已不存在。',
+      }
+    }
+    return assessModelCapability(model, record.role, runtimeSettings.capabilities ?? [])
+  })
 
   async function handleRun() {
     setRunning(true)
     setError('')
     try {
       const nextReport = await runCheck({ runtimeSettings })
+      await onCapabilityRecords?.(nextReport.capabilities)
       setReport(nextReport)
     } catch (err) {
       setReport(null)
@@ -261,6 +295,28 @@ export function PreflightPanel({ runtimeSettings, runCheck = runPreflightCheck }
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {visibleCapabilities.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: report ? 0 : 8 }}>
+          {visibleCapabilities.map((capability) => (
+            <div
+              key={`${capability.modelId}:${capability.role}`}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '120px 90px 1fr',
+                gap: 8,
+                fontSize: 12,
+                padding: '6px 8px',
+                borderRadius: 6,
+                background: COLORS.panel2,
+              }}
+            >
+              <div>{ROLE_LABELS[capability.role]} · {capability.modelAlias}</div>
+              <div style={{ color: CAPABILITY_COLORS[capability.status] }}>{capability.status}</div>
+              <div style={{ color: COLORS.muted }}>{capability.message}</div>
+            </div>
+          ))}
         </div>
       )}
     </section>
@@ -724,6 +780,8 @@ const NAV_ITEMS = ['模型管理', '外观', '高级', '关于'] as const
 export function SettingsPage() {
   const modelPool = useRainStore((s) => s.modelPool)
   const roleAssignment = useRainStore((s) => s.roleAssignment)
+  const capabilityRecords = useRainStore((s) => s.capabilityRecords)
+  const setCapabilityRecords = useRainStore((s) => s.setCapabilityRecords)
   const setPage = useRainStore((s) => s.setPage)
   const [modalOpen, setModalOpen] = useState(false)
   const [activeNav, setActiveNav] = useState<string>('模型管理')
@@ -784,6 +842,7 @@ export function SettingsPage() {
       supportsVision: m.supportsVision,
     })),
     roles: { ...roleAssignment },
+    capabilities: capabilityRecords,
   }
 
   const handleTestConnection = async (modelId: string): Promise<ConnectionTestResult> => {
@@ -858,7 +917,10 @@ export function SettingsPage() {
         <main style={{ overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
           {activeNav === '模型管理' && (
             <>
-              <PreflightPanel runtimeSettings={runtimeSettings} />
+              <PreflightPanel
+                runtimeSettings={runtimeSettings}
+                onCapabilityRecords={setCapabilityRecords}
+              />
 
               {/* 角色选择卡片 */}
               <section

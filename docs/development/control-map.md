@@ -11,6 +11,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 问题 | 当前事实源 | 说明 |
 | --- | --- | --- |
 | 进入项目后必须遵守什么 | `AGENTS.md` | 环境、命令、Harness 限制和会话规则 |
+| 项目中的核心词语是什么意思 | `CONTEXT.md` | 统一领域语言；不能单独证明实现已完成 |
 | 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 当前状态、最近验证和已知风险 |
 | 用户希望产品做什么 | 根目录 `PRD.md` 和对应 `M*.md` | 已确认产品意图；不自动代表代码已经实现 |
 | 本地视频主链路当前按什么设计 | `docs/superpowers/specs/2026-07-17-rain-real-local-video-repair-design.md` | 已实施修复的设计依据；与更晚的事实冲突时需要重新确认 |
@@ -54,10 +55,11 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 
 1. `AGENTS.md`
 2. `docs/development/control-map.md`
-3. `docs/PROJECT_STATE.md`
-4. 与任务有关的 AC、覆盖矩阵和模块地图
-5. 与任务有关的 PRD/spec
-6. 相关代码、测试和最近真实证据
+3. `CONTEXT.md`
+4. `docs/PROJECT_STATE.md`
+5. 与任务有关的 AC、覆盖矩阵和模块地图
+6. 与任务有关的 PRD/spec
+7. 相关代码、测试和最近真实证据
 
 不需要每次通读 99 条历史决策。先通过控制地图找到本次任务真正相关的资料。
 

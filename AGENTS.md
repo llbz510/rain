@@ -7,9 +7,10 @@
 任何新 AI / 开发者进入本项目后，必须按以下顺序阅读：
 
 1. `docs/development/control-map.md`：不同问题应相信哪份事实源；
-2. `docs/PROJECT_STATE.md`：当前可验证状态和已知风险；
-3. 与任务有关的 `acceptance-standard.md`、`harness-coverage.md` 和 `module-map.md`；
-4. 与任务有关的 PRD/spec、代码、测试和证据。
+2. `CONTEXT.md`：项目统一领域语言；
+3. `docs/PROJECT_STATE.md`：当前可验证状态和已知风险；
+4. 与任务有关的 `acceptance-standard.md`、`harness-coverage.md` 和 `module-map.md`；
+5. 与任务有关的 PRD/spec、代码、测试和证据。
 
 不要直接根据 PRD、旧计划、旧截图或旧 evidence 判断当前实现已经完成。
 

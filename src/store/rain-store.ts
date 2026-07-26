@@ -6,6 +6,7 @@
 import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
 import { addModelToPool, applyRuntimeSettings, createRuntimeSettingsInitializer, listModels, loadRuntimeSettings as loadPersistedRuntimeSettings, removeModelFromPool, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
+import { mergeCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
 
 export type LayoutMode = 'follow' | 'textExpand' | 'mapExpand'
 export type SelectionOrigin = 'tree' | 'diagram'
@@ -38,6 +39,7 @@ interface RainState {
   currentPage: 'list' | 'study' | 'settings'
   modelPool: ModelPoolEntry[]
   roleAssignment: { asr: string | null; structuring: string | null; assistant: string | null }
+  capabilityRecords: ModelCapabilityRecord[]
   settingsReady: boolean
   settingsError: string | null
 
@@ -63,6 +65,7 @@ interface RainState {
   addModel: (input: AddModelInput) => void
   removeModel: (id: string) => void
   setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => void
+  setCapabilityRecords: (records: ModelCapabilityRecord[]) => Promise<void>
 }
 
 const initialState = {
@@ -82,6 +85,7 @@ const initialState = {
   currentPage: 'list' as const,
   modelPool: [] as ModelPoolEntry[],
   roleAssignment: { asr: null, structuring: null, assistant: null } as { asr: string | null; structuring: string | null; assistant: string | null },
+  capabilityRecords: [] as ModelCapabilityRecord[],
   settingsReady: false,
   settingsError: null as string | null,
   nodeTree: [] as Node[],
@@ -177,7 +181,13 @@ export const useRainStore = create<RainState>((set, get) => ({
   loadRuntimeSettings: async () => {
     const result = await runtimeSettingsInitializer.initialize()
     if (result.ok) {
-      set({ modelPool: applyRuntimeSettings(result.settings), roleAssignment: result.settings.roles, settingsReady: true, settingsError: null })
+      set({
+        modelPool: applyRuntimeSettings(result.settings),
+        roleAssignment: result.settings.roles,
+        capabilityRecords: result.settings.capabilities ?? [],
+        settingsReady: true,
+        settingsError: null,
+      })
     } else {
       set({ settingsReady: false, settingsError: result.error })
     }
@@ -186,7 +196,13 @@ export const useRainStore = create<RainState>((set, get) => ({
   retryRuntimeSettings: async () => {
     const result = await runtimeSettingsInitializer.retry()
     if (result.ok) {
-      set({ modelPool: applyRuntimeSettings(result.settings), roleAssignment: result.settings.roles, settingsReady: true, settingsError: null })
+      set({
+        modelPool: applyRuntimeSettings(result.settings),
+        roleAssignment: result.settings.roles,
+        capabilityRecords: result.settings.capabilities ?? [],
+        settingsReady: true,
+        settingsError: null,
+      })
     } else {
       set({ settingsReady: false, settingsError: result.error })
     }
@@ -196,20 +212,27 @@ export const useRainStore = create<RainState>((set, get) => ({
     addModelToPool(input)
     const modelPool = listModels()
     set({ modelPool })
-    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment)).catch(() => {})
+    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, get().capabilityRecords)).catch(() => {})
   },
 
   removeModel: (id) => {
     removeModelFromPool(id)
     const modelPool = listModels()
-    set({ modelPool })
-    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment)).catch(() => {})
+    const capabilityRecords = get().capabilityRecords.filter((record) => record.modelId !== id)
+    set({ modelPool, capabilityRecords })
+    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, capabilityRecords)).catch(() => {})
   },
 
   setRoleModel: (role, modelId) => {
     const roleAssignment = { ...get().roleAssignment, [role]: modelId }
     set({ roleAssignment })
-    void saveRuntimeSettings(runtimeSettingsFromPool(roleAssignment)).catch(() => {})
+    void saveRuntimeSettings(runtimeSettingsFromPool(roleAssignment, get().capabilityRecords)).catch(() => {})
+  },
+
+  setCapabilityRecords: async (records) => {
+    const capabilityRecords = mergeCapabilityRecords(get().capabilityRecords, records)
+    await saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, capabilityRecords))
+    set({ capabilityRecords })
   },
 }))
 

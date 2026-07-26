@@ -191,9 +191,9 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 - 运行中的导入使用启动时的配置快照；
 - UI 必须区分 `Compatible`、`Verified` 和 `Unavailable`。
 
-实现归属：模型池、角色选择、预检、Qwen 健康检查、ASR 运行时检查。
+实现归属：模型能力契约、模型池、角色选择、预检、LLM 角色检查、ASR 运行时检查。
 
-裁判：需要新增角色能力契约测试。完整真实 E2E 负责把一个兼容组合提升为 `Verified`，普通健康检查不得伪造该状态。
+裁判：`model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts` 和对应角色的真实行为测试。完整真实 E2E 负责把一个兼容组合提升为 `Verified`；普通连接或文件存在检查不得产生 `Compatible` 或伪造 `Verified`。
 
 ## 3. 当前明确不在已验收范围
 
