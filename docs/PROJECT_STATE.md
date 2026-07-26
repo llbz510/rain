@@ -2,9 +2,9 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-26 +08:00
+Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the AC-ST-06 slice: `1018e6f feat: persist study progress`
+Current working base before the learning-page audit slice: `606a4c0 feat: persist study notes`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -123,6 +123,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate, learning-page assistant gate, and schema v2 Evidence Harness are implemented. `AC-LV-12` has Strong + Evidence for the exact `ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash` structuring/text-assistant configuration. Other model fingerprints remain merely `Compatible` or `Unavailable` until they receive their own complete evidence.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. `src/__tests__/live-qwen.test.ts` is intentionally skipped without a live Key, but it and the legacy default Qwen health path still hard-code `qwen3.5-omni-flash`, while the current schema v2 verified configuration is `qwen3-omni-flash`. The skipped smoke test is therefore not a valid judge for the current verified fingerprint until it reads the selected runtime configuration.
+16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
 
 ## What changed in the 2026-07-26 project-control baseline session
 
@@ -938,6 +939,37 @@ git diff --check
 ```
 
 Observed result: the full frontend suite passed 61 files / 390 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. No Rust test or real-video E2E was run because this slice changed the TypeScript Notes Workflow, database interface and learning UI without changing Rust or external-runtime evidence contracts.
+
+## What changed in the 2026-07-27 learning-page control audit
+
+Audited `AC-ST-01` through `AC-ST-08` as one connected production workflow instead of trusting the Strong labels in the coverage table:
+
+- `AC-ST-01` through `AC-ST-07` have production-path judges crossing the Store, media, database or assistant seams required by their behavior.
+- `AC-ST-08` had a false-green risk: M16 checked a placeholder `LayoutSwitch`, while the production `StudyInterface` conditionally unmounted `VideoZone` in text/map layouts.
+- A red production test proved that layout switching removed the real media element and reset `isPlaying`, leaving `VideoControls` without an active media target.
+- `StudyInterface` now keeps one `VideoZone` mounted for the learning-page lifetime and controls only its visibility. The same media instance, current video, play position, selection, notes, assistant conversation and playing state survive all three layouts.
+- Added `study-layout.test.tsx` as the production judge for `AC-ST-08`; M16 remains useful only for local mode/visibility rules.
+- Recorded `StudyInterface.tsx` as a controlled hotspot. It is about 449 lines and coordinates several modules; future assistant-session behavior should first design a small interface and extract the streaming lifecycle rather than rewriting the page without a behavioral target.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/study-load.test.tsx src/__tests__/study-navigation.test.tsx src/__tests__/study-playback.test.tsx src/__tests__/study-progress.test.tsx src/__tests__/study-notes.test.tsx src/__tests__/study-layout.test.tsx src/__tests__/assistant-context.test.ts harness/m05-catalog-component.test.tsx harness/m06-video-component.test.tsx harness/m07-text-component.test.tsx harness/m08-notes-component.test.tsx harness/m10-ai-component.test.tsx harness/m15-queries.test.ts harness/m16-layout.test.ts harness/m16-layout-component.test.tsx
+npx.cmd tsc --noEmit
+```
+
+Observed result: 15 learning-page files / 84 tests passed and TypeScript passed.
+
+Final verification:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: the full frontend suite passed 62 files / 391 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. Rust and the multi-hour real-video E2E were not rerun because this slice changes only React media lifetime, its production test and control documents.
 
 ## Maintenance checklist for every future session
 

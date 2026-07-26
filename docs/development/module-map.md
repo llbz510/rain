@@ -40,6 +40,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Study Session | 原子加载一个 ready 视频、统一播放位置、协调跳转、进度保存和学习页错误 | SQLite 细节、具体面板渲染、模型 HTTP 请求 | `src/store/rain-store.ts` 负责原子加载和成功打开时间；`src/study/session.ts` 负责把媒体进度持久化为单调递增的跨会话事实 |
 | Study Navigation | 把句子、节点和可信引用解析为同一时间线跳转，保持播放状态并通知相关区域定位 | 保存笔记、调用 LLM、直接读写 SQL | `src/study/navigation.ts` 负责节点到最早叶子句子的解析；`StudyInterface` 协调 Store/media，文本区负责滚动和真实预览 |
 | Notes Workflow | 创建摘注/自由笔记、编辑持久化、解析引用跳转 | 维护 React 局部草稿作为最终事实、修改目录结构 | `src/study/notes.ts` 负责数据库成功后同步 Store；`src/ui/components/notes.tsx` 只收集操作；引用复用 `src/study/navigation.ts` |
+| Study Page Composition | 组合布局、媒体、目录、文本、笔记和助手模块；保持跨布局会话事实 | 重新实现各工作流规则、用条件卸载破坏媒体会话、直接读写 SQL | `src/pages/StudyInterface.tsx`；三模式只改变区域可见性，`VideoZone` 在学习页生命周期内保持同一实例 |
 | Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
 | ASR Capability Probe | 定位内置短语音并复用生产 Whisper 转写模块，只有有效非空句子才能签发 `Compatible` | 写入业务 Video/Sentence、替代完整导入证据、支持尚未实现的 ASR API | `src/settings/asr-capability.ts`、`src/pipeline/asr-runner.ts` |
 | Structuring Capability Probe | 为模型池动作和运行前预检发送最小 Stage2 请求，并用生产契约判断任意 OpenAI-compatible LLM 能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
@@ -105,6 +106,8 @@ cancelImport(videoId)
 
 学习页必须先完整读取同一 Video ID 的 Video、Node、Sentence 和 Note，再一次性切换到 `study`。加载失败不得把部分缓存或空数组包装成成功页面。`playPosition` 是视频、句子高亮和目录当前位置的唯一会话事实；`isPlaying` 是视频区、控制栏和随播滚动共享的播放状态，不能再由组件维护第二份。持久化的 `Video.position` 是跨会话最远进度，与这两个瞬时会话状态语义不同。
 
+布局状态只决定区域可见性，不拥有学习事实。生产学习页在三种布局间切换时必须保留同一个 media 实例；隐藏视频不得卸载它，否则控制栏会失去真实播放对象并重置播放状态。M16 占位组件只裁判局部布局契约，生产行为由 `study-layout.test.tsx` 裁判。
+
 当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
 
 当前进度接口是 `recordPlaybackProgress(videoId, position)`。`VideoZone` 只上报媒体时间，`StudyInterface` 传入当前 Video ID，Study Session 再通过数据库的单调更新保存最远位置。成功的 `loadVideo` 在内容完整性检查之后更新 `lastStudiedAt`；加载失败不得伪造最近学习记录。
@@ -133,6 +136,7 @@ cancelImport(videoId)
 | `src/models/database.ts` | 约 1034 行 | 接口、两种实现、schema、映射、CRUD、事务 | 先补调用级测试，再按数据库接口拆实现 |
 | `src-tauri/src/commands.rs` | 约 796 行 | command、参数处理、部分系统行为 | 保持 command 薄，行为下沉到 Rust 模块 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
+| `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |
 
 文件行数不是拆分理由；职责因为不同原因变化、需要不同测试，才是拆分理由。
 

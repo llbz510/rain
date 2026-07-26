@@ -102,6 +102,10 @@ const flexAutoStyle: React.CSSProperties = {
   flex: '0 0 auto',
 }
 
+const hiddenVideoStyle: React.CSSProperties = {
+  display: 'none',
+}
+
 const rightPanelStyle: React.CSSProperties = {
   gridColumn: '3',
   gridRow: '2',
@@ -362,15 +366,17 @@ export function StudyInterface() {
 
       {/* 中间区：随模式变化 */}
       <section style={middleStyle}>
-        {visibility.videoZone && (
-          <div style={flexFillStyle}>
-            <VideoZone
-              filePath={filePath}
-              resumePosition={playPosition}
-              onProgress={handlePlaybackProgress}
-            />
-          </div>
-        )}
+        <div
+          data-testid="video-zone-shell"
+          aria-hidden={!visibility.videoZone}
+          style={visibility.videoZone ? flexFillStyle : hiddenVideoStyle}
+        >
+          <VideoZone
+            filePath={filePath}
+            resumePosition={playPosition}
+            onProgress={handlePlaybackProgress}
+          />
+        </div>
         {visibility.catalogBar && (
           <div style={flexAutoStyle}>
             <CatalogBar onSeek={handleSeek} />
