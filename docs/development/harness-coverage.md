@@ -1,7 +1,7 @@
 # Rain Harness 覆盖矩阵
 
 > 状态：Active
-> 更新日期：2026-07-26
+> 更新日期：2026-07-27
 > 作用：说明每条 AC 由谁检查，以及现有检查能证明到什么程度。
 
 ## 1. 覆盖等级
@@ -55,6 +55,7 @@
 | LLM 只在前端调用 | `harness/m20-boundaries.test.ts` | Strong | 扫描真实 `src/llm/` 源码，禁止 `invoke` / `tauriInvoke` |
 | Tauri command “包含且仅包含”规定命令 | `harness/m20-boundaries.test.ts` | Strong | 解析真实 `src-tauri/src/lib.rs` 的 `generate_handler!`，检查精确集合和重复项 |
 | 数据库由前端边界模块访问 | `harness/m20-boundaries.test.ts` | Strong | 扫描真实前端源码，确保只有 `src/models/database.ts` 导入 Tauri SQL 插件 |
+| 数据库 schema 形状 | M15 schema Harness、`database-schema.ts` | Strong（内存形状）/ Partial（真实 SQLite） | 内存字段和 Tauri 建表 SQL 现在来自同一事实源，消除双份定义漂移；M15 仍只执行内存 adapter，真实 SQLite 初始化需要 Tauri 运行或 Evidence 补充 |
 | progress 事件名称和字段 | M20/M21 前端 Harness、Rust `events`/`commands` Harness | Strong | 覆盖事件订阅转发、重复监听释放、Rust camelCase 序列化和 ASR 子阶段 |
 | Rust Harness 系统行为 | `src-tauri/tests/*_harness.rs` | Strong | 覆盖调度串行化、按视频取消、取消令牌、ffmpeg/Whisper/yt-dlp 非法输入、错误上下文和真实媒体 fixture |
 | 视觉令牌 | `harness/m13-visual.test.ts` | Strong | 读取并装载应用实际使用的 `src/index.css`，通过 CSSOM 检查变量；不再维护 TS 复制品 |

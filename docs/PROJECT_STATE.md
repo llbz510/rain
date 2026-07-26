@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the learning-page audit slice: `606a4c0 feat: persist study notes`
+Current working base before the database-control slice: `5ae5755 fix: preserve study media across layouts`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,6 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. `src/__tests__/live-qwen.test.ts` is intentionally skipped without a live Key, but it and the legacy default Qwen health path still hard-code `qwen3.5-omni-flash`, while the current schema v2 verified configuration is `qwen3-omni-flash`. The skipped smoke test is therefore not a valid judge for the current verified fingerprint until it reads the selected runtime configuration.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
+17. The exported `Database.exec/query` methods are real only for the Tauri SQL adapter; the memory adapter keeps no-op implementations for legacy interface compatibility. Production callers currently do not use them directly and must continue using the business operations exported by `@/models/database`. A future adapter-seam migration must replace this non-substitutable interface before internal repository modules rely on raw calls.
 
 ## What changed in the 2026-07-26 project-control baseline session
 
@@ -970,6 +971,39 @@ git diff --check
 ```
 
 Observed result: the full frontend suite passed 62 files / 391 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. Rust and the multi-hour real-video E2E were not rerun because this slice changes only React media lifetime, its production test and control documents.
+
+## What changed in the 2026-07-27 database-control audit
+
+Audited the approximately 1034-line database hotspot before attempting any large refactor:
+
+- Added `docs/development/database-control.md` as the Active map for the stable public seam, responsibility groups, AC ownership, judges and extraction order.
+- Confirmed that 24 production import locations use business operations from `@/models/database`; none directly call `Database.exec/query`.
+- Recorded that the locked M15 Harness uses only schema metadata plus public CRUD, while M20 deliberately pins the only Tauri SQL plugin import to `database.ts`.
+- Identified six different reasons for change inside the old file: schema/adapter selection, content CRUD, settings, import state, checkpoints and atomic import writes.
+- Chose schema parity as the first controlled extraction because the old implementation separately maintained memory column lists and SQLite `CREATE TABLE` SQL.
+- Added `src/models/database-schema.ts` as the single table/column/constraint fact source. Both memory initialization and Tauri SQL initialization now derive from it; the public `@/models/database` interface is unchanged.
+- Reduced `database.ts` from about 1034 to 966 lines without moving unrelated CRUD or transaction behavior.
+- Documented that memory behavior tests cannot independently prove the current generated SQL executes inside Tauri. Real SQLite schema initialization therefore remains Partial until a Tauri run or new evidence exercises this exact code.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run harness/m15-schema-crud.test.ts harness/m15-queries.test.ts harness/m15-settings-recovery.test.ts harness/m08-notes.test.ts src/__tests__/database-recovery.test.ts src/__tests__/study-load.test.tsx src/__tests__/study-notes.test.tsx src/__tests__/study-progress.test.tsx src/__tests__/pipeline-asr.test.ts src/__tests__/stage2-runner.test.ts harness/m20-boundaries.test.ts
+npx.cmd tsc --noEmit
+```
+
+Observed result: 11 database-related files / 119 tests passed and TypeScript passed.
+
+Final verification:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+git diff --check
+```
+
+Observed result: the full frontend suite passed 62 files / 391 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. Rust and the real-video E2E were not rerun because this slice changes TypeScript schema definition and adapter initialization only.
 
 ## Maintenance checklist for every future session
 

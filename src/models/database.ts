@@ -7,6 +7,11 @@
 // ========================================
 
 import type { Video, VideoStatus, Node, Sentence, Note, ImportCheckpoint } from './types'
+import {
+  DATABASE_SCHEMA_SQL,
+  getDatabaseTableColumns,
+  listDatabaseTableNames,
+} from './database-schema'
 // 仅类型引用：编译期擦除，不在 jsdom 下触发模块加载。
 // 运行时通过 createDatabase 内的动态 import() 加载。
 import type TauriSqlPlugin from '@tauri-apps/plugin-sql'
@@ -36,28 +41,8 @@ class MemoryDatabase implements Database {
   }
 
   private initSchema(): void {
-    this.tables.set('video', [
-      'id', 'title', 'source', 'source_url', 'file_path',
-      'thumbnail', 'duration', 'language', 'status', 'stage',
-      'error_message', 'created_at', 'position', 'last_studied_at',
-    ])
-    this.tables.set('node', [
-      'id', 'video_id', 'parent_id', 'kind', 'title',
-      'type', 'start_time', 'end_time', 'text', 'translation',
-      'sort_order',
-    ])
-    this.tables.set('sentence', [
-      'id', 'node_id', 'text', 'start_time', 'end_time', 'sort_order',
-    ])
-    this.tables.set('note', [
-      'id', 'video_id', 'content', 'source', 'created_at',
-      'derivation_id', 'sort_order',
-    ])
-    this.tables.set('note_sentence', ['note_id', 'sentence_id'])
-    this.tables.set('setting', ['key', 'value'])
-    this.tables.set('import_checkpoint', ['video_id', 'stage', 'completed_blocks_json', 'error_message', 'updated_at'])
-
-    for (const tableName of this.tables.keys()) {
+    for (const tableName of listDatabaseTableNames()) {
+      this.tables.set(tableName, getDatabaseTableColumns(tableName))
       this.data.set(tableName, [])
     }
   }
@@ -101,72 +86,6 @@ function isTauriEnvironment(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
-// 6 张表的建表 SQL（字段与内存版 schema 完全一致，CREATE TABLE IF NOT EXISTS 保证幂等）
-const SCHEMA_SQL: string[] = [
-  `CREATE TABLE IF NOT EXISTS video (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    source TEXT NOT NULL,
-    source_url TEXT,
-    file_path TEXT,
-    thumbnail TEXT,
-    duration INTEGER,
-    language TEXT,
-    status TEXT,
-    stage TEXT,
-    error_message TEXT,
-    created_at INTEGER,
-    position INTEGER,
-    last_studied_at INTEGER
-  )`,
-  `CREATE TABLE IF NOT EXISTS node (
-    id TEXT PRIMARY KEY,
-    video_id TEXT NOT NULL,
-    parent_id TEXT,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    type TEXT,
-    start_time INTEGER,
-    end_time INTEGER,
-    text TEXT,
-    translation TEXT,
-    sort_order INTEGER
-  )`,
-  `CREATE TABLE IF NOT EXISTS sentence (
-    id TEXT PRIMARY KEY,
-    node_id TEXT NOT NULL,
-    text TEXT NOT NULL,
-    start_time INTEGER,
-    end_time INTEGER,
-    sort_order INTEGER
-  )`,
-  `CREATE TABLE IF NOT EXISTS note (
-    id TEXT PRIMARY KEY,
-    video_id TEXT NOT NULL,
-    content TEXT,
-    source TEXT,
-    created_at INTEGER,
-    derivation_id TEXT,
-    sort_order INTEGER
-  )`,
-  `CREATE TABLE IF NOT EXISTS note_sentence (
-    note_id TEXT NOT NULL,
-    sentence_id TEXT NOT NULL,
-    PRIMARY KEY (note_id, sentence_id)
-  )`,
-  `CREATE TABLE IF NOT EXISTS setting (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  )`,
-  `CREATE TABLE IF NOT EXISTS import_checkpoint (
-    video_id TEXT PRIMARY KEY,
-    stage TEXT NOT NULL,
-    completed_blocks_json TEXT NOT NULL,
-    error_message TEXT,
-    updated_at INTEGER NOT NULL
-  )`,
-]
-
 class TauriSqlDatabase implements Database {
   private db: TauriSqlPlugin
 
@@ -176,7 +95,7 @@ class TauriSqlDatabase implements Database {
 
   // 建表（在 createDatabase 中 await 调用，构造器不能 async）
   async init(): Promise<void> {
-    for (const sql of SCHEMA_SQL) {
+    for (const sql of DATABASE_SCHEMA_SQL) {
       await this.db.execute(sql)
     }
   }
