@@ -44,6 +44,17 @@ function successfulStructuringCheck() {
     }))
 }
 
+function successfulAsrCheck() {
+  return vi.fn(async (model: RuntimeModel) =>
+    recordCapabilityCheck({
+      model,
+      role: 'asr',
+      ok: true,
+      message: 'ASR 能力检查通过。',
+      checkedAt: 100,
+    }))
+}
+
 function desktopInvoke(options: { whisperModels?: string[]; ytdlp?: boolean } = {}) {
   return vi.fn(async (command: string) => {
     if (command === 'get_runtime_capability') {
@@ -72,6 +83,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke(),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAsr: successfulAsrCheck(),
       checkStructuring: (model) => checkStructuringModelCapability(model, { callStage2 }),
     })
 
@@ -98,6 +110,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke,
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAsr: successfulAsrCheck(),
       checkStructuring,
     })
 
@@ -105,8 +118,8 @@ describe('Rain preflight check', () => {
     expect(report.capabilities).toEqual(expect.arrayContaining([
       expect.objectContaining({
         role: 'asr',
-        status: 'Unavailable',
-        message: expect.stringContaining('真实转写能力检查'),
+        status: 'Compatible',
+        message: 'ASR 能力检查通过。',
       }),
       expect.objectContaining({
         role: 'structuring',
@@ -121,7 +134,7 @@ describe('Rain preflight check', () => {
     ]))
     expect(report.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'runtime', status: 'ok', message: expect.stringContaining('cuda') }),
-      expect.objectContaining({ id: 'whisper', status: 'ok', message: expect.stringContaining('ggml-large-v3.bin') }),
+      expect.objectContaining({ id: 'whisper', status: 'ok', message: 'ASR 能力检查通过。' }),
       expect.objectContaining({ id: 'structuring', status: 'ok' }),
       expect.objectContaining({ id: 'database', status: 'ok' }),
       expect.objectContaining({ id: 'ytdlp', status: 'warning' }),
@@ -154,6 +167,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke(),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAsr: successfulAsrCheck(),
       checkStructuring: successfulStructuringCheck(),
     })
 
@@ -175,6 +189,7 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke({ whisperModels: ['D:\\models\\ggml-small.bin'] }),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAsr: successfulAsrCheck(),
       checkStructuring: successfulStructuringCheck(),
     })
 
@@ -198,12 +213,46 @@ describe('Rain preflight check', () => {
       isTauri: () => true,
       invoke: desktopInvoke(),
       checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAsr: successfulAsrCheck(),
       checkStructuring: successfulStructuringCheck(),
     })
 
     expect(report.ready).toBe(true)
     expect(report.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'assistant', status: 'warning' }),
+    ]))
+  })
+
+  it('blocks readiness when the real ASR capability probe fails', async () => {
+    const settings = withGenericStructuringModel(getDefaultRuntimeSettings())
+    const checkAsr = vi.fn(async (model: RuntimeModel) =>
+      recordCapabilityCheck({
+        model,
+        role: 'asr',
+        ok: false,
+        message: 'ASR 能力检查失败：短样本没有有效转写。',
+        checkedAt: 100,
+      }))
+
+    const report = await runPreflightCheck({
+      runtimeSettings: settings,
+      isTauri: () => true,
+      invoke: desktopInvoke(),
+      checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAsr,
+      checkStructuring: successfulStructuringCheck(),
+    })
+
+    expect(report.ready).toBe(false)
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'whisper',
+        status: 'error',
+        message: expect.stringContaining('短样本没有有效转写'),
+      }),
+    ]))
+    expect(report.capabilities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'asr', status: 'Unavailable' }),
     ]))
   })
 })

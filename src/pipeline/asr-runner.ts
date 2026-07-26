@@ -37,6 +37,14 @@ export interface RunAsrStageInput {
   signal?: AbortSignal
 }
 
+export interface TranscribeWithWhisperInput {
+  videoId: string
+  filePath: string
+  asrModel: AsrModelConfig
+  invoke?: PipelineInvoke
+  signal?: AbortSignal
+}
+
 function asError(error: unknown): Error {
   if (error instanceof Error) return error
   if (error && typeof error === 'object' && 'message' in error) {
@@ -146,9 +154,39 @@ function currentImportStage(video: Video): ImportStage {
   return video.status
 }
 
+export async function transcribeWithWhisper(
+  input: TranscribeWithWhisperInput,
+): Promise<Sentence[]> {
+  const invoke = input.invoke ?? (tauriInvoke as PipelineInvoke)
+  const { videoId, filePath, asrModel, signal } = input
+
+  throwIfAborted(signal)
+  if (!filePath.trim()) {
+    throw new Error('Whisper ASR requires a real local file path')
+  }
+  if (asrModel.type !== 'whisper-local') {
+    throw new Error('Only a saved whisper-local ASR model is supported for local imports')
+  }
+
+  const listed = await invoke('list_whisper_models')
+  if (!Array.isArray(listed) || listed.some((entry) => typeof entry !== 'string' || !entry.trim())) {
+    throw new Error('Cannot resolve installed Whisper models: list_whisper_models returned invalid data')
+  }
+  const modelPath = resolveInstalledModelPath(asrModel.modelName, listed as string[])
+  throwIfAborted(signal)
+  const result = await invoke('start_asr', {
+    videoId,
+    filePath,
+    tier: 'whisper',
+    modelPath,
+    language: asrModel.language ?? 'zh',
+  })
+  throwIfAborted(signal)
+  return validateWhisperResult(result)
+}
+
 export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> {
   const { video, asrModel, db, signal } = input
-  const invoke = input.invoke ?? (tauriInvoke as PipelineInvoke)
   const saveAsr = input.saveAsr ?? saveAsrAtomically
   const transition = input.transition ?? transitionVideoImportState
 
@@ -170,26 +208,14 @@ export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> 
     if (video.source !== 'local' || !video.filePath?.trim()) {
       throw new Error('Whisper ASR requires a real local file path')
     }
-    if (asrModel.type !== 'whisper-local') {
-      throw new Error('Only a saved whisper-local ASR model is supported for local imports')
-    }
 
-    throwIfAborted(signal)
-    const listed = await invoke('list_whisper_models')
-    if (!Array.isArray(listed) || listed.some((entry) => typeof entry !== 'string' || !entry.trim())) {
-      throw new Error('Cannot resolve installed Whisper models: list_whisper_models returned invalid data')
-    }
-    const modelPath = resolveInstalledModelPath(asrModel.modelName, listed as string[])
-    throwIfAborted(signal)
-    const result = await invoke('start_asr', {
+    const sentences = await transcribeWithWhisper({
       videoId: video.id,
       filePath: video.filePath,
-      tier: 'whisper',
-      modelPath,
-      language: asrModel.language ?? 'zh',
+      asrModel,
+      invoke: input.invoke,
+      signal,
     })
-    throwIfAborted(signal)
-    const sentences = validateWhisperResult(result)
     const language = detectLanguageFromSentences(sentences)
     await saveAsr(video.id, language, sentences, db)
     assertTransition('asr', 'stage2')

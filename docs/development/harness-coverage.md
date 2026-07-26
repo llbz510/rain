@@ -31,7 +31,7 @@
 | AC-LV-09 | `validate-evidence.ps1`、数据库摘要、学习页截图 | Evidence | 这是“真实可用”声明的主要裁判；普通单元测试不能替代 |
 | AC-LV-10 | `video-list-page-recovery.test.tsx`、`video-list-import.test.tsx` | Strong | 覆盖事件驱动 UI 和持久化终态；真实事件链由 E2E 补充 |
 | AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、截图和秘密 |
-| AC-LV-12 | `model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts`、`settings-preflight.test.tsx`、`settings-role-assignment.test.tsx`、`structuring-capability.test.ts`、`settings-structuring-workflow.test.tsx`、`stage2-runner.test.ts` | Partial | 已覆盖能力记录、三种状态、证据门槛、秘密隔离、持久化和失效；新角色分配由领域函数和 Store 拒绝 `Unavailable`。模型池动作和运行前预检都对任意 OpenAI-compatible LLM 运行同一个生产 Stage2 契约探针，生产 Stage2 入口也接受相同通用配置并校验必填字段；成功后签发 `Compatible`，失败则阻塞就绪状态，普通探针不会伪造或降级 `Verified`。现有旧分配暂不清空，Pipeline 入口尚未强制；ASR/助手仍缺少完整角色检查 |
+| AC-LV-12 | `model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts`、`settings-preflight.test.tsx`、`settings-role-assignment.test.tsx`、`asr-capability.test.ts`、`settings-asr-workflow.test.tsx`、`structuring-capability.test.ts`、`settings-structuring-workflow.test.tsx`、`pipeline-asr.test.ts`、`stage2-runner.test.ts` | Partial | 已覆盖能力记录、三种状态、证据门槛、秘密隔离、持久化和失效；新角色分配由领域函数和 Store 拒绝 `Unavailable`。ASR 模型池动作和预检会用内置短语音走生产 Whisper 解析并校验有效句子；结构化动作和预检会走生产 Stage2 契约探针，生产 Stage2 接受相同 OpenAI-compatible 配置。普通探针不会伪造或降级 `Verified`。现有旧分配暂不清空，Pipeline 入口尚未强制；助手仍缺少完整角色检查 |
 
 ## 3. 架构 Harness 审计
 

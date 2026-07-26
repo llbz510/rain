@@ -87,7 +87,7 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 | `docs/` | Long-lived project docs, plans, specs, and this state document. | `docs/PROJECT_STATE.md` must be updated after every session that changes the project. |
 | `docs/superpowers/` | Superpowers specs/plans used by prior agent work. | Historical plans/construction docs, not automatically current truth; plan checkboxes and old test counts are not progress evidence. |
 | `prototype/` | Mockups and early prototypes. | Do not treat as runtime source. |
-| `test-fixtures/` | Small test media fixtures. | `test-fixtures/sample.mp4` is intentionally tracked. |
+| `test-fixtures/` | Small test and capability-probe media fixtures. | `sample.mp4` supports media tests; `asr-capability.mp4` is bundled into Rain and contains a short English speech sample for the real Whisper capability check. |
 | root `M*.md`, `PRD.md`, `HANDOFF.md` | Original requirements and historical handoff docs. | Useful context but may be stale; prefer this file for current state. |
 
 ## File-management rules
@@ -114,7 +114,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001's generic `Compatible` / `Verified` / `Unavailable` records, stale-result invalidation, role-assignment gate, structuring probe and provider-neutral structuring preflight are implemented. `AC-LV-12` remains Partial because ASR/assistant role probes and Pipeline runtime-entry enforcement are not complete; existing saved assignments are temporarily preserved.
+13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring probe and preflight integration are implemented. `AC-LV-12` remains Partial because the assistant role probe and Pipeline runtime-entry enforcement are not complete; existing saved assignments are temporarily preserved.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 
 ## What changed in the 2026-07-26 project-control baseline session
@@ -450,7 +450,7 @@ Files in this slice:
 - `docs/development/module-map.md`
 - `docs/PROJECT_STATE.md`
 
-Verification so far:
+Verification:
 
 ```powershell
 npm.cmd test -- --run src/__tests__/model-capabilities.test.ts src/__tests__/settings-role-assignment.test.tsx harness/m19-settings-component.test.tsx harness/m19-settings.test.ts harness/store-zustand.test.tsx
@@ -556,6 +556,44 @@ git diff --check
 
 Observed result: targeted capability/preflight tests passed 4 files / 11 tests; the production-path alignment set passed 5 files / 49 tests, including locked M04/M18 without modifying them. TypeScript passed; the final frontend suite passed 51 files / 351 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. No live external model, Rust test or real-video E2E was run in this slice.
 
+## What changed in the 2026-07-26 ASR capability probe session
+
+Continued `AC-LV-12` with the required local-video ASR role:
+
+- Extracted `transcribeWithWhisper` from `runAsrStage`; production imports and capability checks now share model resolution, `start_asr`, cancellation and transcript validation.
+- Added `checkAsrModelCapability(model)`. It resolves a bundled short English speech video, invokes the selected local Whisper model and signs `Compatible` only after receiving non-empty sentences with valid IDs, text and timestamps.
+- Added `test-fixtures/asr-capability.mp4` as an intentionally tracked 48 KB probe resource and mapped it to `asr-capability/sample.mp4` in the Tauri bundle.
+- Added “检查 ASR” to saved local Whisper rows. A successful check is persisted through the existing store interface and unlocks that model in the ASR role selector.
+- Running preflight now executes the same ASR probe after the model-file check. Probe failure blocks local-video readiness; a normal success preserves existing current `Verified` evidence.
+- Unsupported `asr-api` configurations remain `Unavailable`; this slice does not pretend the production local-video Pipeline supports them.
+- Locked Harness and Rust source/tests were not modified.
+
+Files added or changed:
+
+- `src/settings/asr-capability.ts`
+- `src/pipeline/asr-runner.ts`
+- `src/settings/preflight.ts`
+- `src/ui/components/settings/model-pool-list.tsx`
+- `src/ui/components/settings/settings-page.tsx`
+- `src/ui/components/settings/preflight-panel.tsx`
+- `src/__tests__/asr-capability.test.ts`
+- `src/__tests__/settings-asr-workflow.test.tsx`
+- `src/__tests__/preflight.test.ts`
+- `test-fixtures/asr-capability.mp4`
+- `src-tauri/tauri.conf.json`
+
+Verification so far:
+
+```powershell
+npm.cmd test -- --run src/__tests__/asr-capability.test.ts src/__tests__/preflight.test.ts src/__tests__/settings-asr-workflow.test.tsx src/__tests__/settings-role-assignment.test.tsx src/__tests__/pipeline-asr.test.ts harness/m19-settings-component.test.tsx
+npx.cmd tsc --noEmit
+npx.cmd tauri build --debug --no-bundle
+npx.cmd tauri build --debug --bundles nsis
+git diff --check
+```
+
+Observed result: 6 related files / 57 tests passed; TypeScript passed; Tauri debug compilation and debug NSIS packaging passed, producing `Rain_0.1.0_x64-setup.exe` with the configured probe resource; the full frontend suite passed 53 files / 357 tests with 1 live Qwen test skipped; production build passed with the existing Vite dynamic/static import chunking warnings. A live Whisper probe against the locally installed 3 GB model and a full real-video E2E were not run in this slice, so the new probe path is `Compatible`-eligible but not promoted to `Verified` by this session.
+
 ## Current controllability audit on 2026-07-26
 
 The project is more controllable than at the start of the Harness review, but it is not uniformly clean:
@@ -564,7 +602,7 @@ The project is more controllable than at the start of the Harness review, but it
 - Shadow registries, tautological tests, test-only production helpers and obsolete commands were removed in the approved Harness Migration.
 - `AC-LV-12` is intentionally still `Partial`; the control documents do not claim multi-model support is complete.
 - URL import, universal vision explanation and advanced tree editing remain explicit Gap/Proposed work instead of being represented by placeholder success paths.
-- The role-gate and structuring-probe work forms one coherent capability slice and must remain separate from unrelated refactoring.
+- The role gate plus ASR/structuring probes form a coherent capability path; assistant capability and Pipeline entry enforcement remain explicit next slices.
 
 The immediate `settings.tsx` hotspot has been resolved by behavior-preserving extraction. The public file is now a 10-line barrel; page composition, preflight, model-pool actions, add-model form, role selection and shared presentation resources have separate owners under `src/ui/components/settings/`. New settings behavior should enter the matching component, while capability decisions and probes remain in `src/settings/`.
 

@@ -29,5 +29,10 @@
     "sql": {
       "preload": []
     }
+  },
+  "bundle": {
+    "resources": {
+      "../test-fixtures/asr-capability.mp4": "asr-capability/sample.mp4"
+    }
   }
 }

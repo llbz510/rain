@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
+import { checkAsrModelCapability } from '@/settings/asr-capability'
 import { runtimeModelFromPoolEntry, type RuntimeSettings } from '@/settings/model-pool'
 import { checkStructuringModelCapability } from '@/settings/structuring-capability'
 import { useRainStore } from '@/store/rain-store'
@@ -97,6 +98,17 @@ export function SettingsPage() {
     const model = modelPool.find((entry) => entry.id === modelId)
     if (!model) return { ok: false, message: '未找到已保存的模型配置。' }
     const record = await checkStructuringModelCapability(runtimeModelFromPoolEntry(model))
+    await setCapabilityRecords([record])
+    return {
+      ok: record.status === 'Compatible' || record.status === 'Verified',
+      message: record.message,
+    }
+  }
+
+  const handleAsrCheck = async (modelId: string): Promise<ConnectionTestResult> => {
+    const model = modelPool.find((entry) => entry.id === modelId)
+    if (!model) return { ok: false, message: '未找到已保存的 ASR 模型配置。' }
+    const record = await checkAsrModelCapability(runtimeModelFromPoolEntry(model))
     await setCapabilityRecords([record])
     return {
       ok: record.status === 'Compatible' || record.status === 'Verified',
@@ -207,6 +219,7 @@ export function SettingsPage() {
                 <ModelPoolList
                   models={models}
                   onTestConnection={handleTestConnection}
+                  onCheckAsr={handleAsrCheck}
                   onCheckStructuring={handleStructuringCheck}
                 />
               </section>

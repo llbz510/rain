@@ -38,6 +38,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
 | Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择 | 定义能力裁决、直接实现模型请求、承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
 | Model Capability Contract | 定义配置 + 角色能力状态、记录校验、合并、配置变化失效和角色分配裁决 | 发起具体供应商请求、决定完整 E2E 是否通过 | `src/settings/model-capabilities.ts` |
+| ASR Capability Probe | 定位内置短语音并复用生产 Whisper 转写模块，只有有效非空句子才能签发 `Compatible` | 写入业务 Video/Sentence、替代完整导入证据、支持尚未实现的 ASR API | `src/settings/asr-capability.ts`、`src/pipeline/asr-runner.ts` |
 | Structuring Capability Probe | 为模型池动作和运行前预检发送最小 Stage2 请求，并用生产契约判断任意 OpenAI-compatible LLM 能否签发 `Compatible` | 跑完整导入、写业务节点、签发 `Verified` | `src/settings/structuring-capability.ts` |
 | LLM Adapter | OpenAI-compatible 请求、流式和错误处理 | 产品状态机、SQLite | `src/llm/` |
 | Tauri Adapter | command/event 名称和前端调用封装 | 产品规则 | `src/lib/tauri-env.ts`、`src/architecture/` |
@@ -140,7 +141,7 @@ cancelImport(videoId)
 剩余工作：
 
 - 在线 URL 导入尚未经过真实验收，相关逻辑暂时仍在页面中。
-- 模型能力记录、持久化、配置变化失效、新角色分配拦截和通用 LLM 结构化检查已实现；设置预检已复用生产结构化探针。ASR/助手角色检查和 Pipeline 运行入口门禁仍待后续受控切片完成。
+- 模型能力记录、持久化、配置变化失效、新角色分配拦截、真实短样本 ASR 检查和通用 LLM 结构化检查已实现；设置预检复用两种生产探针。助手角色检查和 Pipeline 运行入口门禁仍待后续受控切片完成。
 - 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
 
 ## 8. Harness Migration 结果

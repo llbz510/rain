@@ -1,4 +1,5 @@
 import { tauriInvoke, isTauri as detectTauri } from '@/lib/tauri-env'
+import { checkAsrModelCapability } from '@/settings/asr-capability'
 import type { RuntimeModel, RuntimeSettings } from '@/settings/model-pool'
 import {
   assessModelCapability,
@@ -29,6 +30,7 @@ export interface RunPreflightCheckInput {
   runtimeSettings: RuntimeSettings
   isTauri?: () => boolean
   invoke?: PreflightInvoke
+  checkAsr?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
   checkStructuring?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
   checkDatabaseWrite?: () => Promise<void>
 }
@@ -105,6 +107,7 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
   const isTauri = input.isTauri ?? detectTauri
   const invoke = input.invoke ?? tauriInvoke
   const checkDatabaseWrite = input.checkDatabaseWrite ?? defaultDatabaseWriteCheck
+  const checkAsr = input.checkAsr ?? checkAsrModelCapability
   const checkStructuring = input.checkStructuring ?? checkStructuringModelCapability
   const checks: PreflightCheck[] = []
   const existingCapabilities = input.runtimeSettings.capabilities ?? []
@@ -217,6 +220,17 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
     }
   }
 
+  let asrCapability: ModelCapabilityRecord | null = null
+  const whisperCheck = checks.find((check) => check.id === 'whisper')
+  if (asrModel && whisperCheck?.status === 'ok') {
+    const result = await checkAsr(asrModel)
+    asrCapability = preserveVerifiedRecord(asrModel, result, existingCapabilities)
+    whisperCheck.status = result.status === 'Compatible' || result.status === 'Verified'
+      ? 'ok'
+      : 'error'
+    whisperCheck.message = result.message
+  }
+
   let structuringCapability: ModelCapabilityRecord | null = null
   if (!structuringModel) {
     checks.push({
@@ -317,11 +331,12 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
     }
   }
 
-  const whisperCheck = checks.find((check) => check.id === 'whisper')
   const assistantCheck = checks.find((check) => check.id === 'assistant')
   const capabilities: ModelCapabilityRecord[] = []
 
-  if (asrModel && whisperCheck) {
+  if (asrCapability) {
+    capabilities.push(asrCapability)
+  } else if (asrModel && whisperCheck) {
     capabilities.push(preflightCapabilityRecord(
       asrModel,
       'asr',

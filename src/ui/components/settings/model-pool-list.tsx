@@ -11,10 +11,16 @@ export interface ConnectionTestResult {
 interface ModelPoolListProps {
   models: ModelEntry[]
   onTestConnection?: (modelId: string) => Promise<ConnectionTestResult>
+  onCheckAsr?: (modelId: string) => Promise<ConnectionTestResult>
   onCheckStructuring?: (modelId: string) => Promise<ConnectionTestResult>
 }
 
-export function ModelPoolList({ models, onTestConnection, onCheckStructuring }: ModelPoolListProps) {
+export function ModelPoolList({
+  models,
+  onTestConnection,
+  onCheckAsr,
+  onCheckStructuring,
+}: ModelPoolListProps) {
   const removeModel = useRainStore((state) => state.removeModel)
   const [connectionStatus, setConnectionStatus] = useState<{
     modelId: string
@@ -46,6 +52,20 @@ export function ModelPoolList({ models, onTestConnection, onCheckStructuring }: 
       setConnectionStatus({ modelId: model.id, ok: result.ok, message: result.message })
     } catch {
       setConnectionStatus({ modelId: model.id, ok: false, message: '结构化能力检查失败，请检查模型配置。' })
+    } finally {
+      setTestingModelId(null)
+    }
+  }
+
+  const handleAsrCheck = async (model: ModelEntry) => {
+    if (!onCheckAsr || testingModelId) return
+    setTestingModelId(model.id)
+    setConnectionStatus(null)
+    try {
+      const result = await onCheckAsr(model.id)
+      setConnectionStatus({ modelId: model.id, ok: result.ok, message: result.message })
+    } catch {
+      setConnectionStatus({ modelId: model.id, ok: false, message: 'ASR 能力检查失败，请检查模型配置。' })
     } finally {
       setTestingModelId(null)
     }
@@ -103,6 +123,16 @@ export function ModelPoolList({ models, onTestConnection, onCheckStructuring }: 
               )}
               {!model.canTest && !onCheckStructuring && (
                 <button aria-label="测试（仅 Qwen）" disabled style={s.miniBtn}>测试（仅 Qwen）</button>
+              )}
+              {onCheckAsr && model.type === 'whisper-local' && (
+                <button
+                  aria-label={`检查 ASR ${model.alias}`}
+                  disabled={testingModelId !== null}
+                  onClick={() => void handleAsrCheck(model)}
+                  style={s.miniBtn}
+                >
+                  {testingModelId === model.id ? '检查中…' : '检查 ASR'}
+                </button>
               )}
               {onCheckStructuring && model.type === 'llm' && (
                 <button
