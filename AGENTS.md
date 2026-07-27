@@ -94,7 +94,7 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 - 只有用户明确批准 **Harness Migration** 后才能修改锁定文件；迁移必须记录旧合同、替代裁判、对应 AC、退役影子模块和验证结果
 - 修改 Harness 时优先让测试调用真实公开接口并断言结果、状态或副作用；函数/常量存在、对象自我赋值和恒真表达式不算验收
 - AI 开发者在 feature 分支实现代码，必须让 harness 全绿才能合并
-- 当前迁移记录见 `docs/development/harness-migration-2026-07-26.md`
+- 当前迁移记录见 `docs/development/harness-migration-*.md`；按任务对应的 AC 选择迁移记录
 - 详细设计见 `docs/superpowers/specs/2026-07-07-harness-gated-development-design.md`
 
 ## 已知坑

@@ -36,8 +36,9 @@ describe('runtime model settings', () => {
   it('keeps the saved model ID after restart', async () => {
     await saveRuntimeSettings({ models: [qwenModel], roles })
 
-    expect((await loadRuntimeSettings()).roles.structuring).toBe('qwen-main')
-    expect((await loadRuntimeSettings()).models[0].id).toBe('qwen-main')
+    const reloaded = await loadRuntimeSettings()
+    expect(reloaded.roles).toEqual(roles)
+    expect(reloaded.models[0].id).toBe('qwen-main')
   })
 
   it('stores the API key separately from the model JSON', async () => {
@@ -90,17 +91,27 @@ describe('runtime model settings', () => {
     expect(await getSetting(db, 'api_key.Legacy Qwen')).toBeNull()
     expect(await getSetting(db, 'model_pool')).toBe(JSON.stringify([{ id: 'legacy-qwen', alias: 'Legacy Qwen', model: 'qwen-legacy' }]))
   })
-  it('does not sanitize or delete aliases when canonical key migration fails', async () => {
-    const writes: string[] = []
+  it('submits legacy migration as one atomic batch and surfaces failure', async () => {
+    const batches: unknown[][] = []
     await expect(executeRuntimeSettingsMigration({
       canonicalKeys: [{ id: 'legacy-qwen', key: 'dummy-key' }],
       sanitizedModels: [{ id: 'legacy-qwen', alias: 'Legacy Qwen', model: 'qwen-legacy' }],
       aliasesToDelete: ['Legacy Qwen'],
     }, {
-      set: async (key) => { writes.push(`set:${key}`); throw new Error('disk full') },
-      delete: async (key) => { writes.push(`delete:${key}`) },
+      apply: async (mutations) => {
+        batches.push(mutations)
+        throw new Error('disk full')
+      },
     })).rejects.toThrow('disk full')
-    expect(writes).toEqual(['set:api_key.legacy-qwen'])
+    expect(batches).toEqual([[
+      { op: 'set', key: 'api_key.legacy-qwen', value: 'dummy-key' },
+      {
+        op: 'set',
+        key: 'model_pool',
+        value: JSON.stringify([{ id: 'legacy-qwen', alias: 'Legacy Qwen', model: 'qwen-legacy' }]),
+      },
+      { op: 'delete', key: 'api_key.Legacy Qwen' },
+    ]])
   })
 
   it('keeps canonical keys when a legacy alias equals another model ID', async () => {

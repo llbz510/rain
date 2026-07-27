@@ -205,6 +205,16 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 裁判：公共数据库接口测试、M15 删除 Harness、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
 
+### AC-LV-14 Runtime Settings 必须作为一个快照原子保存
+
+状态：`Confirmed`
+
+保存 Runtime Settings 时，模型列表、按模型 ID 分离的 API Key、三个角色和能力记录必须作为一个快照提交；被删除模型的旧 Key 必须在同一提交中清理。旧格式配置迁移也必须遵守同一规则。任一写入或删除失败时，保存前的所有 setting 必须保持不变，且不得影响无关 setting。模型列表和能力记录中不得保存 API Key 明文。
+
+实现归属：Runtime Settings 持久化规划、数据库批量 Settings interface、Rust SQLite 单事务。
+
+裁判：`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
+
 ## 3. 学习页核心流程
 
 本节只接纳已经由 M05-M10、M15-M16 和用户于 2026-07-26 确认继续梳理的核心学习行为。高级树编辑和 vision 仍不在本节范围。

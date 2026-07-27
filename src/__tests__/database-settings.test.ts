@@ -1,10 +1,20 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SqlDatabaseAdapter } from '@/models/database-adapter'
 import {
+  applySettingMutationsAtomically,
+  createDatabase,
   deleteSetting,
   getSetting,
   setSetting,
 } from '@/models/database'
+
+const mocks = vi.hoisted(() => ({
+  tauriInvoke: vi.fn(),
+}))
+
+vi.mock('@/lib/tauri-env', () => ({
+  tauriInvoke: mocks.tauriInvoke,
+}))
 
 function sqliteAdapter(overrides: Partial<SqlDatabaseAdapter> = {}): SqlDatabaseAdapter {
   return {
@@ -18,6 +28,10 @@ function sqliteAdapter(overrides: Partial<SqlDatabaseAdapter> = {}): SqlDatabase
 }
 
 describe('database settings persistence', () => {
+  beforeEach(() => {
+    mocks.tauriInvoke.mockReset()
+  })
+
   it('uses parameterized SQLite upsert, read and delete operations', async () => {
     const exec = vi.fn()
     const query = vi.fn().mockResolvedValue([{ value: '' }])
@@ -53,5 +67,39 @@ describe('database settings persistence', () => {
       exec: vi.fn().mockRejectedValue(new Error('database unavailable')),
     })
     await expect(setSetting(failedDb, 'key', 'value')).rejects.toThrow('database unavailable')
+  })
+
+  it('sends one atomic SQLite mutation command and surfaces its failure', async () => {
+    const exec = vi.fn()
+    const db = sqliteAdapter({ exec })
+    const mutations = [
+      { op: 'set' as const, key: 'model_pool', value: '[]' },
+      { op: 'delete' as const, key: 'api_key.removed' },
+    ]
+    mocks.tauriInvoke.mockRejectedValueOnce(new Error('settings blocked'))
+
+    await expect(applySettingMutationsAtomically(db, mutations))
+      .rejects.toThrow('settings blocked')
+    expect(mocks.tauriInvoke).toHaveBeenCalledOnce()
+    expect(mocks.tauriInvoke).toHaveBeenCalledWith('apply_settings_atomically', {
+      mutations,
+    })
+    expect(exec).not.toHaveBeenCalled()
+  })
+
+  it('applies an ordered memory mutation batch without touching unrelated keys', async () => {
+    const db = await createDatabase(':memory:')
+    await setSetting(db, 'unrelated', 'keep')
+    await setSetting(db, 'old', 'before')
+
+    await applySettingMutationsAtomically(db, [
+      { op: 'set', key: 'old', value: 'after' },
+      { op: 'set', key: 'new', value: 'created' },
+      { op: 'delete', key: 'old' },
+    ])
+
+    await expect(getSetting(db, 'old')).resolves.toBeNull()
+    await expect(getSetting(db, 'new')).resolves.toBe('created')
+    await expect(getSetting(db, 'unrelated')).resolves.toBe('keep')
   })
 })

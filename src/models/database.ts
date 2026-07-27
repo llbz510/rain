@@ -57,7 +57,13 @@ export {
   updateVideoStatus,
 } from './database-videos'
 export { deleteVideoWithCascade } from './database-video-deletion'
-export { deleteSetting, getSetting, setSetting } from './database-settings'
+export {
+  applySettingMutationsAtomically,
+  deleteSetting,
+  getSetting,
+  setSetting,
+  type SettingMutation,
+} from './database-settings'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）

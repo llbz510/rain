@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the Settings persistence slice: `df6bf21 fix: make video deletion atomic`
+Current working base before the atomic Runtime Settings slice: `349f279 refactor: isolate settings persistence`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,6 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. Low-level Settings key-value CRUD is now controlled, but `saveRuntimeSettings` persists the model list, separate API Keys, three roles and capability records through multiple independent writes/deletes. A mid-save failure can leave a mixed snapshot. No Active AC currently requires atomic Runtime Settings saves, so do not claim that end-to-end Settings persistence is atomic; define that contract before moving the workflow into a transaction.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1215,6 +1214,28 @@ Verification:
 - Full Vitest: 70 files / 417 tests passed; 1 live-key test skipped by its explicit environment guard.
 - TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings.
 - Rust and the multi-hour real-video E2E were not rerun because this slice changes only TypeScript module ownership, keeps SQL behavior characterized, and does not modify Rust, ASR, LLM or rendered workflows.
+
+## What changed in the 2026-07-27 atomic Runtime Settings Harness Migration
+
+Closed the mixed-snapshot risk through the user-approved `AC-LV-14` migration:
+
+- Added `AC-LV-14`: model list, separately stored API Keys, three role assignments, capability records and removed-model Key cleanup must commit as one Runtime Settings snapshot; legacy-format migration follows the same rule; failures preserve the complete previous snapshot and unrelated settings.
+- Added ordered `SettingMutation` and `applySettingMutationsAtomically` to `database-settings.ts`. SQLite sends one `apply_settings_atomically` command; memory computes and replaces the complete setting table result once.
+- Added `src-tauri/src/settings_persistence.rs`, which applies all set/delete mutations on one SQLx connection and transaction.
+- Migrated both `saveRuntimeSettings` and `executeRuntimeSettingsMigration` from repeated independent CRUD to one mutation batch. Single-key CRUD remains available for genuinely independent operations such as the preflight write/delete probe.
+- Strengthened `database-settings.test.ts` with public command payload/error propagation and memory batch isolation. Updated `model-pool.test.ts` to prove legacy migration submits one complete batch.
+- Added Rust success/isolation and trigger-forced final-delete failure tests; the latter proves earlier model/role writes roll back.
+- Added `apply_settings_atomically` to locked M20 under the approved migration. M15 single-key CRUD remained unchanged.
+- Recorded authorization and judge replacement in `docs/development/harness-migration-2026-07-27-runtime-settings.md`; updated AGENTS, coverage, database control and module maps. Runtime Settings snapshot saving is now Strong rather than Partial.
+
+The pre-implementation red run produced three expected failures: missing batch interface on SQLite and memory paths, plus missing real command registration. After implementation, the focused Settings set passed 7 files / 47 tests and focused Rust persistence passed 2 tests.
+
+Full verification passed:
+
+- Vitest: 70 files / 419 tests passed; 1 live-key test skipped by its explicit environment guard.
+- Rust: 81 tests passed; 1 real Whisper model test remained explicitly ignored.
+- TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings.
+- The multi-hour real-video E2E was not rerun because the changed behavior is directly judged at the business mutation batch, public command protocol and real in-memory SQLite transaction layers; ASR, LLM requests and rendered study workflows are unchanged.
 
 ## Maintenance checklist for every future session
 

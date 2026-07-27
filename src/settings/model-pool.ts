@@ -1,7 +1,11 @@
 // src/settings/model-pool.ts
 
 import { getDb } from '@/models/db-singleton'
-import { deleteSetting, getSetting, setSetting } from '@/models/database'
+import {
+  applySettingMutationsAtomically,
+  getSetting,
+  type SettingMutation,
+} from '@/models/database'
 import { parseCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
 import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from '@/settings/default-runtime'
 
@@ -176,16 +180,26 @@ export async function saveRuntimeSettings(settings: RuntimeSettings): Promise<vo
   })() : []
   const models = settings.models.map(({ apiKey: _apiKey, ...model }) => model)
   const modelIds = new Set(settings.models.map(model => model.id))
-  await setSetting(db, 'model_pool', JSON.stringify(models))
-  await Promise.all(priorIds.filter(id => !modelIds.has(id)).map(id => deleteSetting(db, `api_key.${id}`)))
-  await Promise.all(settings.models.map(async (model) => {
-    if (model.apiKey) await setSetting(db, `api_key.${model.id}`, model.apiKey)
-    else await deleteSetting(db, `api_key.${model.id}`)
-  }))
-  await Promise.all((Object.keys(settings.roles) as ModelRole[]).map((role) =>
-    setSetting(db, `role_${role}`, settings.roles[role] ?? '')
-  ))
-  await setSetting(db, 'model_capabilities', JSON.stringify(settings.capabilities ?? []))
+  const mutations: SettingMutation[] = [
+    { op: 'set', key: 'model_pool', value: JSON.stringify(models) },
+    ...priorIds
+      .filter((id) => !modelIds.has(id))
+      .map((id): SettingMutation => ({ op: 'delete', key: `api_key.${id}` })),
+    ...settings.models.map((model): SettingMutation => model.apiKey
+      ? { op: 'set', key: `api_key.${model.id}`, value: model.apiKey }
+      : { op: 'delete', key: `api_key.${model.id}` }),
+    ...(Object.keys(settings.roles) as ModelRole[]).map((role): SettingMutation => ({
+      op: 'set',
+      key: `role_${role}`,
+      value: settings.roles[role] ?? '',
+    })),
+    {
+      op: 'set',
+      key: 'model_capabilities',
+      value: JSON.stringify(settings.capabilities ?? []),
+    },
+  ]
+  await applySettingMutationsAtomically(db, mutations)
 }
 interface ParsedStoredModel {
   model: RuntimeModel
@@ -235,21 +249,29 @@ export interface RuntimeSettingsMigrationPlan {
 }
 
 export interface RuntimeSettingsMigrationPersistence {
-  set: (key: string, value: string) => Promise<void>
-  delete: (key: string) => Promise<void>
+  apply: (mutations: SettingMutation[]) => Promise<void>
 }
 
 export async function executeRuntimeSettingsMigration(
   plan: RuntimeSettingsMigrationPlan,
   persistence: RuntimeSettingsMigrationPersistence,
 ): Promise<void> {
-  for (const { id, key } of plan.canonicalKeys) {
-    await persistence.set(`api_key.${id}`, key)
-  }
-  await persistence.set('model_pool', JSON.stringify(plan.sanitizedModels))
-  for (const alias of plan.aliasesToDelete) {
-    await persistence.delete(`api_key.${alias}`)
-  }
+  await persistence.apply([
+    ...plan.canonicalKeys.map(({ id, key }): SettingMutation => ({
+      op: 'set',
+      key: `api_key.${id}`,
+      value: key,
+    })),
+    {
+      op: 'set',
+      key: 'model_pool',
+      value: JSON.stringify(plan.sanitizedModels),
+    },
+    ...plan.aliasesToDelete.map((alias): SettingMutation => ({
+      op: 'delete',
+      key: `api_key.${alias}`,
+    })),
+  ])
 }
 export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
   const db = await getDb()
@@ -282,8 +304,7 @@ export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
         .filter(alias => !canonicalIds.has(alias)),
     }
     await executeRuntimeSettingsMigration(migrationPlan, {
-      set: (key, value) => setSetting(db, key, value),
-      delete: (key) => deleteSetting(db, key),
+      apply: (mutations) => applySettingMutationsAtomically(db, mutations),
     })
   }
 

@@ -9,6 +9,7 @@ use crate::ffmpeg;
 use crate::import_state_persistence::{self, ImportState};
 use crate::note_persistence::{self, PersistedNote};
 use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
+use crate::settings_persistence::{self, SettingMutation};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
 use crate::video_deletion;
 use crate::whisper::{self, WhisperModelSize};
@@ -203,6 +204,21 @@ pub async fn delete_video_atomically(app: AppHandle, video_id: String) -> Result
     video_deletion::delete_video_atomically_on_connection(&mut connection, &video_id)
         .await
         .map_err(|error| format!("Delete video atomically: {error}"))
+}
+
+#[tauri::command]
+pub async fn apply_settings_atomically(
+    app: AppHandle,
+    mutations: Vec<SettingMutation>,
+) -> Result<(), String> {
+    use sqlx::{Connection, SqliteConnection};
+    let database_path = rain_database_path(&app)?;
+    let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
+        .await
+        .map_err(|error| format!("Open Rain database: {error}"))?;
+    settings_persistence::apply_settings_atomically_on_connection(&mut connection, &mutations)
+        .await
+        .map_err(|error| format!("Apply settings atomically: {error}"))
 }
 
 #[tauri::command]

@@ -4,6 +4,34 @@ import {
   type Database,
 } from './database-adapter'
 
+export type SettingMutation =
+  | { op: 'set'; key: string; value: string }
+  | { op: 'delete'; key: string }
+
+export async function applySettingMutationsAtomically(
+  db: Database,
+  mutations: SettingMutation[],
+): Promise<void> {
+  if (isSqlDatabase(db)) {
+    const { tauriInvoke } = await import('@/lib/tauri-env')
+    await tauriInvoke<void>('apply_settings_atomically', { mutations })
+    return
+  }
+
+  const memory = asMemoryDatabase(db)
+  let nextRows = memory.readTable('setting').map((row) => ({ ...row }))
+  for (const mutation of mutations) {
+    if (mutation.op === 'set') {
+      const existing = nextRows.find((row) => row.key === mutation.key)
+      if (existing) existing.value = mutation.value
+      else nextRows.push({ key: mutation.key, value: mutation.value })
+    } else {
+      nextRows = nextRows.filter((row) => row.key !== mutation.key)
+    }
+  }
+  memory.replaceTable('setting', nextRows)
+}
+
 export async function setSetting(
   db: Database,
   key: string,
