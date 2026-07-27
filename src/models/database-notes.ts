@@ -33,16 +33,8 @@ function rowToNote(row: TableRow, sentenceIds: string[]): Note {
 export async function insertNote(db: Database, note: Note): Promise<void> {
   const row = noteToRow(note)
   if (isSqlDatabase(db)) {
-    await db.exec(
-      'INSERT INTO note (id, video_id, content, source, created_at, derivation_id, sort_order) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [row.id, row.video_id, row.content, row.source, row.created_at, row.derivation_id, row.sort_order],
-    )
-    for (const sentenceId of note.sentenceIds) {
-      await db.exec(
-        'INSERT INTO note_sentence (note_id, sentence_id) VALUES ($1, $2)',
-        [note.id, sentenceId],
-      )
-    }
+    const { tauriInvoke } = await import('@/lib/tauri-env')
+    await tauriInvoke<void>('insert_note_atomically', { note })
     return
   }
 

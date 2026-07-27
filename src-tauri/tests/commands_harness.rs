@@ -5,6 +5,7 @@
 // ========================================
 
 use rain_lib::events::ProgressPayload;
+use rain_lib::note_persistence::PersistedNote;
 use rain_lib::scheduler::{CancellationToken, ImportScheduler, TaskFinish, TaskState};
 use std::sync::Arc;
 use tokio::time::{sleep, timeout, Duration};
@@ -21,6 +22,27 @@ fn r20_progress_payload_serializes_to_the_frontend_contract() {
     assert_eq!(json["percent"], 50);
     assert_eq!(json["retrying"], true);
     assert!(json.get("video_id").is_none());
+}
+
+#[test]
+fn r26_note_payload_uses_the_frontend_contract() {
+    let payload = PersistedNote {
+        id: "note-1".into(),
+        video_id: "video-1".into(),
+        content: "Signal.".into(),
+        source: "excerpt".into(),
+        sentence_ids: vec!["sentence-1".into(), "sentence-2".into()],
+        created_at: 10,
+        sort_order: 0,
+    };
+    let json = serde_json::to_value(payload).unwrap();
+
+    assert_eq!(json["videoId"], "video-1");
+    assert_eq!(json["sentenceIds"][0], "sentence-1");
+    assert_eq!(json["createdAt"], 10);
+    assert_eq!(json["sortOrder"], 0);
+    assert!(json.get("video_id").is_none());
+    assert!(json.get("sentence_ids").is_none());
 }
 
 #[test]

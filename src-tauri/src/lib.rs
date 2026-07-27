@@ -4,6 +4,7 @@ pub mod e2e_config;
 pub mod events;
 pub mod ffmpeg;
 pub mod import_state_persistence;
+pub mod note_persistence;
 pub mod runtime;
 pub mod scheduler;
 pub mod structure_persistence;
@@ -26,6 +27,7 @@ pub fn run() {
             commands::generate_thumbnail,
             commands::start_asr,
             commands::save_asr_atomically,
+            commands::insert_note_atomically,
             commands::assign_asr_sentences_atomically,
             commands::transition_video_import_state,
             commands::merge_import_atomically,

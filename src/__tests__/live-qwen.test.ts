@@ -27,5 +27,5 @@ maybeDescribe('live OpenAI-compatible connection', () => {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(redactSecret(message, [apiKey]))
     }
-  })
+  }, 30_000)
 })

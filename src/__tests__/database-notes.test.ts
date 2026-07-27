@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SqlDatabaseAdapter } from '@/models/database-adapter'
 import {
   createDatabase,
@@ -7,6 +7,14 @@ import {
   updateNoteContent,
 } from '@/models/database'
 import type { Note } from '@/models/types'
+
+const mocks = vi.hoisted(() => ({
+  tauriInvoke: vi.fn(),
+}))
+
+vi.mock('@/lib/tauri-env', () => ({
+  tauriInvoke: mocks.tauriInvoke,
+}))
 
 function sqliteAdapter(overrides: Partial<SqlDatabaseAdapter> = {}): SqlDatabaseAdapter {
   return {
@@ -30,32 +38,29 @@ const note: Note = {
 }
 
 describe('database notes persistence', () => {
-  it('sends the note and all sentence references through the SQLite adapter', async () => {
+  beforeEach(() => {
+    mocks.tauriInvoke.mockReset()
+  })
+
+  it('sends the complete note to one Rust transaction', async () => {
     const exec = vi.fn()
     const db = sqliteAdapter({ exec })
 
     await insertNote(db, note)
 
-    expect(exec.mock.calls.map(([sql]) => sql)).toEqual([
-      expect.stringContaining('INSERT INTO note '),
-      expect.stringContaining('INSERT INTO note_sentence'),
-      expect.stringContaining('INSERT INTO note_sentence'),
-    ])
+    expect(mocks.tauriInvoke).toHaveBeenCalledOnce()
+    expect(mocks.tauriInvoke).toHaveBeenCalledWith('insert_note_atomically', { note })
+    expect(exec).not.toHaveBeenCalled()
   })
 
-  it('surfaces a SQLite sentence-reference failure', async () => {
+  it('surfaces a Rust note transaction failure', async () => {
+    mocks.tauriInvoke.mockRejectedValueOnce(new Error('duplicate reference'))
     const exec = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('duplicate reference'))
     const db = sqliteAdapter({ exec })
 
     await expect(insertNote(db, note)).rejects.toThrow('duplicate reference')
-    expect(exec.mock.calls.map(([sql]) => sql)).toEqual([
-      expect.stringContaining('INSERT INTO note '),
-      expect.stringContaining('INSERT INTO note_sentence'),
-      expect.stringContaining('INSERT INTO note_sentence'),
-    ])
+    expect(mocks.tauriInvoke).toHaveBeenCalledWith('insert_note_atomically', { note })
+    expect(exec).not.toHaveBeenCalled()
   })
 
   it('rolls back both memory tables when a duplicate reference violates the schema', async () => {

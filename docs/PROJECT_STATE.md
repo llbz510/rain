@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the note-persistence slice: `62e4dac refactor: extract atomic import persistence`
+Current working base before the atomic Note Harness Migration: `2f70bd9 refactor: isolate note persistence`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -125,8 +125,6 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
 17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state, atomic import and note persistence have moved behind it. Legacy video/content CRUD and settings functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
-18. SQLite Note creation still performs one frontend SQL-plugin call for the Note followed by calls for sentence references. `tauri-plugin-sql` 2.4.0 executes each call against a SQLx pool, so wrapping those calls with frontend `BEGIN/COMMIT` cannot prove one-connection atomicity. A real fix requires a Rust `insert_note_atomically` command plus an explicitly approved Harness Migration for the locked command set; until then `AC-ST-06` failure atomicity is Partial.
-
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1131,6 +1129,20 @@ npx.cmd tsc --noEmit
 ```
 
 Observed result: the focused set passed 8 files / 36 tests and TypeScript passed. The full frontend suite passed 66 files / 408 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings; `git diff --check` reported no whitespace errors. No Rust files or locked Harness were changed; the missing Rust Note transaction remains explicit rather than being represented by a frontend mock.
+
+## What changed in the 2026-07-27 atomic Note Harness Migration
+
+Closed the remaining `AC-ST-06` SQLite failure-atomicity gap with the user-approved migration recorded in `docs/development/harness-migration-2026-07-27-note-persistence.md`:
+
+- Added `src-tauri/src/note_persistence.rs` as the owner of the Note/reference SQLite transaction. It opens one transaction on the command's connection, writes the Note and every sentence reference, commits only after all writes succeed, and explicitly rolls back on failure.
+- Added `insert_note_atomically` to the real Tauri command registry. `commands.rs` only resolves the application database, opens the connection, delegates persistence and adds error context.
+- Changed only the SQLite branch of public `insertNote`: it now sends the complete Note in one command call. The stable `@/models/database` interface, memory adapter behavior, reads and edits remain unchanged.
+- Migrated locked M20 to include the new command in the exact real registry, and added a locked Rust protocol test for camelCase Note payload fields.
+- Replaced the old frontend statement-order tests with a single-command payload/error contract. Rust tests directly prove both success and rollback against SQLite; a duplicate second reference leaves both `note` and `note_sentence` empty.
+- Removed the old known risk that frontend SQL-plugin calls could leave half a Note. `AC-ST-06` and the Note persistence seam are now Strong.
+- Repaired the live-key smoke timeout without changing its opt-in contract. A forced real `qwen3-omni-flash` run first exposed Vitest's 5-second default timeout; the test now has a 30-second external-call allowance and passed in about 1.36 seconds. The key was injected only into the test process and was not written to the repository.
+
+The migration first produced the expected 3 red assertions against the old implementation, then passed 4 focused frontend files / 19 tests and 3 focused Rust behavior/protocol tests. Full verification passed 66 frontend files / 408 tests with the opt-in live test skipped by default; the separately forced live test passed 1/1. Rust passed 53 library tests and 23 executable Harness tests, with the existing real Whisper model test ignored. The production build, `git diff --check` and a tracked-file scan for the supplied key passed. The existing Vite dynamic/static import chunking warnings remain unchanged.
 
 ## Maintenance checklist for every future session
 

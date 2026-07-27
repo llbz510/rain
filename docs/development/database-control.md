@@ -28,6 +28,7 @@
 | 设置持久化 | 模型池、角色和能力记录使用的 key-value 设置 | AC-LV-01/12、AC-ST-07 | M15 settings/recovery、模型能力测试 |
 | 导入状态与恢复 | 批准状态转换、检查点、恢复判断 | AC-LV-03/06/07/08 | Pipeline 恢复测试、M03/M21、真实 Evidence |
 | 原子导入写入 | ASR 保存、句子归属、最终节点/句子合并 | AC-LV-04/05/09 | Pipeline/Stage2 测试、Rust Harness、真实 Evidence |
+| 笔记持久化 | Note 读取/编辑，Note 与 sentence 引用原子创建 | AC-ST-06 | M08/M15、学习页测试、前端 command 协议测试、Rust 事务测试 |
 
 内存 adapter 是快速行为裁判，不是 Tauri SQLite 与 Rust command 的完整替身。涉及真实事务、command 参数或 SQLite 执行的结论，必须由 Rust Harness 或真实 Evidence 补足。
 
@@ -42,7 +43,7 @@
 7. `database-boundary.test.ts` 禁止生产模块直接导入 `database-adapter`、`database-checkpoints`、`database-content-rows`、`database-import-atomic`、`database-import-state`、`database-notes` 或 `database-schema`，并证明内存 adapter 不伪装支持 SQL。内部实现可以继续拆分，调用者仍只能看到稳定公共入口。
 8. `database-import-state.ts` 统一负责受保护的导入状态转换和基于持久句子的恢复决策；SQLite command/查询和内存表细节不再留在公共入口。
 9. `database-import-atomic.ts` 统一负责 ASR 保存、句子归属、最终合并和直接原子句子插入；`database-content-rows.ts` 是普通 CRUD 与原子写入共享的 Node/Sentence 行格式事实源。
-10. `database-notes.ts` 统一负责 Note 与 sentence 引用持久化；内存 adapter 镜像主键/关联唯一约束和失败回滚。SQLite 当前仍是多次 SQL-plugin 调用，不能把前端 `BEGIN/COMMIT` mock 当成真实事务证明。
+10. `database-notes.ts` 统一负责 Note 与 sentence 引用持久化；内存 adapter 镜像主键/关联唯一约束和失败回滚。SQLite 创建通过单次 `insert_note_atomically` command 进入 `note_persistence.rs`，由一个连接上的真实事务提交 Note 与全部引用。
 
 ## 4. 受控拆分顺序
 
@@ -50,7 +51,7 @@
 
 1. `Completed`：提取 schema 唯一事实源，公共 interface 不变。
 2. `Completed`：导入状态、检查点和原子合并。adapter interface、检查点、状态转换、恢复判断、ASR 保存、句子归属和最终合并均已移出公共入口，由 AC-LV-03 至 AC-LV-09 的测试和 Rust/Evidence 裁判。
-3. `In progress`：学习内容与笔记持久化。`AC-ST-06` 的笔记模块和内存约束已提取，但真实 SQLite Note/reference 原子写入需要新增 Rust command 和明确批准的 Harness Migration；视频/Node/Sentence 查询与 `AC-ST-05` 进度持久化仍在 `database.ts`。
+3. `In progress`：学习内容持久化。`AC-ST-06` 的笔记模块、内存约束和真实 SQLite Note/reference 原子 command 已完成；视频/Node/Sentence 查询与 `AC-ST-05` 进度持久化仍在 `database.ts`。
 4. 设置持久化。由模型能力、设置恢复和预检测试裁判。
 
 禁止一次性重写整个数据库层。每一步都必须保持 `@/models/database` 导出兼容、运行对应裁判、更新本文件和 `PROJECT_STATE.md`。

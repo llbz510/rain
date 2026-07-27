@@ -7,6 +7,7 @@ use crate::asr_persistence::{self, PersistedSentence};
 use crate::events::{self, ProgressPayload};
 use crate::ffmpeg;
 use crate::import_state_persistence::{self, ImportState};
+use crate::note_persistence::{self, PersistedNote};
 use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
 use crate::whisper::{self, WhisperModelSize};
@@ -178,6 +179,19 @@ pub async fn save_asr_atomically(
     .await
     .map_err(|error| format!("Persist ASR atomically: {error}"))
 }
+
+#[tauri::command]
+pub async fn insert_note_atomically(app: AppHandle, note: PersistedNote) -> Result<(), String> {
+    use sqlx::{Connection, SqliteConnection};
+    let database_path = rain_database_path(&app)?;
+    let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
+        .await
+        .map_err(|error| format!("Open Rain database: {error}"))?;
+    note_persistence::insert_note_atomically_on_connection(&mut connection, &note)
+        .await
+        .map_err(|error| format!("Persist note atomically: {error}"))
+}
+
 #[tauri::command]
 pub async fn assign_asr_sentences_atomically(
     app: AppHandle,

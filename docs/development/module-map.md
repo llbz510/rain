@@ -108,7 +108,7 @@ cancelImport(videoId)
 
 布局状态只决定区域可见性，不拥有学习事实。生产学习页在三种布局间切换时必须保留同一个 media 实例；隐藏视频不得卸载它，否则控制栏会失去真实播放对象并重置播放状态。M16 占位组件只裁判局部布局契约，生产行为由 `study-layout.test.tsx` 裁判。
 
-数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。`src/models/database-adapter.ts` 是内部 adapter seam：公共 `Database` 只含两种 adapter 都真实支持的 interface，SQLite 的 `exec/query` 与内存表读写不会互相伪装。检查点编码和读写归 `src/models/database-checkpoints.ts`，导入状态转换和恢复判断归 `src/models/database-import-state.ts`，原子导入事务归 `src/models/database-import-atomic.ts`，Note 映射、读取与写入归 `src/models/database-notes.ts`；普通 CRUD 与原子写入共享 `src/models/database-content-rows.ts` 的 Node/Sentence 行格式。Note/reference 的真实 SQLite 原子提交尚未完成，必须通过 Rust command 解决，不能用多次前端 SQL-plugin 调用假装事务。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接导入这些内部模块。
+数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。`src/models/database-adapter.ts` 是内部 adapter seam：公共 `Database` 只含两种 adapter 都真实支持的 interface，SQLite 的 `exec/query` 与内存表读写不会互相伪装。检查点编码和读写归 `src/models/database-checkpoints.ts`，导入状态转换和恢复判断归 `src/models/database-import-state.ts`，原子导入事务归 `src/models/database-import-atomic.ts`，Note 映射、读取与写入归 `src/models/database-notes.ts`；普通 CRUD 与原子写入共享 `src/models/database-content-rows.ts` 的 Node/Sentence 行格式。Note/reference 的真实 SQLite 创建必须通过 `insert_note_atomically` 进入 `src-tauri/src/note_persistence.rs`，不能退回多次前端 SQL-plugin 调用。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接导入这些内部模块。
 
 当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
 
