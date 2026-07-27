@@ -17,9 +17,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ]
 
 export const WHISPER_SIZES = [
-  { value: 'tiny', label: 'tiny（39MB，最快最差）' },
-  { value: 'base', label: 'base（74MB）' },
-  { value: 'small', label: 'small（244MB）' },
-  { value: 'medium', label: 'medium（769MB）' },
-  { value: 'large-v3', label: 'large-v3（1.5GB，最慢最好）' },
+  { value: 'tiny', label: 'tiny（约 74 MiB，最快最差）' },
+  { value: 'base', label: 'base（约 141 MiB）' },
+  { value: 'small', label: 'small（约 465 MiB）' },
+  { value: 'medium', label: 'medium（约 1.43 GiB）' },
+  { value: 'large-v3', label: 'large-v3（约 2.88 GiB，最慢最好）' },
 ]

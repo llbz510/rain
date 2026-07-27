@@ -14,6 +14,7 @@ use crate::settings_persistence::{self, SettingMutation};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
 use crate::video_deletion;
 use crate::whisper::WhisperModelSize;
+use crate::whisper_model_download::{self, ModelDownloadManager};
 use crate::ytdlp;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -248,49 +249,32 @@ pub async fn merge_import_atomically(
 }
 /// 下载 Whisper 模型（决策94）
 #[tauri::command]
-pub async fn download_whisper_model(app: AppHandle, model_size: String) -> Result<String, String> {
+pub async fn download_whisper_model(
+    app: AppHandle,
+    downloads: State<'_, Arc<ModelDownloadManager>>,
+    model_size: String,
+) -> Result<String, String> {
     let size = WhisperModelSize::from_str(&model_size)
         .ok_or_else(|| format!("Unknown model size: {}", model_size))?;
-
-    let filename = size.as_filename();
-
-    // 用 Tauri 自带的路径解析取 app data dir，无需前端权限
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Cannot resolve app data dir: {}", e))?;
     let output_dir = data_dir.join("whisper-models");
-    let output_path = output_dir.join(filename);
-
-    std::fs::create_dir_all(&output_dir).map_err(|e| format!("Create dir failed: {}", e))?;
-
-    let url = format!(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
-        filename
-    );
-
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
-
-    let response = client
-        .get(&url)
-        .send()
+    whisper_model_download::download_model(downloads.inner().as_ref(), &app, &output_dir, size)
         .await
-        .map_err(|e| format!("Download failed: {}", e))?;
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|error| error.to_string())
+}
 
-    if !response.status().is_success() {
-        return Err(format!("Download failed: HTTP {}", response.status()));
-    }
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Read response failed: {}", e))?;
-
-    std::fs::write(&output_path, &bytes).map_err(|e| format!("Write file failed: {}", e))?;
-
-    Ok(output_path.to_string_lossy().to_string())
+#[tauri::command]
+pub async fn cancel_whisper_model_download(
+    downloads: State<'_, Arc<ModelDownloadManager>>,
+    model_size: String,
+) -> Result<bool, String> {
+    let size = WhisperModelSize::from_str(&model_size)
+        .ok_or_else(|| format!("Unknown model size: {}", model_size))?;
+    Ok(whisper_model_download::cancel_model_download(downloads.inner().as_ref(), size).await)
 }
 
 /// 列出已下载的 Whisper 模型
@@ -302,21 +286,8 @@ pub async fn list_whisper_models(app: AppHandle) -> Result<Vec<String>, String> 
         .map_err(|e| format!("Cannot resolve app data dir: {}", e))?;
     let model_dir = data_dir.join("whisper-models");
 
-    let sizes = [
-        WhisperModelSize::Tiny,
-        WhisperModelSize::Base,
-        WhisperModelSize::Small,
-        WhisperModelSize::Medium,
-        WhisperModelSize::LargeV3,
-    ];
-
-    let mut found = Vec::new();
-    for size in &sizes {
-        let path = model_dir.join(size.as_filename());
-        if path.exists() {
-            found.push(path.to_string_lossy().to_string());
-        }
-    }
-
-    Ok(found)
+    Ok(whisper_model_download::list_models(&model_dir)
+        .into_iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect())
 }

@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { PROGRESS_EVENT_NAME, type ProgressPayload } from '@/architecture/events'
+import { WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT } from '@/settings/whisper-model-download'
 
 const repoRoot = process.cwd()
 
@@ -55,6 +56,7 @@ describe('M20-T01: Rust 后端导出的 Tauri command 列表（决策92-98）', 
       'transition_video_import_state',
       'merge_import_atomically',
       'download_whisper_model',
+      'cancel_whisper_model_download',
       'list_whisper_models',
       'get_real_e2e_config',
     ]
@@ -146,5 +148,14 @@ describe('M20-T06: 完成/失败/取消也走 event（决策97）', () => {
     expect(IMPORT_COMPLETE_EVENT).toBe('import_complete')
     expect(IMPORT_FAILED_EVENT).toBe('import_failed')
     expect(IMPORT_CANCELLED_EVENT).toBe('import_cancelled')
+  })
+})
+
+describe('M20-T07 / AC-MM-02: Whisper 模型下载事件协议', () => {
+  it('前端监听的事件名与 Rust 生产上报器一致', () => {
+    const rustSource = readRepoFile('src-tauri/src/whisper_model_download.rs')
+    expect(rustSource).toContain(
+      `MODEL_DOWNLOAD_PROGRESS_EVENT: &str = "${WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT}"`,
+    )
   })
 })

@@ -35,15 +35,13 @@
 | AC-LV-13 | `database-video-deletion.test.ts`、M15/M20、Rust `video_deletion` tests | Strong（公共接口 + Rust 事务） | 前端锁定单 command 协议、错误传播和内存隔离；Rust 真实 SQLite 锁定全部归属数据清理、末步失败回滚和缺失 Video 幂等 |
 | AC-LV-14 | `database-settings.test.ts`、`model-pool.test.ts`、M20、Rust `settings_persistence` tests | Strong（业务批次 + Rust 事务） | 模型快照保存与旧格式迁移均组装单批 mutation；前端锁定 command/payload/错误传播，Rust 锁定成功提交、无关 key 隔离和末步失败全回滚 |
 
-## 3. Whisper 模型下载（Proposed）
-
-这些 AC 尚未确认，不构成完成门禁，也不授权修改锁定 Harness。表中记录的是如果确认后必须补齐的裁判。
+## 3. Whisper 模型下载
 
 | AC | 当前裁判 | 等级 | 当前结论与缺口 |
 | --- | --- | --- | --- |
-| AC-MM-01 | M20 仅确认 `download_whisper_model` / `list_whisper_models` 已注册 | Gap | 当前 command 整包读取响应后直接写最终路径；没有受信 manifest、哈希/长度校验、临时文件、原子替换、失败清理或旧文件保留裁判。需要 Rust 本地 HTTP fixture + 临时目录行为测试 |
-| AC-MM-02 | 设置页只有 `downloading/done/error` 局部状态 | Gap | 没有分块消费裁判、真实进度事件、取消 command、重复下载隔离或取消后重试。新增 cancel command 需要用户批准 M20 Harness Migration |
-| AC-MM-03 | 无直接行为测试；历史规格和当前“首次使用触发下载，显示进度”文案不能充当裁判 | Gap | UI 没有数值进度、取消、生产事件订阅或成功后列表复核。需要通过生产 Tauri adapter/event interface 操作真实 `AddModelForm` 的非锁定组件测试 |
+| AC-MM-01 | Rust `whisper_model_download` tests、M20 | Strong | 固定上游 revision/文件名/字节数/SHA-256；本地 HTTP 与临时目录直接证明验证后提交、坏哈希清理、旧文件保留、替换失败保护和有效文件幂等复用；M20 锁定真实下载/列举 command |
+| AC-MM-02 | Rust `whisper_model_download` tests、M20 | Strong | `Response::chunk` 增量写入和增量哈希；recording reporter 锁定单调进度；并发 fixture 锁定每型号单 writer、取消清理和干净重试；停滞网络 fixture 证明取消会唤醒等待中的读取；M20 锁定独立取消 command |
+| AC-MM-03 | `whisper-model-download.test.tsx`、M19/M20 | Strong | 真实 `AddModelForm` 通过生产 Tauri adapter/event seam 展示数值进度、发出取消、区分取消/失败、允许重试、释放 listener，并在安装列表复核后才显示成功；浏览器仍禁用本地下载 |
 
 ## 4. 学习页核心流程
 

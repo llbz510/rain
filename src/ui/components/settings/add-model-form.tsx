@@ -1,7 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PROVIDER_PRESETS, WHISPER_SIZES } from '@/lib/provider-presets'
 import { isTauri } from '@/lib/tauri-env'
 import type { ModelType } from '@/settings/model-pool'
+import {
+  createWhisperModelDownloadSession,
+  isWhisperDownloadCancelled,
+  type WhisperModelDownloadProgress,
+  type WhisperModelDownloadSession,
+} from '@/settings/whisper-model-download'
 import { useRainStore } from '@/store/rain-store'
 import { COLORS, s } from './shared'
 
@@ -21,11 +27,19 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
   const [alias, setAlias] = useState('')
   const [supportsVision, setSupportsVision] = useState(false)
   const [whisperSize, setWhisperSize] = useState('medium')
-  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle')
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading' | 'done' | 'cancelled' | 'error'>('idle')
   const [downloadError, setDownloadError] = useState('')
+  const [downloadProgress, setDownloadProgress] = useState<WhisperModelDownloadProgress | null>(null)
+  const downloadSession = useRef<WhisperModelDownloadSession | null>(null)
+  const mounted = useRef(true)
 
   const isApiType = modelType === 'llm' || modelType === 'asr-api'
   const isWhisper = modelType === 'whisper-local'
+
+  useEffect(() => () => {
+    mounted.current = false
+    downloadSession.current?.dispose()
+  }, [])
 
   function handleProviderChange(value: string) {
     setProvider(value)
@@ -40,15 +54,37 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
   async function handleDownload() {
     setDownloadStatus('downloading')
     setDownloadError('')
+    setDownloadProgress(null)
     try {
-      const { tauriInvoke } = await import('@/lib/tauri-env')
-      await tauriInvoke<string>('download_whisper_model', {
-        modelSize: whisperSize,
+      const session = await createWhisperModelDownloadSession(whisperSize, (progress) => {
+        if (mounted.current) setDownloadProgress(progress)
       })
-      setDownloadStatus('done')
+      if (!mounted.current) {
+        session.dispose()
+        return
+      }
+      downloadSession.current = session
+      await session.run()
+      if (mounted.current) setDownloadStatus('done')
     } catch (err) {
-      setDownloadStatus('error')
-      setDownloadError(String(err))
+      if (mounted.current) {
+        setDownloadStatus(isWhisperDownloadCancelled(err) ? 'cancelled' : 'error')
+        setDownloadError(String(err))
+      }
+    } finally {
+      downloadSession.current?.dispose()
+      downloadSession.current = null
+    }
+  }
+
+  async function handleCancelDownload() {
+    try {
+      await downloadSession.current?.cancel()
+    } catch (err) {
+      if (mounted.current) {
+        setDownloadStatus('error')
+        setDownloadError(String(err))
+      }
     }
   }
 
@@ -186,7 +222,12 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
             <select
               style={s.select}
               value={whisperSize}
-              onChange={(event) => setWhisperSize(event.target.value)}
+              disabled={downloadStatus === 'downloading'}
+              onChange={(event) => {
+                setWhisperSize(event.target.value)
+                setDownloadStatus('idle')
+                setDownloadProgress(null)
+              }}
             >
               {WHISPER_SIZES.map((whisperModel) => (
                 <option key={whisperModel.value} value={whisperModel.value}>
@@ -198,6 +239,7 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
               首次使用触发下载，显示进度
             </div>
             <button
+              data-testid="whisper-download-action"
               style={s.btn}
               disabled={!isTauri() || downloadStatus === 'downloading'}
               onClick={isTauri() ? handleDownload : undefined}
@@ -208,13 +250,40 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
                   ? '✓ 已下载'
                   : '下载模型'}
             </button>
+            {downloadStatus === 'downloading' && (
+              <button
+                data-testid="whisper-download-cancel"
+                style={s.btn}
+                onClick={handleCancelDownload}
+              >
+                取消下载
+              </button>
+            )}
+            {downloadStatus === 'downloading' && downloadProgress && (
+              <div
+                data-testid="whisper-download-progress"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={downloadProgress.percent ?? undefined}
+                style={{ fontSize: 12, color: COLORS.muted, marginTop: 4 }}
+              >
+                {downloadProgress.percent == null ? '下载中' : `${downloadProgress.percent}%`}
+                {' '}({downloadProgress.downloadedBytes} / {downloadProgress.totalBytes ?? '?'} bytes)
+              </div>
+            )}
             {downloadStatus === 'error' && (
-              <div style={{ fontSize: 12, color: COLORS.fail, marginTop: 4 }}>
+              <div data-testid="whisper-download-status" style={{ fontSize: 12, color: COLORS.fail, marginTop: 4 }}>
                 下载失败：{downloadError}
               </div>
             )}
+            {downloadStatus === 'cancelled' && (
+              <div data-testid="whisper-download-status" style={{ fontSize: 12, color: COLORS.muted, marginTop: 4 }}>
+                下载已取消，可重新下载
+              </div>
+            )}
             {downloadStatus === 'done' && (
-              <div style={{ fontSize: 12, color: COLORS.example, marginTop: 4 }}>
+              <div data-testid="whisper-download-status" style={{ fontSize: 12, color: COLORS.example, marginTop: 4 }}>
                 模型已下载，可保存添加到模型池
               </div>
             )}

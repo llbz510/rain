@@ -13,6 +13,7 @@ pub mod settings_persistence;
 pub mod structure_persistence;
 pub mod video_deletion;
 pub mod whisper;
+pub mod whisper_model_download;
 pub mod ytdlp;
 
 use std::sync::Arc;
@@ -23,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .manage(Arc::new(scheduler::ImportScheduler::new()))
+        .manage(Arc::new(whisper_model_download::ModelDownloadManager::new()))
         .invoke_handler(tauri::generate_handler![
             commands::cancel_import,
             commands::check_ytdlp_command,
@@ -38,6 +40,7 @@ pub fn run() {
             commands::transition_video_import_state,
             commands::merge_import_atomically,
             commands::download_whisper_model,
+            commands::cancel_whisper_model_download,
             commands::list_whisper_models,
             e2e_config::get_real_e2e_config,
         ])

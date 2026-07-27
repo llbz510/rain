@@ -1286,6 +1286,25 @@ Stopped before modifying the known model-download hotspot and converted the unce
 
 The next decision is product authorization, not implementation: confirm, amend or reject `AC-MM-01` through `AC-MM-03`. Only after confirmation should the work proceed test-first, beginning with the Rust download module judges.
 
+## What changed in the 2026-07-27 Whisper model-download slice
+
+The user confirmed `AC-MM-01` through `AC-MM-03` and explicitly approved the M20 Harness Migration for a dedicated cancellation command. The model-download hotspot is now behind one owned Rust module and one frontend workflow:
+
+- Added `src-tauri/src/whisper_model_download.rs`. It pins all five supported files to upstream revision `5359861c739e955e79d9a303bcbc70fb988958b1` with exact byte counts and SHA-256 values, streams bounded response chunks into a unique same-directory `.part`, hashes incrementally, syncs and atomically replaces only after verification.
+- Kept production logic and its direct judges adjacent but separate: `whisper_model_download.rs` is about 466 lines, while the 11 local HTTP/filesystem/protocol judges live in `whisper_model_download_tests.rs` instead of doubling the production file's reading cost.
+- Existing valid files are reused without network access. Integrity/network/progress failures and cancellation remove the partial file; replacement failure preserves the prior destination. `list_models` only returns known final filenames and does not claim ASR capability.
+- Added a per-model download lease and cancellation token. One model size has one writer; cancellation wakes a stalled `Response::chunk()` through `Notify` plus `tokio::select!`, cleans up, and permits a clean retry.
+- `commands.rs` now only parses the model size, resolves the application model directory and delegates download/cancel/list. Tauri manages the download manager; locked M20 now includes the approved `cancel_whisper_model_download` command.
+- Added `src/settings/whisper-model-download.ts` as the production session owner for event filtering, download/cancel invokes, installed-list verification and listener disposal. `AddModelForm` displays actual bytes/percent, exposes cancel, distinguishes failed/cancelled, permits retry and only reports success after Rust lists the final file.
+- Corrected the model-size labels to the pinned ggml file sizes (MiB/GiB); the old labels understated every download by roughly half. M20 now locks the frontend/Rust model-progress event name, and Rust locks its camelCase payload.
+- Recorded the authorization and old-to-new judge mapping in `docs/development/harness-migration-2026-07-27-whisper-model-download.md`. The three ACs are Confirmed and their coverage is Strong.
+
+TDD evidence: the manifest test first failed to compile without `manifest_for`; M20 failed only for the missing approved command; all three UI tests failed on the old form; the model-size assertion exposed the stale medium label; and the correctly synchronized stalled-read test timed out before cancellation gained a wake-up path. A final diff review found that atomic replacement failure retained the verified `.part`; its red test failed for the missing commit helper before cleanup was added. Focused verification then passed 11 Rust download tests, 4 frontend/Harness files with 18 tests, and TypeScript compilation.
+
+Full verification passed 71 frontend test files / 423 tests with 1 live-key test skipped by its explicit environment guard. Rust passed 95 tests with 1 real Whisper model test explicitly ignored. TypeScript and the Vite production build passed with the existing dynamic/static import chunking warnings. A real GB-scale model download and the multi-hour real-video E2E were not run: this slice is directly judged with the pinned production manifest, local streaming HTTP fixtures, the real filesystem, the production Tauri command/event boundary and the real settings form; model capability remains owned by its separate probe/Evidence judges.
+
+Strict Clippy remains globally blocked by two pre-existing warnings in `whisper.rs` (`should_implement_trait` and `manual_is_multiple_of`). Rerunning with only those two lints allowed and all other warnings denied passed, so the new download module introduces no additional Clippy warning.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

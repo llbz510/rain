@@ -14,3 +14,14 @@ export async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<T>(cmd, args)
 }
+
+export async function tauriListen<T>(
+  eventName: string,
+  callback: (payload: T) => void,
+): Promise<() => void> {
+  if (!isTauri()) {
+    throw new Error(`Tauri not available: cannot listen to '${eventName}'`)
+  }
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen<T>(eventName, (event) => callback(event.payload))
+}

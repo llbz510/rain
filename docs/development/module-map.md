@@ -36,6 +36,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
+| Whisper Download Workflow | 建立一次下载会话、过滤生产进度事件、调用下载/取消并复核安装列表、释放 listener | 下载字节、文件完整性、持有后台任务 | `src/settings/whisper-model-download.ts` |
 | Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择 | 定义能力裁决、直接实现模型请求、承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
 | Study Session | 原子加载一个 ready 视频、统一播放位置、协调跳转、进度保存和学习页错误 | SQLite 细节、具体面板渲染、模型 HTTP 请求 | `src/store/rain-store.ts` 负责原子加载和成功打开时间；`src/study/session.ts` 负责把媒体进度持久化为单调递增的跨会话事实 |
 | Study Navigation | 把句子、节点和可信引用解析为同一时间线跳转，保持播放状态并通知相关区域定位 | 保存笔记、调用 LLM、直接读写 SQL | `src/study/navigation.ts` 负责节点到最早叶子句子的解析；`StudyInterface` 协调 Store/media，文本区负责滚动和真实预览 |
@@ -50,6 +51,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Rust Commands | 把前端请求翻译为 Rust 模块调用并解析应用拥有的路径 | 承载 ASR 执行、转录规则或数据库事务实现 | `src-tauri/src/commands.rs` |
 | ASR Execution | 校验一次 ASR 请求，持有 scheduler lease，编排临时 WAV、Whisper、进度、成功/失败/取消分类，并调用 Transcript seam | Tauri command 参数协议、转录分句规则、Pipeline 状态持久化 | `src-tauri/src/asr_execution.rs`；唯一生产入口 `execute_asr` |
 | ASR Transcript | 把 `WhisperResult` 转换为经过文本、时间戳、长度和唯一 ID 校验的 `AsrSentence` | Tauri 事件、临时 WAV、取消、调度和模型生命周期 | `src-tauri/src/asr_transcript.rs`；唯一生产入口 `build_asr_transcript` |
+| Whisper Model Download | 固定 manifest、流式下载、增量校验、临时文件、原子替换、每型号 lease/取消和进度上报 | React 状态、模型能力签发、视频导入调度 | `src-tauri/src/whisper_model_download.rs`；相邻直接裁判 `whisper_model_download_tests.rs`；生产入口 `download_model` / `cancel_model_download` / `list_models` |
 | Rust Runtime | 文件、ffmpeg、yt-dlp、Whisper、调度、取消 | React 状态和 LLM 调用 | `src-tauri/src/*.rs` |
 | Evidence | 运行真实流程并证明结果 | 代替普通回归测试 | `src/e2e/`、`scripts/`、`evidence/` |
 | Test Support | 为组件测试注入 Zustand 状态 | 参与生产运行、向生产组件提供 Context | `harness/support/` |
@@ -98,6 +100,8 @@ cancelImport(videoId)
 
 `start_asr` 只能把 Tauri 参数组装为 `AsrExecutionRequest`，再调用 `execute_asr(&AppHandle, &ImportScheduler, request)`。请求门禁、scheduler lease、临时 WAV、阻塞任务、进度顺序、取消/失败/过期分类和 Whisper adapter 归 `asr_execution.rs`；其生产实现与测试 fake 必须通过同一私有 backend/reporter seam 驱动同一套编排。Whisper 结果随后只能通过 `build_asr_transcript(&WhisperResult)` 进入应用句子模型；分句、无词级时间戳回退、乱码/空文本拒绝、时间戳单调性与重叠检查、500 字符预算和句子 ID 生成归 `asr_transcript.rs`。
 
+`download_whisper_model`、`cancel_whisper_model_download` 和 `list_whisper_models` 只能解析型号/应用模型目录并调用 `whisper_model_download.rs`。固定来源和哈希、响应分块、临时文件、最终替换、任务 lease、取消唤醒与进度事件都归该模块；设置表单不得绕过 `src/settings/whisper-model-download.ts` 自行拼接多条 Tauri 调用。
+
 媒体、Whisper、调度和持久化细节应分别留在对应 Rust 模块。新增 command 时必须同步真实 `generate_handler!`、调用适配器和协议测试，不再维护手写影子 command 清单。
 
 ## 4. 持久化和状态所有权
@@ -142,7 +146,7 @@ cancelImport(videoId)
 | --- | ---: | --- | --- |
 | `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
 | `src/models/database.ts` | 约 163 行 | 稳定公共导出和两种 adapter 构造 | 保持 `@/models/database` 稳定；业务持久化进入已有内部 module，不把公共入口重新长成实现集合 |
-| `src-tauri/src/commands.rs` | 约 314 行 | 15 个 command 中 14 个是薄 adapter；Whisper 模型下载/列举仍混合 HTTP、整包内存缓冲和文件系统行为 | ASR 已分别进入 execution/transcript module。模型管理必须等 `AC-MM-01/02/03` 从 Proposed 获得确认，并先建立失败/取消/完整性裁判；其他薄 command 不因文件长度被拆分 |
+| `src-tauri/src/commands.rs` | 约 293 行 | 16 个 command 的参数/路径适配 | ASR 已分别进入 execution/transcript module，模型下载已进入独立 module；继续保持 command 薄适配，其他 command 不因文件长度被拆分 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
 | `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |
 
