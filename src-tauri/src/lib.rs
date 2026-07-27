@@ -1,4 +1,5 @@
 pub mod asr_persistence;
+pub mod asr_transcript;
 pub mod commands;
 pub mod e2e_config;
 pub mod events;

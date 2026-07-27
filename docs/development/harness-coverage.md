@@ -67,6 +67,7 @@
 | Settings 持久化 seam | `database-settings.test.ts`、M15 settings/recovery、`model-pool.test.ts`、`model-capabilities.test.ts`、预检/设置 UI 测试 | Strong（公共接口 + 双 adapter） | SQLite characterization 锁定参数化 upsert/read/delete、空值/缺失值和错误传播；M15 锁定内存 CRUD；Key 分离、旧配置迁移、能力记录与配置变更失效由上层行为测试托管 |
 | Runtime Settings 快照保存 | `database-settings.test.ts`、`model-pool.test.ts`、M20、Rust `settings_persistence` tests | Strong（业务批次 + Rust 事务） | `AC-LV-14` 锁定模型列表、独立 Key、角色、能力记录和旧格式迁移的单批提交；真实 SQLite 末步失败会回滚全部变更并保留无关 key |
 | 视频级联删除 seam | `database-video-deletion.test.ts`、M15/M20、Rust `video_deletion` tests | Strong（公共接口 + Rust 事务） | `AC-LV-13` 由前端单 command/错误传播、内存全清理与隔离、真实 SQLite 成功/晚失败回滚/幂等共同托管 |
+| ASR Transcript seam | Rust `asr_transcript` tests、`pipeline-asr.test.ts`、真实证据 | Strong + Evidence | `AC-LV-03` 的 fail-closed 结果门禁由真实 `build_asr_transcript` 直接裁判：覆盖空结果、空白/乱码、无效/逆序/重叠时间戳、无词级时间戳回退、可疑 token、长段分句和全局唯一 ID；Pipeline 测试继续证明失败不进入 Stage2，真实 Evidence 补充 Whisper 运行结果。ASR 执行生命周期仍由 scheduler/events/command 测试和 Evidence 分别托管 |
 | progress 事件名称和字段 | M20/M21 前端 Harness、Rust `events`/`commands` Harness | Strong | 覆盖事件订阅转发、重复监听释放、Rust camelCase 序列化和 ASR 子阶段 |
 | Rust Harness 系统行为 | `src-tauri/tests/*_harness.rs` | Strong | 覆盖调度串行化、按视频取消、取消令牌、ffmpeg/Whisper/yt-dlp 非法输入、错误上下文和真实媒体 fixture |
 | 视觉令牌 | `harness/m13-visual.test.ts` | Strong | 读取并装载应用实际使用的 `src/index.css`，通过 CSSOM 检查变量；不再维护 TS 复制品 |

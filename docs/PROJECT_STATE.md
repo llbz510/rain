@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the atomic Runtime Settings slice: `349f279 refactor: isolate settings persistence`
+Current working base before the Rust commands audit and ASR Transcript slice: `71dfc06 fix: make runtime settings atomic`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -1236,6 +1236,22 @@ Full verification passed:
 - Rust: 81 tests passed; 1 real Whisper model test remained explicitly ignored.
 - TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings.
 - The multi-hour real-video E2E was not rerun because the changed behavior is directly judged at the business mutation batch, public command protocol and real in-memory SQLite transaction layers; ASR, LLM requests and rendered study workflows are unchanged.
+
+## What changed in the 2026-07-27 Rust commands audit and ASR Transcript slice
+
+Audited `src-tauri/src/commands.rs` by reason to change rather than by line count. Most of its 15 Tauri commands are already thin adapters; the two real mixed responsibilities were ASR Transcript conversion/validation and ASR Execution lifecycle management.
+
+- Added `src-tauri/src/asr_transcript.rs` as the single owner of `WhisperResult -> Result<Vec<AsrSentence>, String>` through `build_asr_transcript`.
+- Moved sentence splitting, no-word-timestamp fallback, suspicious token handling, empty/mojibake rejection, timestamp validation, the 500-character Stage2 input budget and globally unique IDs together with their responsibility.
+- Kept the `start_asr` command name, payload, return shape and frontend interface unchanged. `commands.rs` now delegates transcript construction after Whisper completes.
+- Moved the 10 direct transcript behavior tests into the new module. The 3 ASR execution tests for cancellation, tier validation and language normalization remain with `commands.rs`.
+- Reduced `commands.rs` from about 835 to 459 lines. The new transcript module is about 438 lines including its 10 tests; line count is not the acceptance criterion.
+- No locked file under `harness/` or `src-tauri/tests/` changed, so this behavior-preserving responsibility extraction required no Harness Migration.
+- This slice is governed by `AC-LV-03` and the existing Stage2 input constraints. Its direct judge is the Rust `asr_transcript` test module; `pipeline-asr.test.ts` proves a rejected result cannot advance to Stage2, while real Evidence remains the judge for the complete Whisper runtime.
+
+The next controlled Rust slice is ASR Execution: temporary WAV creation, progress events, cancellation, scheduler lifecycle and model invocation still live in `commands.rs`. They should move behind one execution interface while keeping the Tauri protocol and their existing scheduler/event/command judges stable. The other thin commands should not be rewritten merely to make the file shorter.
+
+Focused verification passed 10 `asr_transcript` tests and 3 remaining `commands::tests`. Full verification passed 70 frontend files / 419 tests with 1 live-key test skipped by its explicit environment guard; Rust passed 81 tests with 1 real Whisper model test explicitly ignored. The production Vite build passed with the existing dynamic/static import chunking warnings. `rustfmt --check` for the new module and `git diff --check` also passed. The multi-hour real-video E2E was not rerun because the Tauri protocol, Whisper invocation and observable transcript rules are unchanged and all moved rules are directly judged through the same production entry.
 
 ## Maintenance checklist for every future session
 

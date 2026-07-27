@@ -47,7 +47,8 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Assistant Capability Probe | 复用生产流式聊天接口检查文本响应、指令遵循、超时和脱敏，并签发助手角色的 `Compatible` | 证明 vision、替代学习页上下文和引用测试、签发 `Verified` | `src/settings/assistant-capability.ts` |
 | LLM Adapter | OpenAI-compatible 请求、流式和错误处理 | 产品状态机、SQLite | `src/llm/` |
 | Tauri Adapter | command/event 名称和前端调用封装 | 产品规则 | `src/lib/tauri-env.ts`、`src/architecture/` |
-| Rust Commands | 把前端请求翻译为 Rust 模块调用 | 承载全部媒体/Whisper 实现 | `src-tauri/src/commands.rs` |
+| Rust Commands | 把前端请求翻译为 Rust 模块调用，并编排仍未提取的 ASR 执行生命周期 | 定义 Whisper 转录文本转换和质量门禁 | `src-tauri/src/commands.rs` |
+| ASR Transcript | 把 `WhisperResult` 转换为经过文本、时间戳、长度和唯一 ID 校验的 `AsrSentence` | Tauri 事件、临时 WAV、取消、调度和模型生命周期 | `src-tauri/src/asr_transcript.rs`；唯一生产入口 `build_asr_transcript` |
 | Rust Runtime | 文件、ffmpeg、yt-dlp、Whisper、调度、取消 | React 状态和 LLM 调用 | `src-tauri/src/*.rs` |
 | Evidence | 运行真实流程并证明结果 | 代替普通回归测试 | `src/e2e/`、`scripts/`、`evidence/` |
 | Test Support | 为组件测试注入 Zustand 状态 | 参与生产运行、向生产组件提供 Context | `harness/support/` |
@@ -94,6 +95,8 @@ cancelImport(videoId)
 - 调用相应 Rust 模块；
 - 把结构化结果或错误返回给前端。
 
+Whisper 转录结果只能通过 `build_asr_transcript(&WhisperResult)` 进入应用句子模型。分句、无词级时间戳回退、乱码/空文本拒绝、时间戳单调性与重叠检查、500 字符预算和句子 ID 生成归 `asr_transcript.rs`；调用方不得在 command 层复制这些规则。ASR 执行阶段的临时 WAV、进度事件、取消、调度和模型生命周期目前仍在 `commands.rs`，是下一轮按接口提取的明确热点。
+
 媒体、Whisper、调度和持久化细节应分别留在对应 Rust 模块。新增 command 时必须同步真实 `generate_handler!`、调用适配器和协议测试，不再维护手写影子 command 清单。
 
 ## 4. 持久化和状态所有权
@@ -138,7 +141,7 @@ cancelImport(videoId)
 | --- | ---: | --- | --- |
 | `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
 | `src/models/database.ts` | 约 163 行 | 稳定公共导出和两种 adapter 构造 | 保持 `@/models/database` 稳定；业务持久化进入已有内部 module，不把公共入口重新长成实现集合 |
-| `src-tauri/src/commands.rs` | 约 835 行 | command、参数处理、部分系统行为 | 保持 command 薄；数据库事务分别下沉到 persistence module，后续按行为职责继续审计其余 command |
+| `src-tauri/src/commands.rs` | 约 459 行 | command、参数处理；ASR 执行仍混合临时 WAV、进度、取消、调度和模型生命周期 | 转录转换已进入 `asr_transcript.rs`；下一切片只提取 ASR 执行 interface，其他薄 command 不因文件长度被重写 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
 | `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |
 
