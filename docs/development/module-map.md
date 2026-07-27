@@ -142,7 +142,7 @@ cancelImport(videoId)
 | --- | ---: | --- | --- |
 | `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
 | `src/models/database.ts` | 约 163 行 | 稳定公共导出和两种 adapter 构造 | 保持 `@/models/database` 稳定；业务持久化进入已有内部 module，不把公共入口重新长成实现集合 |
-| `src-tauri/src/commands.rs` | 约 314 行 | 15 个 command 中 14 个是薄 adapter；Whisper 模型下载/列举仍混合 HTTP、整包内存缓冲和文件系统行为 | ASR 已分别进入 execution/transcript module。模型管理在新增 Active AC 和失败/取消/完整性裁判前不得顺手重写；其他薄 command 不因文件长度被拆分 |
+| `src-tauri/src/commands.rs` | 约 314 行 | 15 个 command 中 14 个是薄 adapter；Whisper 模型下载/列举仍混合 HTTP、整包内存缓冲和文件系统行为 | ASR 已分别进入 execution/transcript module。模型管理必须等 `AC-MM-01/02/03` 从 Proposed 获得确认，并先建立失败/取消/完整性裁判；其他薄 command 不因文件长度被拆分 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
 | `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |
 

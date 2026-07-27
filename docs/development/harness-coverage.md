@@ -35,7 +35,17 @@
 | AC-LV-13 | `database-video-deletion.test.ts`、M15/M20、Rust `video_deletion` tests | Strong（公共接口 + Rust 事务） | 前端锁定单 command 协议、错误传播和内存隔离；Rust 真实 SQLite 锁定全部归属数据清理、末步失败回滚和缺失 Video 幂等 |
 | AC-LV-14 | `database-settings.test.ts`、`model-pool.test.ts`、M20、Rust `settings_persistence` tests | Strong（业务批次 + Rust 事务） | 模型快照保存与旧格式迁移均组装单批 mutation；前端锁定 command/payload/错误传播，Rust 锁定成功提交、无关 key 隔离和末步失败全回滚 |
 
-## 3. 学习页核心流程
+## 3. Whisper 模型下载（Proposed）
+
+这些 AC 尚未确认，不构成完成门禁，也不授权修改锁定 Harness。表中记录的是如果确认后必须补齐的裁判。
+
+| AC | 当前裁判 | 等级 | 当前结论与缺口 |
+| --- | --- | --- | --- |
+| AC-MM-01 | M20 仅确认 `download_whisper_model` / `list_whisper_models` 已注册 | Gap | 当前 command 整包读取响应后直接写最终路径；没有受信 manifest、哈希/长度校验、临时文件、原子替换、失败清理或旧文件保留裁判。需要 Rust 本地 HTTP fixture + 临时目录行为测试 |
+| AC-MM-02 | 设置页只有 `downloading/done/error` 局部状态 | Gap | 没有分块消费裁判、真实进度事件、取消 command、重复下载隔离或取消后重试。新增 cancel command 需要用户批准 M20 Harness Migration |
+| AC-MM-03 | 无直接行为测试；历史规格和当前“首次使用触发下载，显示进度”文案不能充当裁判 | Gap | UI 没有数值进度、取消、生产事件订阅或成功后列表复核。需要通过生产 Tauri adapter/event interface 操作真实 `AddModelForm` 的非锁定组件测试 |
+
+## 4. 学习页核心流程
 
 | AC | 当前裁判 | 等级 | 当前结论与缺口 |
 | --- | --- | --- | --- |
@@ -50,7 +60,7 @@
 
 学习页整体审计结论：现有 M05-M10、M16 Harness 并非无效，但多数只裁判单个组件、函数或占位组合。它们可以保留为局部裁判，不能独自签发跨 Store、媒体元素、SQLite 和多个区域的学习工作流完成状态；`AC-ST-01` 至 `AC-ST-08` 的 Strong 结论以对应生产路径测试为准。
 
-## 4. 架构 Harness 审计
+## 5. 架构 Harness 审计
 
 | 规则 | 当前裁判 | 等级 | 问题 |
 | --- | --- | --- | --- |
@@ -77,7 +87,7 @@
 
 2026-07-26 经用户批准完成两轮 Harness Migration。旧的影子注册表、假导入队列、未接入树编辑、视觉令牌复制品、旧 ASR 标准化和恒真 Rust 测试已被真实接口行为测试替代或明确退役；详见 `harness-migration-2026-07-26.md`。
 
-## 5. 当前不设“已完成”门禁的能力
+## 6. 当前不设“已完成”门禁的能力
 
 | 能力 | 状态 | 处理规则 |
 | --- | --- | --- |
@@ -85,7 +95,7 @@
 | 在线 URL 完整导入 | Gap | 进入验收范围前，不得用空 `start_import` command 或字幕/API 标准化函数表示已实现 |
 | Vision 解释当前画面 | Gap | 必须有截图、图像请求和模型能力验证后才能加入完成门禁 |
 
-## 6. 变更时如何查表
+## 7. 变更时如何查表
 
 例如修改取消逻辑：
 

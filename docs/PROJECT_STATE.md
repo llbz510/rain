@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the ASR Execution slice: `bf89cae refactor: isolate asr transcript processing`
+Current working base before the Whisper model-download AC proposal: `43263bd refactor: isolate asr execution lifecycle`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. Whisper model download/listing is not covered by an Active AC or a direct behavior Harness. `download_whisper_model` currently buffers the complete HTTP response in memory, then writes directly to the final path without cancellation, progress, hash validation or an atomic temporary-file rename. This is the next controlled Rust risk, but changing its behavior first requires a Proposed AC to be confirmed and assigned failure/cancellation/integrity judges.
+17. Whisper model download/listing is not covered by a Confirmed AC or a direct behavior Harness. `download_whisper_model` currently buffers the complete HTTP response in memory, then writes directly to the final path without cancellation, progress, hash validation or an atomic temporary-file rename. `AC-MM-01` through `AC-MM-03` now record the proposed product contract and judges, but remain `Proposed`; they do not authorize implementation until the user confirms them.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1271,6 +1271,20 @@ Completed the second responsibility extraction from `src-tauri/src/commands.rs` 
 Focused verification passed 6 `asr_execution` tests, 13 scheduler tests, 5 locked command Harness tests and 5 locked Whisper Harness tests. Full verification passed 70 frontend files / 419 tests with 1 live-key test skipped by its explicit environment guard; Rust passed 84 tests with 1 real Whisper model test explicitly ignored. The production Vite build passed with the existing dynamic/static import chunking warnings. `rustfmt --check`, `git diff --check` and the locked-directory diff check passed. The multi-hour real-video E2E was not rerun because the Tauri protocol, production Whisper adapter and observable lifecycle are unchanged, while the moved orchestration now has direct success/failure/cancellation judges.
 
 The next controlled Rust risk is model download/listing, not the remaining thin commands. Before implementation, define and confirm acceptance criteria for streaming memory use, progress, cancellation, partial-file cleanup, integrity and replacement behavior; then assign each criterion to a direct Rust judge and any necessary UI/Evidence judge.
+
+## What changed in the 2026-07-27 Whisper model-download AC proposal
+
+Stopped before modifying the known model-download hotspot and converted the uncertainty into three explicit Proposed acceptance criteria:
+
+- `AC-MM-01` proposes a versioned trusted manifest, streamed temporary-file writes, byte-count/SHA-256 verification, atomic final replacement, old-valid-file preservation and idempotent reuse.
+- `AC-MM-02` proposes bounded-memory chunk consumption, monotonic byte/percent progress, per-model cancellation, one writer per model and clean retry.
+- `AC-MM-03` proposes a settings workflow driven by production events: real progress, cancel, distinct failed/cancelled states, retry, listener cleanup and success only after the installed-model list sees the final file.
+- Each AC now names its proposed owner and direct judge. Rust tests would use a local HTTP fixture and temporary directory rather than real multi-GB downloads; UI tests would drive the real form through the production Tauri adapter/event seam.
+- The current locked M20 only proves command registration. Adding `cancel_whisper_model_download` would change its exact command set, so implementation requires a separately approved Harness Migration after the ACs become Confirmed.
+- Historical model-management specs mention progress, but they are not current acceptance truth. The proposal records that intent without silently promoting it to Active behavior.
+- No product code or locked Harness changed in this proposal slice.
+
+The next decision is product authorization, not implementation: confirm, amend or reject `AC-MM-01` through `AC-MM-03`. Only after confirmation should the work proceed test-first, beginning with the Rust download module judges.
 
 ## Maintenance checklist for every future session
 
