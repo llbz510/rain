@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the atomic Note Harness Migration: `2f70bd9 refactor: isolate note persistence`
+Current working base before the study-content persistence slice: `4cf76c3 fix: make note persistence atomic`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state, atomic import and note persistence have moved behind it. Legacy video/content CRUD and settings functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
+17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state, atomic import, Node/Sentence content and note persistence have moved behind it. Legacy Video lifecycle and settings functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1143,6 +1143,20 @@ Closed the remaining `AC-ST-06` SQLite failure-atomicity gap with the user-appro
 - Repaired the live-key smoke timeout without changing its opt-in contract. A forced real `qwen3-omni-flash` run first exposed Vitest's 5-second default timeout; the test now has a 30-second external-call allowance and passed in about 1.36 seconds. The key was injected only into the test process and was not written to the repository.
 
 The migration first produced the expected 3 red assertions against the old implementation, then passed 4 focused frontend files / 19 tests and 3 focused Rust behavior/protocol tests. Full verification passed 66 frontend files / 408 tests with the opt-in live test skipped by default; the separately forced live test passed 1/1. Rust passed 53 library tests and 23 executable Harness tests, with the existing real Whisper model test ignored. The production build, `git diff --check` and a tracked-file scan for the supplied key passed. The existing Vite dynamic/static import chunking warnings remain unchanged.
+
+## What changed in the 2026-07-27 study-content persistence slice
+
+Continued the controlled database decomposition without changing product behavior or the stable `@/models/database` interface:
+
+- Added `src/models/database-content.ts` as the owner of Node/Sentence ordinary writes and queries by Node or Video.
+- Kept `insertNodes`, `getNodesByVideoId`, `insertSentences`, `getSentencesByNodeId` and `getSentencesByVideoId` re-exported from `database.ts`; Store, Pipeline, E2E and Harness callers did not learn the internal module.
+- Added `database-content.test.ts` at the public interface. It characterizes complete SQLite Node/Sentence parameters, domain-row reconstruction and the distinct Node, sentence-by-Node and sentence-by-Video query scopes.
+- Reused the existing real two-adapter seam inside the extracted module. Node/Sentence persistence no longer depends on `MemoryDatabase` compatibility methods, while both ordinary and atomic paths continue sharing `database-content-rows.ts`.
+- Extended `database-boundary.test.ts` so production callers outside `src/models/` cannot import `database-content` directly.
+- Reduced `database.ts` from 503 to 424 lines. Its remaining implementation responsibilities are adapter construction, Video lifecycle/progress, settings and cascade deletion.
+- This slice is governed by `AC-ST-01` and existing `AC-LV-04/05/09` contracts. It does not modify locked Harness or claim new product behavior.
+
+Focused verification passed 6 files / 87 tests across the new SQLite characterization, internal import rule, M15 CRUD, production study loading, Pipeline ASR and Stage2 behavior; TypeScript also passed. The full frontend suite passed 67 files / 410 tests with the opt-in live test skipped by default. The production build passed with the existing Vite dynamic/static import chunking warnings, and `git diff --check` passed. Rust and the multi-hour real-video E2E were not rerun because this slice changes only TypeScript module ownership while preserving the public database interface and all runtime behavior.
 
 ## Maintenance checklist for every future session
 

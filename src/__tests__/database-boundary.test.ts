@@ -30,6 +30,7 @@ describe('database adapter seam', () => {
     const internalModuleNames = [
       'database-adapter',
       'database-checkpoints',
+      'database-content',
       'database-content-rows',
       'database-import-atomic',
       'database-import-state',

@@ -6,7 +6,7 @@
 // 公开 API（Database 接口 + 所有导出函数签名）两种后端完全一致。
 // ========================================
 
-import type { Video, Node, Sentence } from './types'
+import type { Video } from './types'
 import {
   isSqlDatabase,
   type Database,
@@ -19,12 +19,6 @@ import {
   getDatabaseTableColumns,
   listDatabaseTableNames,
 } from './database-schema'
-import {
-  nodeToRow,
-  rowToNode,
-  rowToSentence,
-  sentenceToRow,
-} from './database-content-rows'
 // 仅类型引用：编译期擦除，不在 jsdom 下触发模块加载。
 // 运行时通过 createDatabase 内的动态 import() 加载。
 import type TauriSqlPlugin from '@tauri-apps/plugin-sql'
@@ -43,6 +37,13 @@ export {
   mergeImportAtomically,
   saveAsrAtomically,
 } from './database-import-atomic'
+export {
+  getNodesByVideoId,
+  getSentencesByNodeId,
+  getSentencesByVideoId,
+  insertNodes,
+  insertSentences,
+} from './database-content'
 export {
   getNotesByVideoId,
   insertNote,
@@ -227,70 +228,6 @@ export async function getVideoById(db: Database, id: string): Promise<Video | nu
   const memDb = db as unknown as MemoryDatabase
   const row = memDb._getTable('video').find(r => r.id === id)
   return row ? rowToVideo(row) : null
-}
-
-export async function insertNodes(db: Database, nodes: Node[]): Promise<void> {
-  if (isTauriDb(db)) {
-    for (const node of nodes) {
-      const r = nodeToRow(node)
-      await db.exec(
-        'INSERT INTO node (id, video_id, parent_id, kind, title, type, start_time, end_time, text, translation, sort_order) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
-        [r.id, r.video_id, r.parent_id, r.kind, r.title, r.type, r.start_time, r.end_time, r.text, r.translation, r.sort_order]
-      )
-    }
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('node')
-  for (const node of nodes) {
-    table.push(nodeToRow(node))
-  }
-  memDb._setTable('node', table)
-}
-
-export async function getNodesByVideoId(db: Database, videoId: string): Promise<Node[]> {
-  if (isTauriDb(db)) {
-    const rows = await db.query<TableRow>('SELECT * FROM node WHERE video_id = $1', [videoId])
-    return rows.map(rowToNode)
-  }
-  const memDb = db as unknown as MemoryDatabase
-  return memDb._getTable('node')
-    .filter(r => r.video_id === videoId)
-    .map(rowToNode)
-}
-
-export async function insertSentences(db: Database, sentences: Sentence[]): Promise<void> {
-  if (isTauriDb(db)) {
-    for (const sentence of sentences) {
-      const r = sentenceToRow(sentence)
-      await db.exec(
-        'INSERT INTO sentence (id, node_id, text, start_time, end_time, sort_order) VALUES ($1, $2, $3, $4, $5, $6)',
-        [r.id, r.node_id, r.text, r.start_time, r.end_time, r.sort_order]
-      )
-    }
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('sentence')
-  for (const sentence of sentences) {
-    table.push(sentenceToRow(sentence))
-  }
-  memDb._setTable('sentence', table)
-}
-
-export async function getSentencesByNodeId(db: Database, nodeId: string): Promise<Sentence[]> {
-  if (isTauriDb(db)) {
-    const rows = await db.query<TableRow>(
-      'SELECT * FROM sentence WHERE node_id = $1 ORDER BY sort_order ASC',
-      [nodeId]
-    )
-    return rows.map(rowToSentence)
-  }
-  const memDb = db as unknown as MemoryDatabase
-  return memDb._getTable('sentence')
-    .filter(r => r.node_id === nodeId)
-    .map(rowToSentence)
-    .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
 function isTauriDb(db: Database): db is SqlDatabaseAdapter {
@@ -486,20 +423,4 @@ export async function deleteVideoWithCascade(db: Database, videoId: string): Pro
   memDb._setTable('import_checkpoint', memDb._getTable('import_checkpoint').filter(
     r => r.video_id !== videoId
   ))
-}
-
-export async function getSentencesByVideoId(db: Database, videoId: string): Promise<Sentence[]> {
-  if (isTauriDb(db)) {
-    const rows = await db.query<TableRow>(
-      'SELECT sentence.* FROM sentence LEFT JOIN node ON sentence.node_id = node.id WHERE sentence.node_id = $1 OR node.video_id = $1 ORDER BY sentence.sort_order ASC',
-      [videoId]
-    )
-    return rows.map(rowToSentence)
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const nodeIds = new Set(memDb._getTable('node').filter(row => row.video_id === videoId).map(row => row.id))
-  return memDb._getTable('sentence')
-    .filter(row => row.node_id === videoId || nodeIds.has(row.node_id))
-    .map(rowToSentence)
-    .sort((a, b) => a.sortOrder - b.sortOrder)
 }
