@@ -19,6 +19,12 @@ import {
   getDatabaseTableColumns,
   listDatabaseTableNames,
 } from './database-schema'
+import {
+  nodeToRow,
+  rowToNode,
+  rowToSentence,
+  sentenceToRow,
+} from './database-content-rows'
 // 仅类型引用：编译期擦除，不在 jsdom 下触发模块加载。
 // 运行时通过 createDatabase 内的动态 import() 加载。
 import type TauriSqlPlugin from '@tauri-apps/plugin-sql'
@@ -31,6 +37,12 @@ export {
   type ImportRecoveryAction,
   type VideoImportState,
 } from './database-import-state'
+export {
+  assignAsrSentencesToNodes,
+  atomicInsertSentences,
+  mergeImportAtomically,
+  saveAsrAtomically,
+} from './database-import-atomic'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）
@@ -172,64 +184,6 @@ function rowToVideo(row: TableRow): Video {
   }
 }
 
-// 转换 Node 对象到行数据
-function nodeToRow(node: Node): TableRow {
-  return {
-    id: node.id,
-    video_id: node.videoId,
-    parent_id: node.parentId,
-    kind: node.kind,
-    title: node.title,
-    type: node.type,
-    start_time: node.startTime,
-    end_time: node.endTime,
-    text: node.text,
-    translation: node.translation ?? null,
-    sort_order: node.sortOrder,
-  }
-}
-
-// 转换行数据到 Node 对象
-function rowToNode(row: TableRow): Node {
-  return {
-    id: row.id,
-    videoId: row.video_id,
-    parentId: row.parent_id,
-    kind: row.kind,
-    title: row.title,
-    type: row.type,
-    startTime: row.start_time,
-    endTime: row.end_time,
-    text: row.text,
-    translation: row.translation ?? undefined,
-    sortOrder: row.sort_order,
-  }
-}
-
-// 转换 Sentence 对象到行数据
-function sentenceToRow(sentence: Sentence): TableRow {
-  return {
-    id: sentence.id,
-    node_id: sentence.nodeId,
-    text: sentence.text,
-    start_time: sentence.startTime,
-    end_time: sentence.endTime,
-    sort_order: sentence.sortOrder,
-  }
-}
-
-// 转换行数据到 Sentence 对象
-function rowToSentence(row: TableRow): Sentence {
-  return {
-    id: row.id,
-    nodeId: row.node_id,
-    text: row.text,
-    startTime: row.start_time,
-    endTime: row.end_time,
-    sortOrder: row.sort_order,
-  }
-}
-
 // 转换 Note 对象到行数据
 function noteToRow(note: Note): TableRow {
   return {
@@ -324,16 +278,6 @@ export async function getNodesByVideoId(db: Database, videoId: string): Promise<
   return memDb._getTable('node')
     .filter(r => r.video_id === videoId)
     .map(rowToNode)
-}
-
-function assertSentenceIdsAvailable(table: TableRow[], sentences: Sentence[]): void {
-  const ids = new Set(table.map(row => row.id))
-  for (const sentence of sentences) {
-    if (ids.has(sentence.id)) {
-      throw new Error(`Sentence already exists: ${sentence.id}`)
-    }
-    ids.add(sentence.id)
-  }
 }
 
 export async function insertSentences(db: Database, sentences: Sentence[]): Promise<void> {
@@ -645,204 +589,4 @@ export async function getSentencesByVideoId(db: Database, videoId: string): Prom
     .filter(row => row.node_id === videoId || nodeIds.has(row.node_id))
     .map(rowToSentence)
     .sort((a, b) => a.sortOrder - b.sortOrder)
-}
-
-export async function saveAsrAtomically(
-  videoId: string,
-  language: string,
-  sentences: Sentence[],
-  database?: Database,
-): Promise<void> {
-  const db = database ?? await (await import('./db-singleton')).getDb()
-  if (!await getVideoById(db, videoId)) {
-    throw new Error(`Video not found: ${videoId}`)
-  }
-  const asrSentences = sentences.map(sentence => sentence.nodeId ? sentence : { ...sentence, nodeId: videoId })
-  if (isTauriDb(db)) {
-    const { tauriInvoke } = await import('@/lib/tauri-env')
-    await tauriInvoke<void>('save_asr_atomically', { videoId, language, sentences: asrSentences })
-    return
-  }
-
-  const memDb = db as unknown as MemoryDatabase
-  const sentenceRows = memDb._getTable('sentence')
-  const videoRows = memDb._getTable('video')
-  const sentenceBackup = sentenceRows.map(row => ({ ...row }))
-  const videoBackup = videoRows.map(row => ({ ...row }))
-  try {
-    const video = videoRows.find(row => row.id === videoId)
-    if (!video) throw new Error(`Video not found: ${videoId}`)
-    if (video.status !== 'processing' || video.stage !== 'asr') {
-      throw new Error(`Persisted import state changed for video "${videoId}"`)
-    }
-    for (const sentence of asrSentences) {
-      assertSentenceIdsAvailable(sentenceRows, [sentence])
-      sentenceRows.push(sentenceToRow(sentence))
-    }
-    video.language = language
-    video.status = 'processing'
-    video.stage = 'stage2'
-    memDb._setTable('sentence', sentenceRows)
-    memDb._setTable('video', videoRows)
-  } catch (error) {
-    memDb._setTable('sentence', sentenceBackup)
-    memDb._setTable('video', videoBackup)
-    throw error
-  }
-}
-export async function assignAsrSentencesToNodes(
-  db: Database,
-  videoId: string,
-  sentences: Sentence[],
-): Promise<void> {
-  if (isTauriDb(db)) {
-    const { tauriInvoke } = await import('@/lib/tauri-env')
-    await tauriInvoke<void>('assign_asr_sentences_atomically', {
-      videoId,
-      assignments: sentences.map((sentence) => ({
-        id: sentence.id,
-        nodeId: sentence.nodeId,
-        sortOrder: sentence.sortOrder,
-      })),
-    })
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const rows = memDb._getTable('sentence')
-  const backup = rows.map((row) => ({ ...row }))
-  const validNodeIds = new Set(
-    memDb._getTable('node').filter((row) => row.video_id === videoId).map((row) => row.id),
-  )
-  try {
-    for (const sentence of sentences) {
-      if (!validNodeIds.has(sentence.nodeId)) {
-        throw new Error(`Cannot assign ASR sentence "${sentence.id}" to node "${sentence.nodeId}"`)
-      }
-      const row = rows.find((candidate) => candidate.id === sentence.id && candidate.node_id === videoId)
-      if (!row) {
-        throw new Error(`Cannot assign ASR sentence "${sentence.id}" to node "${sentence.nodeId}"`)
-      }
-      row.node_id = sentence.nodeId
-      row.sort_order = sentence.sortOrder
-    }
-    memDb._setTable('sentence', rows)
-  } catch (error) {
-    memDb._setTable('sentence', backup)
-    throw error
-  }
-}
-
-export async function mergeImportAtomically(
-  db: Database,
-  videoId: string,
-  nodes: Node[],
-  sentences: Sentence[],
-): Promise<void> {
-  const assignments = sentences.map((sentence) => ({
-    id: sentence.id,
-    nodeId: sentence.nodeId,
-    sortOrder: sentence.sortOrder,
-  }))
-  if (isTauriDb(db)) {
-    const { tauriInvoke } = await import('@/lib/tauri-env')
-    await tauriInvoke<void>('merge_import_atomically', { videoId, nodes, assignments })
-    return
-  }
-
-  const memDb = db as unknown as MemoryDatabase
-  const nodeRows = memDb._getTable('node')
-  const sentenceRows = memDb._getTable('sentence')
-  const videoRows = memDb._getTable('video')
-  const nodeBackup = nodeRows.map((row) => ({ ...row }))
-  const sentenceBackup = sentenceRows.map((row) => ({ ...row }))
-  const videoBackup = videoRows.map((row) => ({ ...row }))
-  try {
-    const video = videoRows.find((row) => row.id === videoId)
-    if (!video || video.status !== 'processing' || video.stage !== 'merging') {
-      throw new Error(`Persisted import state changed for video "${videoId}"`)
-    }
-    const submittedNodeIds = new Set(nodes.map((node) => node.id))
-    if (submittedNodeIds.size !== nodes.length) throw new Error('Submitted node graph contains duplicate node IDs')
-    for (const node of nodes) {
-      if (node.videoId !== videoId) throw new Error(`Cannot insert import node "${node.id}"`)
-      if (node.parentId !== null && !submittedNodeIds.has(node.parentId)) {
-        throw new Error(`Submitted node "${node.id}" has missing parent "${node.parentId}"`)
-      }
-    }
-    const placeholderIds = sentenceRows
-      .filter((row) => row.node_id === videoId)
-      .map((row) => String(row.id))
-    const assignmentIds = assignments.map((assignment) => assignment.id)
-    const uniqueAssignmentIds = new Set(assignmentIds)
-    if (assignmentIds.length !== placeholderIds.length || uniqueAssignmentIds.size !== assignmentIds.length
-      || placeholderIds.some((id) => !uniqueAssignmentIds.has(id))) {
-      throw new Error('Sentence assignments must exhaust placeholder ASR sentences exactly once')
-    }
-    if (assignments.some((assignment) => !submittedNodeIds.has(assignment.nodeId))) {
-      throw new Error('Sentence assignment targets a node outside the submitted graph')
-    }
-
-    const allNodeIds = new Set(nodeRows.map((row) => row.id))
-    for (const node of nodes) {
-      if (allNodeIds.has(node.id)) throw new Error(`Cannot insert import node "${node.id}"`)
-      allNodeIds.add(node.id)
-      nodeRows.push(nodeToRow(node))
-    }
-    for (const assignment of assignments) {
-      const row = sentenceRows.find((candidate) =>
-        candidate.id === assignment.id && candidate.node_id === videoId)
-      if (!row) {
-        throw new Error(`Cannot assign ASR sentence "${assignment.id}" to node "${assignment.nodeId}"`)
-      }
-      row.node_id = assignment.nodeId
-      row.sort_order = assignment.sortOrder
-    }
-    video.status = 'ready'
-    video.stage = null
-    video.error_message = null
-    memDb._setTable('node', nodeRows)
-    memDb._setTable('sentence', sentenceRows)
-    memDb._setTable('video', videoRows)
-  } catch (error) {
-    memDb._setTable('node', nodeBackup)
-    memDb._setTable('sentence', sentenceBackup)
-    memDb._setTable('video', videoBackup)
-    throw error
-  }
-}
-export async function atomicInsertSentences(db: Database, sentences: Sentence[]): Promise<void> {
-  if (isTauriDb(db)) {
-    // 原子插入：用 BEGIN/COMMIT/ROLLBACK 事务保证全部成功或全部失败
-    await db.exec('BEGIN')
-    try {
-      for (const sentence of sentences) {
-        const r = sentenceToRow(sentence)
-        await db.exec(
-          'INSERT INTO sentence (id, node_id, text, start_time, end_time, sort_order) VALUES ($1, $2, $3, $4, $5, $6)',
-          [r.id, r.node_id, r.text, r.start_time, r.end_time, r.sort_order]
-        )
-      }
-      await db.exec('COMMIT')
-    } catch (error) {
-      await db.exec('ROLLBACK')
-      throw error
-    }
-    return
-  }
-  // 原子插入：全部成功或全部失败
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('sentence')
-  const backup = table.map(row => ({ ...row }))
-
-  try {
-    assertSentenceIdsAvailable(table, sentences)
-    for (const sentence of sentences) {
-      table.push(sentenceToRow(sentence))
-    }
-    memDb._setTable('sentence', table)
-  } catch (error) {
-    // 回滚
-    memDb._setTable('sentence', backup)
-    throw error
-  }
 }

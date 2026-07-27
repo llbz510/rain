@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the database import-state slice: `2658e7e fix: align live model configuration`
+Current working base before the atomic import-persistence slice: `106497d refactor: extract import state persistence`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint plus import-state persistence have moved behind it. Most legacy CRUD and atomic import functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
+17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state and atomic import persistence have moved behind it. Legacy content CRUD and settings functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
 
 ## What changed in the 2026-07-26 project-control baseline session
 
@@ -1083,6 +1083,30 @@ cargo.exe test --manifest-path src-tauri/Cargo.toml --lib persistence
 ```
 
 Observed result: the focused frontend set passed 9 files / 75 tests, TypeScript passed, and Rust persistence passed 7 tests. The full frontend suite passed 64 files / 397 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings; `git diff --check` reported no whitespace errors.
+
+## What changed in the 2026-07-27 atomic import-persistence slice
+
+Completed the database-control import-persistence stage after `106497d refactor: extract import state persistence`:
+
+- Added `src/models/database-import-atomic.ts` as the owner of ASR atomic save, ASR sentence assignment, final import merge and direct atomic sentence insertion.
+- Added `src/models/database-content-rows.ts` as the single Node/Sentence row codec and sentence-ID conflict rule used by both ordinary CRUD and atomic writes.
+- Kept all four business operations re-exported from `@/models/database`; Pipeline, E2E and Harness callers did not learn either internal module path.
+- Added `database-import-atomic.test.ts` to lock SQLite video existence checks, normalized ASR ownership, exact Rust command payloads and direct `BEGIN/COMMIT/ROLLBACK` order.
+- Kept memory rollback, stale-state, graph-parent, exact-assignment and terminal `ready` behavior under the existing Pipeline/Stage2 tests and Rust persistence tests.
+- Extended the internal-module boundary test so production callers outside `src/models/` cannot import the row codec or atomic module directly.
+- Reduced `database.ts` from about 848 to 593 lines. Its remaining main responsibilities are adapter construction, content/note CRUD, settings and cascade deletion.
+- This behavior-preserving refactor is governed by `AC-LV-04`, `AC-LV-05` and `AC-LV-09`; it does not expand their acceptance status or replace real Evidence.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/database-import-atomic.test.ts src/__tests__/database-boundary.test.ts src/__tests__/database-recovery.test.ts src/__tests__/pipeline-asr.test.ts src/__tests__/pipeline-recovery.test.ts src/__tests__/stage2-runner.test.ts harness/m03-video-import.test.ts harness/m04-ai-pipeline.test.ts harness/m15-settings-recovery.test.ts harness/m18-long-video.test.ts harness/m20-boundaries.test.ts
+npx.cmd tsc --noEmit
+cargo.exe test --manifest-path src-tauri/Cargo.toml --lib persistence
+```
+
+Observed result: the focused frontend set passed 11 files / 115 tests, TypeScript passed, and Rust persistence passed 7 tests. The full frontend suite passed 65 files / 403 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. The initial whitespace check found and then removed one trailing blank line from `database.ts`; the final check passed.
 
 ## Maintenance checklist for every future session
 
