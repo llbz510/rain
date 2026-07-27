@@ -39,9 +39,10 @@
 4. `database-schema.ts` 现在是表、字段、约束和建表 SQL的唯一事实源；内存 adapter 和 Tauri adapter 从同一定义初始化。
 5. M20 当前锁定“只有 `database.ts` 导入 Tauri SQL 插件”。未来内部拆分必须保留这个入口，或先经过明确的 Harness Migration，不能为了移动文件偷偷改裁判。
 6. `Database` 现在只暴露两种 adapter 都真实支持的元数据 interface。内部通过 `adapterKind` 区分 `MemoryDatabaseAdapter` 与 `SqlDatabaseAdapter`；只有 SQLite adapter 拥有 `exec/query`，内存 adapter 不再提供空实现。
-7. `database-boundary.test.ts` 禁止生产模块直接导入 `database-adapter`、`database-checkpoints`、`database-content-rows`、`database-import-atomic`、`database-import-state` 或 `database-schema`，并证明内存 adapter 不伪装支持 SQL。内部实现可以继续拆分，调用者仍只能看到稳定公共入口。
+7. `database-boundary.test.ts` 禁止生产模块直接导入 `database-adapter`、`database-checkpoints`、`database-content-rows`、`database-import-atomic`、`database-import-state`、`database-notes` 或 `database-schema`，并证明内存 adapter 不伪装支持 SQL。内部实现可以继续拆分，调用者仍只能看到稳定公共入口。
 8. `database-import-state.ts` 统一负责受保护的导入状态转换和基于持久句子的恢复决策；SQLite command/查询和内存表细节不再留在公共入口。
 9. `database-import-atomic.ts` 统一负责 ASR 保存、句子归属、最终合并和直接原子句子插入；`database-content-rows.ts` 是普通 CRUD 与原子写入共享的 Node/Sentence 行格式事实源。
+10. `database-notes.ts` 统一负责 Note 与 sentence 引用持久化；内存 adapter 镜像主键/关联唯一约束和失败回滚。SQLite 当前仍是多次 SQL-plugin 调用，不能把前端 `BEGIN/COMMIT` mock 当成真实事务证明。
 
 ## 4. 受控拆分顺序
 
@@ -49,7 +50,7 @@
 
 1. `Completed`：提取 schema 唯一事实源，公共 interface 不变。
 2. `Completed`：导入状态、检查点和原子合并。adapter interface、检查点、状态转换、恢复判断、ASR 保存、句子归属和最终合并均已移出公共入口，由 AC-LV-03 至 AC-LV-09 的测试和 Rust/Evidence 裁判。
-3. `Next`：学习内容与笔记持久化。由 AC-ST-01、AC-ST-05、AC-ST-06 的数据库往返测试裁判。
+3. `In progress`：学习内容与笔记持久化。`AC-ST-06` 的笔记模块和内存约束已提取，但真实 SQLite Note/reference 原子写入需要新增 Rust command 和明确批准的 Harness Migration；视频/Node/Sentence 查询与 `AC-ST-05` 进度持久化仍在 `database.ts`。
 4. 设置持久化。由模型能力、设置恢复和预检测试裁判。
 
 禁止一次性重写整个数据库层。每一步都必须保持 `@/models/database` 导出兼容、运行对应裁判、更新本文件和 `PROJECT_STATE.md`。

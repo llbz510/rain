@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the atomic import-persistence slice: `106497d refactor: extract import state persistence`
+Current working base before the note-persistence slice: `62e4dac refactor: extract atomic import persistence`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,8 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state and atomic import persistence have moved behind it. Legacy content CRUD and settings functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
+17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state, atomic import and note persistence have moved behind it. Legacy video/content CRUD and settings functions inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge. Continue migration one responsibility at a time before deleting that bridge.
+18. SQLite Note creation still performs one frontend SQL-plugin call for the Note followed by calls for sentence references. `tauri-plugin-sql` 2.4.0 executes each call against a SQLx pool, so wrapping those calls with frontend `BEGIN/COMMIT` cannot prove one-connection atomicity. A real fix requires a Rust `insert_note_atomically` command plus an explicitly approved Harness Migration for the locked command set; until then `AC-ST-06` failure atomicity is Partial.
 
 ## What changed in the 2026-07-26 project-control baseline session
 
@@ -1107,6 +1108,29 @@ cargo.exe test --manifest-path src-tauri/Cargo.toml --lib persistence
 ```
 
 Observed result: the focused frontend set passed 11 files / 115 tests, TypeScript passed, and Rust persistence passed 7 tests. The full frontend suite passed 65 files / 403 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings. The initial whitespace check found and then removed one trailing blank line from `database.ts`; the final check passed.
+
+## What changed in the 2026-07-27 note-persistence slice
+
+Started the learning-content persistence stage with the isolated `AC-ST-06` responsibility:
+
+- Added `src/models/database-notes.ts` as the owner of Note row mapping, insertion, per-video reads and content updates.
+- Kept `insertNote`, `getNotesByVideoId` and `updateNoteContent` re-exported from `@/models/database`; the Notes workflow and Store loading path did not learn an internal module.
+- Added `database-notes.test.ts`. Its initial red run exposed that SQLite inserted the Note and sentence references without a transaction and that the memory adapter allowed duplicate references despite the schema primary key.
+- Inspected the installed `tauri-plugin-sql` 2.4.0 Rust source before accepting a mock-only transaction fix. Each `execute` targets a SQLx pool, so separate frontend `BEGIN`, insert and `COMMIT` calls do not prove one-connection atomicity; that attempted false green was discarded.
+- SQLite adapter tests now lock the current statement payloads and error propagation without claiming rollback. Real Note/reference atomicity is recorded as a Harness Migration gap requiring a Rust command.
+- The memory adapter now mirrors the Note primary key and `(note_id, sentence_id)` uniqueness constraints and restores both tables after a failure.
+- Extended the internal-module boundary test so production callers outside `src/models/` cannot import `database-notes` directly.
+- Reduced `database.ts` from about 593 to 505 lines. Video/content CRUD, progress, cascade deletion and settings remain there.
+- Locked files under `harness/` and `src-tauri/tests/` were not modified.
+
+Focused verification:
+
+```powershell
+npm.cmd test -- --run src/__tests__/database-notes.test.ts src/__tests__/study-notes.test.tsx src/__tests__/study-load.test.tsx harness/m08-notes.test.ts harness/m08-notes-component.test.tsx harness/m15-schema-crud.test.ts harness/store-zustand-phase2.test.tsx src/__tests__/database-boundary.test.ts
+npx.cmd tsc --noEmit
+```
+
+Observed result: the focused set passed 8 files / 36 tests and TypeScript passed. The full frontend suite passed 66 files / 408 tests with 1 live-key test skipped; the production build passed with the existing Vite dynamic/static import chunking warnings; `git diff --check` reported no whitespace errors. No Rust files or locked Harness were changed; the missing Rust Note transaction remains explicit rather than being represented by a frontend mock.
 
 ## Maintenance checklist for every future session
 

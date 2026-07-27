@@ -6,7 +6,7 @@
 // 公开 API（Database 接口 + 所有导出函数签名）两种后端完全一致。
 // ========================================
 
-import type { Video, Node, Sentence, Note } from './types'
+import type { Video, Node, Sentence } from './types'
 import {
   isSqlDatabase,
   type Database,
@@ -43,6 +43,11 @@ export {
   mergeImportAtomically,
   saveAsrAtomically,
 } from './database-import-atomic'
+export {
+  getNotesByVideoId,
+  insertNote,
+  updateNoteContent,
+} from './database-notes'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）
@@ -184,32 +189,6 @@ function rowToVideo(row: TableRow): Video {
   }
 }
 
-// 转换 Note 对象到行数据
-function noteToRow(note: Note): TableRow {
-  return {
-    id: note.id,
-    video_id: note.videoId,
-    content: note.content,
-    source: note.source,
-    created_at: note.createdAt,
-    derivation_id: null,
-    sort_order: note.sortOrder,
-  }
-}
-
-// 转换行数据到 Note 对象
-function rowToNote(row: TableRow, sentenceIds: string[]): Note {
-  return {
-    id: row.id,
-    videoId: row.video_id,
-    content: row.content,
-    source: row.source,
-    sentenceIds,
-    createdAt: row.created_at,
-    sortOrder: row.sort_order,
-  }
-}
-
 // ===== 导出函数 =====
 
 export async function createDatabase(path: string = ':memory:'): Promise<Database> {
@@ -314,74 +293,8 @@ export async function getSentencesByNodeId(db: Database, nodeId: string): Promis
     .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
-export async function insertNote(db: Database, note: Note): Promise<void> {
-  if (isTauriDb(db)) {
-    const r = noteToRow(note)
-    await db.exec(
-      'INSERT INTO note (id, video_id, content, source, created_at, derivation_id, sort_order) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [r.id, r.video_id, r.content, r.source, r.created_at, r.derivation_id, r.sort_order]
-    )
-    for (const sentenceId of note.sentenceIds) {
-      await db.exec(
-        'INSERT INTO note_sentence (note_id, sentence_id) VALUES ($1, $2)',
-        [note.id, sentenceId]
-      )
-    }
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const notesTable = memDb._getTable('note')
-  notesTable.push(noteToRow(note))
-  memDb._setTable('note', notesTable)
-
-  // 插入 note_sentence 关联
-  const nsTable = memDb._getTable('note_sentence')
-  for (const sentenceId of note.sentenceIds) {
-    nsTable.push({ note_id: note.id, sentence_id: sentenceId })
-  }
-  memDb._setTable('note_sentence', nsTable)
-}
-
-export async function getNotesByVideoId(db: Database, videoId: string): Promise<Note[]> {
-  if (isTauriDb(db)) {
-    const noteRows = await db.query<TableRow>('SELECT * FROM note WHERE video_id = $1', [videoId])
-    const result: Note[] = []
-    for (const row of noteRows) {
-      const nsRows = await db.query<{ sentence_id: string }>(
-        'SELECT sentence_id FROM note_sentence WHERE note_id = $1',
-        [row.id]
-      )
-      result.push(rowToNote(row, nsRows.map(ns => ns.sentence_id)))
-    }
-    return result
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const noteRows = memDb._getTable('note').filter(r => r.video_id === videoId)
-  const nsTable = memDb._getTable('note_sentence')
-
-  return noteRows.map(row => {
-    const sentenceIds = nsTable
-      .filter(ns => ns.note_id === row.id)
-      .map(ns => ns.sentence_id)
-    return rowToNote(row, sentenceIds)
-  })
-}
-
 function isTauriDb(db: Database): db is SqlDatabaseAdapter {
   return isSqlDatabase(db)
-}
-
-export async function updateNoteContent(db: Database, noteId: string, content: string): Promise<void> {
-  if (isTauriDb(db)) {
-    await db.exec('UPDATE note SET content = $1 WHERE id = $2', [content, noteId])
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('note')
-  for (const row of table) {
-    if (row.id === noteId) row.content = content
-  }
-  memDb._setTable('note', table)
 }
 
 export async function updateVideoStatus(db: Database, id: string, status: string): Promise<void> {

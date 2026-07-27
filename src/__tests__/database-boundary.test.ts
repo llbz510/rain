@@ -33,6 +33,7 @@ describe('database adapter seam', () => {
       'database-content-rows',
       'database-import-atomic',
       'database-import-state',
+      'database-notes',
       'database-schema',
     ]
     const violations = sourceFiles(sourceRoot)
