@@ -63,6 +63,8 @@
 | 学习内容持久化 seam | `database-content.test.ts`、M15、Pipeline/Stage2 tests、`study-load.test.tsx` | Strong（公共接口 + 双 adapter） | 公共 `database.ts` 导出不变；SQLite characterization 锁定完整 Node/Sentence 行、按 Node/Video 查询范围和映射，内存 adapter 与生产学习加载/导入测试覆盖可观察结果 |
 | 笔记持久化 seam | `database-notes.test.ts`、M08/M15、`study-notes.test.tsx`、Rust `note_persistence`/command Harness | Strong（前端路径 + Rust 事务） | 公共入口不变；SQLite 写入通过单次 Rust command，在独占连接的真实事务中提交 Note 与全部引用；前端 payload/错误传播、Rust 成功与回滚、内存约束和生产页面重开闭环均有裁判 |
 | Video 记录持久化 seam | `database-videos.test.ts`、M15 queries/CRUD、视频列表、`study-load.test.tsx`、`study-progress.test.tsx` | Strong（普通读写） | 公共导出不变；完整 Video 行往返、批准的三种排序、参数化搜索、状态、单调进度和最近学习时间均由 SQLite characterization 与内存/生产路径共同裁判 |
+| Settings 持久化 seam | `database-settings.test.ts`、M15 settings/recovery、`model-pool.test.ts`、`model-capabilities.test.ts`、预检/设置 UI 测试 | Strong（公共接口 + 双 adapter） | SQLite characterization 锁定参数化 upsert/read/delete、空值/缺失值和错误传播；M15 锁定内存 CRUD；Key 分离、旧配置迁移、能力记录与配置变更失效由上层行为测试托管 |
+| Runtime Settings 快照保存 | `model-pool.test.ts` | Partial | 成功保存、Key 清理和旧格式迁移有裁判；模型列表、多个 Key、角色和能力记录仍是多次独立写入，缺少失败时整份回滚的 AC 与裁判 |
 | 视频级联删除 seam | `database-video-deletion.test.ts`、M15/M20、Rust `video_deletion` tests | Strong（公共接口 + Rust 事务） | `AC-LV-13` 由前端单 command/错误传播、内存全清理与隔离、真实 SQLite 成功/晚失败回滚/幂等共同托管 |
 | progress 事件名称和字段 | M20/M21 前端 Harness、Rust `events`/`commands` Harness | Strong | 覆盖事件订阅转发、重复监听释放、Rust camelCase 序列化和 ASR 子阶段 |
 | Rust Harness 系统行为 | `src-tauri/tests/*_harness.rs` | Strong | 覆盖调度串行化、按视频取消、取消令牌、ffmpeg/Whisper/yt-dlp 非法输入、错误上下文和真实媒体 fixture |

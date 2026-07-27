@@ -28,7 +28,8 @@
 | Video 记录与进度 | Video 创建、查询、列表、搜索、状态和学习进度 | AC-LV-02/09、AC-ST-01/05 | `database-videos.test.ts`、M15、视频列表、学习加载/进度测试 |
 | 视频级联删除 | 原子删除 Video 及其 Node/Sentence/Note/reference/checkpoint | AC-LV-13 | 公共接口测试、M15/M20、Rust SQLite 成功/晚失败回滚/幂等测试（Strong） |
 | 学习内容读写 | Node/Sentence 普通写入和按 Node/Video 查询 | AC-LV-04/05/09、AC-ST-01 | `database-content.test.ts`、M15、Pipeline/Stage2、学习加载测试 |
-| 设置持久化 | 模型池、角色和能力记录使用的 key-value 设置 | AC-LV-01/12、AC-ST-07 | M15 settings/recovery、模型能力测试 |
+| 设置持久化 | 模型池、角色和能力记录使用的参数化 key-value CRUD | AC-LV-01/12、AC-ST-07 | `database-settings.test.ts`、M15 settings/recovery、模型池/能力/预检测试（Strong） |
+| Runtime Settings 快照保存 | 一次保存模型列表、独立 Key、角色和能力记录 | 尚无独立原子保存 AC | `model-pool.test.ts` 仅覆盖成功与局部迁移失败顺序；多 key 原子性未证明（Partial） |
 | 导入状态与恢复 | 批准状态转换、检查点、恢复判断 | AC-LV-03/06/07/08 | Pipeline 恢复测试、M03/M21、真实 Evidence |
 | 原子导入写入 | ASR 保存、句子归属、最终节点/句子合并 | AC-LV-04/05/09 | Pipeline/Stage2 测试、Rust Harness、真实 Evidence |
 | 笔记持久化 | Note 读取/编辑，Note 与 sentence 引用原子创建 | AC-ST-06 | M08/M15、学习页测试、前端 command 协议测试、Rust 事务测试 |
@@ -43,13 +44,15 @@
 4. `database-schema.ts` 现在是表、字段、约束和建表 SQL的唯一事实源；内存 adapter 和 Tauri adapter 从同一定义初始化。
 5. M20 当前锁定“只有 `database.ts` 导入 Tauri SQL 插件”。未来内部拆分必须保留这个入口，或先经过明确的 Harness Migration，不能为了移动文件偷偷改裁判。
 6. `Database` 现在只暴露两种 adapter 都真实支持的元数据 interface。内部通过 `adapterKind` 区分 `MemoryDatabaseAdapter` 与 `SqlDatabaseAdapter`；只有 SQLite adapter 拥有 `exec/query`，内存 adapter 不再提供空实现。
-7. `database-boundary.test.ts` 禁止生产模块直接导入 `database-adapter`、`database-checkpoints`、`database-content`、`database-content-rows`、`database-import-atomic`、`database-import-state`、`database-notes`、`database-video-deletion` 或 `database-schema`，并证明内存 adapter 不伪装支持 SQL。内部实现可以继续拆分，调用者仍只能看到稳定公共入口。
+7. `database-boundary.test.ts` 禁止生产模块直接导入 `database-adapter`、`database-checkpoints`、`database-content`、`database-content-rows`、`database-import-atomic`、`database-import-state`、`database-notes`、`database-settings`、`database-video-deletion` 或 `database-schema`，并证明内存 adapter 不伪装支持 SQL。内部实现可以继续拆分，调用者仍只能看到稳定公共入口。
 8. `database-import-state.ts` 统一负责受保护的导入状态转换和基于持久句子的恢复决策；SQLite command/查询和内存表细节不再留在公共入口。
 9. `database-import-atomic.ts` 统一负责 ASR 保存、句子归属、最终合并和直接原子句子插入；`database-content-rows.ts` 是普通 CRUD 与原子写入共享的 Node/Sentence 行格式事实源。
 10. `database-notes.ts` 统一负责 Note 与 sentence 引用持久化；内存 adapter 镜像主键/关联唯一约束和失败回滚。SQLite 创建通过单次 `insert_note_atomically` command 进入 `note_persistence.rs`，由一个连接上的真实事务提交 Note 与全部引用。
 11. `database-content.ts` 统一负责 Node/Sentence 的普通写入和查询；它通过 adapter seam 访问 SQLite 或内存表，并与原子导入模块共享 `database-content-rows.ts` 行格式。业务调用方仍从 `@/models/database` 导入。
 12. `database-videos.ts` 统一负责 Video 行映射、普通读写、列表/搜索和 `AC-ST-05` 进度更新。SQLite characterization 直接锁定 `position < $1`，防止真实数据库进度回退；级联删除不属于这个 module。
 13. `database-video-deletion.ts` 统一负责 `AC-LV-13` 的公共删除行为。SQLite 路径只发送一次 `delete_video_atomically` command，由 `video_deletion.rs` 在单连接事务中清理六类归属数据；内存路径同时清理普通 Sentence 与 `node_id = videoId` 的 ASR 占位句，并保留其他 Video。
+14. `database-settings.ts` 统一负责参数化 key-value CRUD。SQLite characterization 锁定 upsert/read/delete SQL、空字符串与缺失值语义及错误传播；M15 继续锁定内存 adapter。模型 JSON 与 Key 分离、迁移和能力失效属于更高层 `src/settings/` module，由其行为测试负责。
+15. `saveRuntimeSettings` 仍通过多次独立 CRUD 保存模型列表、Key、角色和能力记录。任一步失败可能留下新旧配置混合状态；现有 AC 没有定义整份 Runtime Settings 是否必须原子提交，因此本轮不静默改变语义，先保留为下一项控制决策。
 
 ## 4. 受控拆分顺序
 
@@ -58,7 +61,7 @@
 1. `Completed`：提取 schema 唯一事实源，公共 interface 不变。
 2. `Completed`：导入状态、检查点和原子合并。adapter interface、检查点、状态转换、恢复判断、ASR 保存、句子归属和最终合并均已移出公共入口，由 AC-LV-03 至 AC-LV-09 的测试和 Rust/Evidence 裁判。
 3. `Completed`：学习内容与 Video 普通持久化。Note/reference、Node/Sentence、Video 行映射、列表/搜索和 `AC-ST-05` 进度均有独立 module 与裁判。
-4. 设置持久化。由模型能力、设置恢复和预检测试裁判。
+4. `Completed`：设置持久化。公共 CRUD 由 SQLite characterization 与 M15 双 adapter 裁判；模型池、能力记录和预检继续裁判上层配置行为。
 5. `Completed`：视频级联删除。`AC-LV-13`、公共接口、锁定 M15/M20 和 Rust 真实事务测试共同裁判；迁移记录见 `harness-migration-2026-07-27-video-deletion.md`。
 
 禁止一次性重写整个数据库层。每一步都必须保持 `@/models/database` 导出兼容、运行对应裁判、更新本文件和 `PROJECT_STATE.md`。

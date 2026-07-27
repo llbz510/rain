@@ -7,7 +7,6 @@
 // ========================================
 
 import {
-  isSqlDatabase,
   type Database,
   type MemoryDatabaseAdapter,
   type SqlDatabaseAdapter,
@@ -58,6 +57,7 @@ export {
   updateVideoStatus,
 } from './database-videos'
 export { deleteVideoWithCascade } from './database-video-deletion'
+export { deleteSetting, getSetting, setSetting } from './database-settings'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）
@@ -94,14 +94,6 @@ class MemoryDatabase implements MemoryDatabaseAdapter {
 
   replaceTable(tableName: string, rows: TableRow[]): void {
     this.data.set(tableName, rows)
-  }
-
-  _getTable(tableName: string): TableRow[] {
-    return this.readTable(tableName)
-  }
-
-  _setTable(tableName: string, rows: TableRow[]): void {
-    this.replaceTable(tableName, rows)
   }
 }
 
@@ -168,47 +160,4 @@ export async function createDatabase(path: string = ':memory:'): Promise<Databas
     return tdb
   }
   return new MemoryDatabase()
-}
-
-function isTauriDb(db: Database): db is SqlDatabaseAdapter {
-  return isSqlDatabase(db)
-}
-
-export async function setSetting(db: Database, key: string, value: string): Promise<void> {
-  if (isTauriDb(db)) {
-    await db.exec(
-      'INSERT INTO setting (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      [key, value]
-    )
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('setting')
-  const existing = table.find(r => r.key === key)
-  if (existing) {
-    existing.value = value
-  } else {
-    table.push({ key, value })
-  }
-  memDb._setTable('setting', table)
-}
-
-export async function getSetting(db: Database, key: string): Promise<string | null> {
-  if (isTauriDb(db)) {
-    const rows = await db.query<{ value: string }>('SELECT value FROM setting WHERE key = $1', [key])
-    return rows.length > 0 ? rows[0].value : null
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const row = memDb._getTable('setting').find(r => r.key === key)
-  return row ? row.value : null
-}
-
-export async function deleteSetting(db: Database, key: string): Promise<void> {
-  if (isTauriDb(db)) {
-    await db.exec('DELETE FROM setting WHERE key = $1', [key])
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('setting').filter(r => r.key !== key)
-  memDb._setTable('setting', table)
 }

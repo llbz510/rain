@@ -84,7 +84,7 @@ cancelImport(videoId)
 - `saveAsrAtomically`
 - `mergeImportAtomically`
 
-新代码不得在页面中拼 SQL 或自行管理事务。`database.ts` 当前同时包含内存实现、Tauri SQL 实现、schema、映射和大量业务操作，后续应按接口拆开，但拆分前必须保持现有调用接口和行为测试。
+新代码不得在页面中拼 SQL 或自行管理事务。`database.ts` 现在只保留稳定公共导出和两种 adapter 的构造；schema、行映射和业务操作均已按职责进入内部 module。调用方仍必须保持现有 `@/models/database` interface，不得绕过入口导入内部实现。
 
 ### Rust command 接口
 
@@ -108,7 +108,7 @@ cancelImport(videoId)
 
 布局状态只决定区域可见性，不拥有学习事实。生产学习页在三种布局间切换时必须保留同一个 media 实例；隐藏视频不得卸载它，否则控制栏会失去真实播放对象并重置播放状态。M16 占位组件只裁判局部布局契约，生产行为由 `study-layout.test.tsx` 裁判。
 
-数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。`src/models/database-adapter.ts` 是内部 adapter seam：公共 `Database` 只含两种 adapter 都真实支持的 interface，SQLite 的 `exec/query` 与内存表读写不会互相伪装。检查点编码和读写归 `src/models/database-checkpoints.ts`，Node/Sentence 普通持久化归 `src/models/database-content.ts`，Video 普通记录、列表/搜索和进度归 `src/models/database-videos.ts`，视频跨表删除归 `src/models/database-video-deletion.ts`，导入状态转换和恢复判断归 `src/models/database-import-state.ts`，原子导入事务归 `src/models/database-import-atomic.ts`，Note 映射、读取与写入归 `src/models/database-notes.ts`；普通读写与原子写入共享 `src/models/database-content-rows.ts` 的 Node/Sentence 行格式。Note/reference 的真实 SQLite 创建必须通过 `insert_note_atomically` 进入 `src-tauri/src/note_persistence.rs`。Video 的真实 SQLite 删除必须通过 `delete_video_atomically` 进入 `src-tauri/src/video_deletion.rs`；两者都不能退回多次前端 SQL-plugin 调用。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接导入这些内部模块。
+数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。`src/models/database-adapter.ts` 是内部 adapter seam：公共 `Database` 只含两种 adapter 都真实支持的 interface，SQLite 的 `exec/query` 与内存表读写不会互相伪装。检查点编码和读写归 `src/models/database-checkpoints.ts`，Node/Sentence 普通持久化归 `src/models/database-content.ts`，Video 普通记录、列表/搜索和进度归 `src/models/database-videos.ts`，视频跨表删除归 `src/models/database-video-deletion.ts`，Settings key-value CRUD 归 `src/models/database-settings.ts`，导入状态转换和恢复判断归 `src/models/database-import-state.ts`，原子导入事务归 `src/models/database-import-atomic.ts`，Note 映射、读取与写入归 `src/models/database-notes.ts`；普通读写与原子写入共享 `src/models/database-content-rows.ts` 的 Node/Sentence 行格式。Note/reference 的真实 SQLite 创建必须通过 `insert_note_atomically` 进入 `src-tauri/src/note_persistence.rs`。Video 的真实 SQLite 删除必须通过 `delete_video_atomically` 进入 `src-tauri/src/video_deletion.rs`；两者都不能退回多次前端 SQL-plugin 调用。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接导入这些内部模块。
 
 当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
 
@@ -137,7 +137,7 @@ cancelImport(videoId)
 | 热点 | 当前规模 | 混合的职责 | 控制策略 |
 | --- | ---: | --- | --- |
 | `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
-| `src/models/database.ts` | 约 213 行 | 稳定公共导出、两种 adapter 构造和设置持久化；其余数据库职责已按 AC 分模块 | 保持 `@/models/database` 稳定；下一步只在设置职责有独立裁判时迁移，不把行数当作拆分目标 |
+| `src/models/database.ts` | 约 163 行 | 稳定公共导出和两种 adapter 构造 | 保持 `@/models/database` 稳定；业务持久化进入已有内部 module，不把公共入口重新长成实现集合 |
 | `src-tauri/src/commands.rs` | 约 796 行 | command、参数处理、部分系统行为 | 保持 command 薄，行为下沉到 Rust 模块 |
 | `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
 | `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |

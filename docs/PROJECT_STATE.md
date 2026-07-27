@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the atomic Video deletion slice: `1f725ec refactor: isolate video persistence`
+Current working base before the Settings persistence slice: `df6bf21 fix: make video deletion atomic`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,7 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state, atomic import, Node/Sentence content, Video records/progress, note persistence and atomic Video deletion have moved behind it. Settings inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge.
+17. Low-level Settings key-value CRUD is now controlled, but `saveRuntimeSettings` persists the model list, separate API Keys, three roles and capability records through multiple independent writes/deletes. A mid-save failure can leave a mixed snapshot. No Active AC currently requires atomic Runtime Settings saves, so do not claim that end-to-end Settings persistence is atomic; define that contract before moving the workflow into a transaction.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1194,6 +1194,27 @@ Full verification passed:
 - Rust: 79 tests passed; 1 real Whisper model test remained explicitly ignored.
 - TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings.
 - The multi-hour real-video E2E was not rerun because this change is directly judged at the public command boundary and against real in-memory SQLite transaction behavior; it does not alter ASR, LLM or study rendering.
+
+## What changed in the 2026-07-27 Settings persistence slice
+
+Completed the final business-persistence extraction from `database.ts` without changing the stable public interface:
+
+- Added `src/__tests__/database-settings.test.ts` before moving implementation. The characterization locks parameterized SQLite upsert/read/delete calls, preserves empty strings versus missing keys, and proves adapter failures reach callers.
+- Confirmed the pre-move implementation passed the new characterization together with M15 Settings CRUD, model-pool and capability-record tests; this established a green behavioral baseline rather than inventing semantics during refactoring.
+- Added `src/models/database-settings.ts` as the owner of `setSetting`, `getSetting` and `deleteSetting` for both SQLite and memory adapters. Callers still import all three from `@/models/database`.
+- Removed the last concrete `MemoryDatabase` business compatibility methods (`_getTable/_setTable`) and the Settings-specific type guard from `database.ts`.
+- Extended `database-boundary.test.ts` so production callers cannot bypass the stable entry and import `database-settings` directly.
+- Updated the database control, coverage and module maps. Low-level Settings persistence is Strong through public-interface dual-adapter judges; model JSON/Key separation, legacy migration, capability fingerprints and preflight remain the responsibility of their higher-level behavior tests.
+- Recorded Runtime Settings snapshot saving as a separate Partial seam: its multi-key success path is covered, but all-or-nothing failure behavior has no Active AC or transaction judge yet.
+- No locked Harness file changed and no Harness Migration was required. Existing M15-T14 through T17 remained an unchanged memory-adapter judge.
+- Reduced `database.ts` from 213 to 163 lines. It now contains stable re-exports plus adapter construction and no business-table CRUD.
+
+Verification:
+
+- Focused Settings/database tests: 7 files / 39 tests passed.
+- Full Vitest: 70 files / 417 tests passed; 1 live-key test skipped by its explicit environment guard.
+- TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings.
+- Rust and the multi-hour real-video E2E were not rerun because this slice changes only TypeScript module ownership, keeps SQL behavior characterized, and does not modify Rust, ASR, LLM or rendered workflows.
 
 ## Maintenance checklist for every future session
 

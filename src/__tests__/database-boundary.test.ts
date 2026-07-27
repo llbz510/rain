@@ -36,6 +36,7 @@ describe('database adapter seam', () => {
       'database-import-state',
       'database-notes',
       'database-schema',
+      'database-settings',
       'database-video-deletion',
       'database-videos',
     ]
