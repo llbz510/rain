@@ -10,6 +10,7 @@ use crate::import_state_persistence::{self, ImportState};
 use crate::note_persistence::{self, PersistedNote};
 use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
+use crate::video_deletion;
 use crate::whisper::{self, WhisperModelSize};
 use crate::ytdlp;
 use std::path::{Path, PathBuf};
@@ -190,6 +191,18 @@ pub async fn insert_note_atomically(app: AppHandle, note: PersistedNote) -> Resu
     note_persistence::insert_note_atomically_on_connection(&mut connection, &note)
         .await
         .map_err(|error| format!("Persist note atomically: {error}"))
+}
+
+#[tauri::command]
+pub async fn delete_video_atomically(app: AppHandle, video_id: String) -> Result<(), String> {
+    use sqlx::{Connection, SqliteConnection};
+    let database_path = rain_database_path(&app)?;
+    let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
+        .await
+        .map_err(|error| format!("Open Rain database: {error}"))?;
+    video_deletion::delete_video_atomically_on_connection(&mut connection, &video_id)
+        .await
+        .map_err(|error| format!("Delete video atomically: {error}"))
 }
 
 #[tauri::command]

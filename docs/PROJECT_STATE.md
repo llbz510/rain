@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the Video persistence slice: `4de4024 refactor: isolate study content persistence`
+Current working base before the atomic Video deletion slice: `1f725ec refactor: isolate video persistence`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,8 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state, atomic import, Node/Sentence content, Video records/progress and note persistence have moved behind it. Settings and cross-table cascade deletion inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge.
-18. `deleteVideoWithCascade` is not yet a controlled atomic operation. Its SQLite path makes six separate SQL-plugin calls through a pool, and its memory path currently leaves ASR placeholder sentences whose `node_id` is the Video ID because it filters only submitted Node IDs. The behavior has no independent Active AC. Do not fold it into the completed Video module or claim Strong coverage; define the deletion AC and approve a Rust-command Harness Migration before fixing the real SQLite path.
+17. The public `Database` interface no longer exposes fake memory `exec/query`; the discriminated internal adapter seam is active, and checkpoint, import-state, atomic import, Node/Sentence content, Video records/progress, note persistence and atomic Video deletion have moved behind it. Settings inside `database.ts` still use the concrete `MemoryDatabase` compatibility bridge.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1173,6 +1172,28 @@ Separated ordinary Video persistence from cross-table deletion without changing 
 - Locked Harness files were not modified.
 
 Focused verification passed 7 files / 32 tests across the new SQLite characterization, internal import rule, M15 queries/CRUD, production study progress/loading and local import; TypeScript also passed. The full frontend suite passed 68 files / 413 tests with the opt-in live test skipped by default. The production build and `git diff --check` passed with the existing Vite dynamic/static import chunking warnings. Rust and the multi-hour real-video E2E were not rerun because this slice changes only TypeScript module ownership and adds no Rust command or runtime behavior.
+
+## What changed in the 2026-07-27 atomic Video deletion Harness Migration
+
+Closed the previously recorded cross-table deletion risk through the user-approved `AC-LV-13` migration:
+
+- Added `AC-LV-13`: deleting a Video must atomically remove its Node, ordinary Sentence, direct ASR placeholder Sentence, Note, Note-Sentence reference and import checkpoint; failure preserves all rows, other Videos remain intact, and a missing Video is idempotent.
+- Added `src/models/database-video-deletion.ts`. The stable `deleteVideoWithCascade` export remains at `@/models/database`; SQLite now sends one `delete_video_atomically` command instead of six independent SQL-plugin calls.
+- Added `src-tauri/src/video_deletion.rs`, which performs the six-table cleanup on one SQLx connection and transaction.
+- Fixed the in-memory mirror so direct `node_id = videoId` ASR placeholder sentences are removed and all replacement tables are computed before mutation.
+- Added the public interface test and three real SQLite tests: successful isolated deletion, a trigger-forced failure on the final Video delete proving full rollback, and missing-Video idempotency.
+- Strengthened locked M15 with placeholder/checkpoint assertions and locked M20 with the approved real command. Authorization and old-to-new judge mapping are recorded in `docs/development/harness-migration-2026-07-27-video-deletion.md`.
+- Updated the coverage, database control and module maps. The deletion seam is now `Strong（公共接口 + Rust 事务）`; prior known risk 18 is resolved.
+- Reduced `database.ts` from 265 to 213 lines. It now owns adapter construction, settings and stable re-exports, while deletion behavior has an independent owner and judge set.
+
+The pre-implementation red run produced four expected failures: missing command registration, swallowed SQLite command failure, and ASR placeholder leakage in both the public interface test and M15. After implementation, the focused frontend set passed 4 files / 25 tests and focused Rust deletion tests passed 3 tests.
+
+Full verification passed:
+
+- Vitest: 69 files / 415 tests passed; 1 live-key test skipped by its explicit environment guard.
+- Rust: 79 tests passed; 1 real Whisper model test remained explicitly ignored.
+- TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings.
+- The multi-hour real-video E2E was not rerun because this change is directly judged at the public command boundary and against real in-memory SQLite transaction behavior; it does not alter ASR, LLM or study rendering.
 
 ## Maintenance checklist for every future session
 

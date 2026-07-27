@@ -57,6 +57,7 @@ export {
   updateVideoPosition,
   updateVideoStatus,
 } from './database-videos'
+export { deleteVideoWithCascade } from './database-video-deletion'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）
@@ -210,58 +211,4 @@ export async function deleteSetting(db: Database, key: string): Promise<void> {
   const memDb = db as unknown as MemoryDatabase
   const table = memDb._getTable('setting').filter(r => r.key !== key)
   memDb._setTable('setting', table)
-}
-
-export async function deleteVideoWithCascade(db: Database, videoId: string): Promise<void> {
-  if (isTauriDb(db)) {
-    // 级联删除顺序：先删依赖关联，再删主体
-    await db.exec('DELETE FROM note_sentence WHERE note_id IN (SELECT id FROM note WHERE video_id = $1)', [videoId])
-    await db.exec('DELETE FROM sentence WHERE node_id = $1 OR node_id IN (SELECT id FROM node WHERE video_id = $1)', [videoId])
-    await db.exec('DELETE FROM note WHERE video_id = $1', [videoId])
-    await db.exec('DELETE FROM node WHERE video_id = $1', [videoId])
-    await db.exec('DELETE FROM import_checkpoint WHERE video_id = $1', [videoId])
-    await db.exec('DELETE FROM video WHERE id = $1', [videoId])
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-
-  // 获取视频关联的 nodes
-  const nodeRows = memDb._getTable('node').filter(r => r.video_id === videoId)
-  const nodeIds = nodeRows.map(r => r.id)
-
-  // 获取这些 nodes 关联的 sentences
-  const sentenceRows = memDb._getTable('sentence').filter(r => r.node_id === videoId || nodeIds.includes(r.node_id))
-  const sentenceIds = sentenceRows.map(r => r.id)
-
-  // 获取视频关联的 notes
-  const noteRows = memDb._getTable('note').filter(r => r.video_id === videoId)
-  const noteIds = noteRows.map(r => r.id)
-
-  // 删除 note_sentence 关联
-  memDb._setTable('note_sentence', memDb._getTable('note_sentence').filter(
-    r => !noteIds.includes(r.note_id)
-  ))
-
-  // 删除 sentences
-  memDb._setTable('sentence', memDb._getTable('sentence').filter(
-    r => !nodeIds.includes(r.node_id)
-  ))
-
-  // 删除 notes
-  memDb._setTable('note', memDb._getTable('note').filter(
-    r => r.video_id !== videoId
-  ))
-
-  // 删除 nodes
-  memDb._setTable('node', memDb._getTable('node').filter(
-    r => r.video_id !== videoId
-  ))
-
-  // 删除 video
-  memDb._setTable('video', memDb._getTable('video').filter(
-    r => r.id !== videoId
-  ))
-  memDb._setTable('import_checkpoint', memDb._getTable('import_checkpoint').filter(
-    r => r.video_id !== videoId
-  ))
 }

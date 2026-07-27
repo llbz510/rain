@@ -195,6 +195,16 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 裁判：`model-capabilities.test.ts`、`model-pool.test.ts`、`preflight.test.ts`、`asr-capability.test.ts`、`structuring-capability.test.ts`、`assistant-capability.test.ts`、`video-import-capability-gate.test.ts`、`study-playback.test.tsx` 和对应角色的真实行为测试。完整真实 E2E 负责把一个兼容组合提升为 `Verified`；普通连接或文件存在检查不得产生 `Compatible` 或伪造 `Verified`。
 
+### AC-LV-13 删除视频必须原子清理关联数据
+
+状态：`Confirmed`
+
+用户删除一个 Video 时，该 Video 及其 Node、Sentence（包括直接归属 Video ID 的 ASR 占位句子）、Note、Note-Sentence 引用和 import checkpoint 必须作为一个整体删除。任一步失败时，所有数据必须保持删除前状态；不得留下孤儿记录，也不得删除其他 Video 的数据。删除不存在的 Video 保持幂等。
+
+实现归属：数据库删除接口、Rust SQLite 单事务持久化。
+
+裁判：公共数据库接口测试、M15 删除 Harness、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
+
 ## 3. 学习页核心流程
 
 本节只接纳已经由 M05-M10、M15-M16 和用户于 2026-07-26 确认继续梳理的核心学习行为。高级树编辑和 vision 仍不在本节范围。

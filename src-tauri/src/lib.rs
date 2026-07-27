@@ -8,6 +8,7 @@ pub mod note_persistence;
 pub mod runtime;
 pub mod scheduler;
 pub mod structure_persistence;
+pub mod video_deletion;
 pub mod whisper;
 pub mod ytdlp;
 
@@ -28,6 +29,7 @@ pub fn run() {
             commands::start_asr,
             commands::save_asr_atomically,
             commands::insert_note_atomically,
+            commands::delete_video_atomically,
             commands::assign_asr_sentences_atomically,
             commands::transition_video_import_state,
             commands::merge_import_atomically,

@@ -13,8 +13,11 @@ import {
   getNodesByVideoId,
   insertSentences,
   getSentencesByNodeId,
+  getSentencesByVideoId,
   insertNote,
   getNotesByVideoId,
+  getImportCheckpoint,
+  saveImportCheckpoint,
   updateVideoStatus,
   deleteVideoWithCascade,
 } from '@/models/database'
@@ -250,10 +253,14 @@ describe('M15-T13: 删除 Video 级联删除（决策60）', () => {
     ])
     await insertSentences(db, [
       { id: 's1', nodeId: 'p1', text: '句一。', startTime: 0, endTime: 100, sortOrder: 0 },
+      { id: 'asr-s1', nodeId: 'v1', text: '占位句。', startTime: 0, endTime: 100, sortOrder: 1 },
     ])
     await insertNote(db, {
       id: 'note1', videoId: 'v1', content: '', source: 'excerpt',
       sentenceIds: ['s1'], createdAt: 3000, sortOrder: 0,
+    })
+    await saveImportCheckpoint(db, {
+      videoId: 'v1', stage: 'asr', completedBlocks: [], updatedAt: 3000,
     })
 
     await deleteVideoWithCascade(db, 'v1')
@@ -261,6 +268,8 @@ describe('M15-T13: 删除 Video 级联删除（决策60）', () => {
     // 全部清空
     expect(await getVideoById(db, 'v1')).toBeNull()
     expect(await getNodesByVideoId(db, 'v1')).toEqual([])
+    expect(await getSentencesByVideoId(db, 'v1')).toEqual([])
     expect(await getNotesByVideoId(db, 'v1')).toEqual([])
+    expect(await getImportCheckpoint(db, 'v1')).toBeNull()
   })
 })
