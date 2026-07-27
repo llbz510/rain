@@ -4,7 +4,7 @@
 
 Last updated: 2026-07-27 +08:00
 Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the Rust commands audit and ASR Transcript slice: `71dfc06 fix: make runtime settings atomic`
+Current working base before the ASR Execution slice: `bf89cae refactor: isolate asr transcript processing`
 Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
 
 ## Current verified status
@@ -124,6 +124,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
+17. Whisper model download/listing is not covered by an Active AC or a direct behavior Harness. `download_whisper_model` currently buffers the complete HTTP response in memory, then writes directly to the final path without cancellation, progress, hash validation or an atomic temporary-file rename. This is the next controlled Rust risk, but changing its behavior first requires a Proposed AC to be confirmed and assigned failure/cancellation/integrity judges.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1252,6 +1253,24 @@ Audited `src-tauri/src/commands.rs` by reason to change rather than by line coun
 The next controlled Rust slice is ASR Execution: temporary WAV creation, progress events, cancellation, scheduler lifecycle and model invocation still live in `commands.rs`. They should move behind one execution interface while keeping the Tauri protocol and their existing scheduler/event/command judges stable. The other thin commands should not be rewritten merely to make the file shorter.
 
 Focused verification passed 10 `asr_transcript` tests and 3 remaining `commands::tests`. Full verification passed 70 frontend files / 419 tests with 1 live-key test skipped by its explicit environment guard; Rust passed 81 tests with 1 real Whisper model test explicitly ignored. The production Vite build passed with the existing dynamic/static import chunking warnings. `rustfmt --check` for the new module and `git diff --check` also passed. The multi-hour real-video E2E was not rerun because the Tauri protocol, Whisper invocation and observable transcript rules are unchanged and all moved rules are directly judged through the same production entry.
+
+## What changed in the 2026-07-27 ASR Execution slice
+
+Completed the second responsibility extraction from `src-tauri/src/commands.rs` without changing the `start_asr` Tauri protocol:
+
+- Added `src-tauri/src/asr_execution.rs` with one public `execute_asr` interface and an `AsrExecutionRequest` carrying the existing command inputs.
+- Moved tier/language/request validation, scheduler lease ownership, temporary WAV lifecycle, blocking conversion/inference, progress reporting, Transcript invocation and final success/failure/cancelled/stale classification together.
+- Kept `start_asr` as a thin adapter that only packages Tauri arguments and supplies the managed scheduler. Command name, payload, return shape and `generate_handler!` registration are unchanged.
+- Added private backend and reporter seams. Production adapters call the existing Whisper and Tauri event modules; test adapters drive the same orchestration without loading a model or desktop runtime.
+- Preserved the 3 existing validation/cancellation tests and added 3 direct lifecycle tests for ordered `10/35/90/100` progress, backend failure plus scheduler state, and conversion-time cancellation plus cancelled reporting.
+- An attempted Tauri `mock_app` reporter test failed before test execution on this Windows environment with `STATUS_ENTRYPOINT_NOT_FOUND`; that approach was removed rather than skipped. The private reporter adapter provides a fast portable judge without changing the public interface.
+- Reduced `commands.rs` from about 459 to 314 lines. The new execution module is about 457 lines including 6 tests; the improvement is responsibility and judge locality, not line-count reduction.
+- No locked file under `harness/` or `src-tauri/tests/` changed, so no Harness Migration was required. Existing scheduler, command and Whisper Harness remain independent system judges.
+- This slice is governed by `AC-LV-03`, `AC-LV-07` and `AC-LV-10`. The canonical real-video evidence remains the full runtime judge; the multi-hour E2E is not required to prove a behavior-preserving module move when the execution lifecycle now has direct fast judges.
+
+Focused verification passed 6 `asr_execution` tests, 13 scheduler tests, 5 locked command Harness tests and 5 locked Whisper Harness tests. Full verification passed 70 frontend files / 419 tests with 1 live-key test skipped by its explicit environment guard; Rust passed 84 tests with 1 real Whisper model test explicitly ignored. The production Vite build passed with the existing dynamic/static import chunking warnings. `rustfmt --check`, `git diff --check` and the locked-directory diff check passed. The multi-hour real-video E2E was not rerun because the Tauri protocol, production Whisper adapter and observable lifecycle are unchanged, while the moved orchestration now has direct success/failure/cancellation judges.
+
+The next controlled Rust risk is model download/listing, not the remaining thin commands. Before implementation, define and confirm acceptance criteria for streaming memory use, progress, cancellation, partial-file cleanup, integrity and replacement behavior; then assign each criterion to a direct Rust judge and any necessary UI/Evidence judge.
 
 ## Maintenance checklist for every future session
 

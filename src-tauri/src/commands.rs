@@ -3,17 +3,17 @@
 // Tauri command 层（决策92/96/98）
 // ========================================
 
+use crate::asr_execution::{self, AsrExecutionRequest};
 use crate::asr_persistence::{self, PersistedSentence};
-use crate::asr_transcript::{build_asr_transcript, AsrSentence};
-use crate::events::{self, ProgressPayload};
+use crate::asr_transcript::AsrSentence;
 use crate::ffmpeg;
 use crate::import_state_persistence::{self, ImportState};
 use crate::note_persistence::{self, PersistedNote};
-use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
+use crate::scheduler::ImportScheduler;
 use crate::settings_persistence::{self, SettingMutation};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
 use crate::video_deletion;
-use crate::whisper::{self, WhisperModelSize};
+use crate::whisper::WhisperModelSize;
 use crate::ytdlp;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -92,48 +92,18 @@ pub async fn start_asr(
     model_path: Option<String>,
     language: Option<String>,
 ) -> Result<Vec<AsrSentence>, String> {
-    if let Err(error) = validate_asr_tier(&tier) {
-        let _ = events::emit_import_failed(&app, video_id, error.clone());
-        return Err(error);
-    }
-
-    let model = model_path.unwrap_or_default();
-    let language = normalize_asr_language(language)?;
-    if let Err(error) = whisper::validate_asr_request(&file_path, &model) {
-        let _ = events::emit_import_failed(&app, video_id, error.clone());
-        return Err(error);
-    }
-
-    let task = scheduler.start_video_task(video_id.clone()).await;
-    let token = task.token();
-    let result = run_whisper_asr(&app, &video_id, &file_path, &model, &language, token.clone()).await;
-
-    let response = match result {
-        Ok(sentences) => match scheduler.finish_success(&token).await {
-            TaskFinish::Completed => {
-                let _ = events::emit_progress(&app, ProgressPayload::new(&video_id, "asr", 100));
-                Ok(sentences)
-            }
-            TaskFinish::Cancelled => {
-                let _ = events::emit_import_cancelled(&app, video_id);
-                Err("ASR cancelled".to_string())
-            }
-            TaskFinish::Stale | TaskFinish::Failed => Err("ASR task was superseded".to_string()),
+    asr_execution::execute_asr(
+        &app,
+        scheduler.inner().as_ref(),
+        AsrExecutionRequest {
+            video_id,
+            file_path,
+            tier,
+            model_path,
+            language,
         },
-        Err(error) => match scheduler.finish_failure(&token, error.clone()).await {
-            TaskFinish::Failed => {
-                let _ = events::emit_import_failed(&app, video_id, error.clone());
-                Err(error)
-            }
-            TaskFinish::Cancelled => {
-                let _ = events::emit_import_cancelled(&app, video_id);
-                Err("ASR cancelled".to_string())
-            }
-            TaskFinish::Stale | TaskFinish::Completed => Err("ASR task was superseded".to_string()),
-        },
-    };
-    drop(task);
-    response
+    )
+    .await
 }
 
 fn rain_database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -276,86 +246,6 @@ pub async fn merge_import_atomically(
     .await
     .map_err(|error| format!("Merge import atomically: {error}"))
 }
-fn validate_asr_tier(tier: &str) -> Result<(), String> {
-    if tier == "whisper" {
-        Ok(())
-    } else {
-        Err(format!(
-            "ASR tier '{tier}' is not supported; configure local Whisper"
-        ))
-    }
-}
-
-fn normalize_asr_language(language: Option<String>) -> Result<String, String> {
-    let normalized = language
-        .unwrap_or_else(|| "zh".to_string())
-        .trim()
-        .to_ascii_lowercase();
-    match normalized.as_str() {
-        "zh" | "en" | "auto" => Ok(normalized),
-        _ => Err(format!("ASR language '{normalized}' is not supported; use zh, en, or auto")),
-    }
-}
-async fn run_whisper_asr(
-    app: &AppHandle,
-    video_id: &str,
-    file_path: &str,
-    model_path: &str,
-    language: &str,
-    token: CancellationToken,
-) -> Result<Vec<AsrSentence>, String> {
-    ensure_asr_not_cancelled(&token)?;
-    let _ = events::emit_progress(app, ProgressPayload::new(video_id, "asr_extraction", 10));
-
-    let temp_wav = whisper::temporary_wav_path(file_path);
-    if let Some(parent) = temp_wav.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("Create ASR temp dir failed: {error}"))?;
-    }
-    let _temp_guard = whisper::TemporaryWavGuard::new(temp_wav.clone());
-    let temp_wav_string = temp_wav
-        .to_str()
-        .ok_or_else(|| "Temporary WAV path is not valid UTF-8".to_string())?
-        .to_string();
-
-    let input = file_path.to_string();
-    let output = temp_wav_string.clone();
-    let conversion_token = token.clone();
-    tokio::task::spawn_blocking(move || {
-        whisper::convert_to_wav_cancellable(&input, &output, Some(&conversion_token))
-    })
-    .await
-    .map_err(|error| format!("ASR extraction task failed: {error}"))?
-    .map_err(|error| error.to_string())?;
-
-    ensure_asr_not_cancelled(&token)?;
-    let _ = events::emit_progress(app, ProgressPayload::new(video_id, "asr_transcription", 35));
-
-    let model = model_path.to_string();
-    let wav = temp_wav_string;
-    let inference_token = token.clone();
-    let whisper_language = if language == "auto" { None } else { Some(language.to_string()) };
-    let whisper_result = tokio::task::spawn_blocking(move || {
-        whisper::transcribe_wav_with_language(&model, &wav, whisper_language.as_deref(), Some(inference_token))
-    })
-    .await
-    .map_err(|error| format!("Whisper task failed: {error}"))?
-    .map_err(|error| error.to_string())?;
-
-    ensure_asr_not_cancelled(&token)?;
-    let _ = events::emit_progress(app, ProgressPayload::new(video_id, "asr_finalization", 90));
-
-    build_asr_transcript(&whisper_result)
-}
-
-fn ensure_asr_not_cancelled(token: &CancellationToken) -> Result<(), String> {
-    if token.is_cancelled() {
-        Err("ASR cancelled".to_string())
-    } else {
-        Ok(())
-    }
-}
-
 /// 下载 Whisper 模型（决策94）
 #[tauri::command]
 pub async fn download_whisper_model(app: AppHandle, model_size: String) -> Result<String, String> {
@@ -429,35 +319,4 @@ pub async fn list_whisper_models(app: AppHandle) -> Result<Vec<String>, String> 
     }
 
     Ok(found)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cancelled_asr_token_is_rejected() {
-        let token = crate::scheduler::CancellationToken::new();
-        token.cancel();
-        assert_eq!(
-            ensure_asr_not_cancelled(&token).unwrap_err(),
-            "ASR cancelled"
-        );
-    }
-    #[test]
-    fn unsupported_asr_tiers_fail_closed() {
-        assert!(validate_asr_tier("whisper").is_ok());
-        assert_eq!(
-            validate_asr_tier("subtitle").unwrap_err(),
-            "ASR tier 'subtitle' is not supported; configure local Whisper"
-        );
-        assert!(validate_asr_tier("api").is_err());
-    }
-
-    #[test]
-    fn asr_language_defaults_to_chinese_and_fails_closed() {
-        assert_eq!(normalize_asr_language(None).unwrap(), "zh");
-        assert_eq!(normalize_asr_language(Some("AUTO".to_string())).unwrap(), "auto");
-        assert!(normalize_asr_language(Some("fr".to_string())).unwrap_err().contains("zh, en, or auto"));
-    }
 }

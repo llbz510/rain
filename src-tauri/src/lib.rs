@@ -1,3 +1,4 @@
+pub mod asr_execution;
 pub mod asr_persistence;
 pub mod asr_transcript;
 pub mod commands;
