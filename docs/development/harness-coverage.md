@@ -41,7 +41,7 @@
 | AC-ST-02 | M07 组件 Harness、`study-playback.test.tsx`、`study-navigation.test.tsx` | Strong | 生产 `StudyInterface` 测试证明双击句子和点击通过 ID/时间校验的助手引用都会更新唯一 `playPosition` 与真实 media `currentTime`；播放和暂停状态均不被 seek 路径改变 |
 | AC-ST-03 | M05/M07 组件 Harness、`study-playback.test.tsx`、`study-navigation.test.tsx` | Strong | 生产 `StudyInterface` 测试从真实 video `timeupdate` 贯通唯一 `playPosition`、半开区间句子高亮和目录当前态；播放时当前句滚入可视区，暂停时不强制滚动；播放状态由 Store 统一持有 |
 | AC-ST-04 | M05 组件 Harness、`study-navigation.test.tsx` | Strong | 生产 `StudyInterface` 测试证明单击只选中；双击章节/节/段落统一解析到子树最早句子，更新 Store 与真实 media、定位对应文本并保持播放/暂停状态；地图预览展示所选节点的真实首段内容 |
-| AC-ST-05 | M06 组件 Harness、M15 数据库 Harness、`study-progress.test.tsx` | Strong | 生产 `StudyInterface` 测试从真实 media `timeupdate` 写入真实数据库，证明 Store 当前时间可回退而持久化最远进度不下降；退出后重新加载会恢复 Store/media 位置，并在成功建立学习会话后更新 `lastStudiedAt` |
+| AC-ST-05 | `database-videos.test.ts`、M06 组件 Harness、M15 数据库 Harness、`study-progress.test.tsx` | Strong | SQLite characterization 直接锁定带 `position < $1` 的单调更新和独立 `lastStudiedAt` 写入；生产 `StudyInterface` 测试从真实 media `timeupdate` 写入数据库，证明 Store 当前时间可回退而持久化最远进度不下降；退出后重新加载会恢复 Store/media 位置 |
 | AC-ST-06 | `database-notes.test.ts`、M08 数据库/组件 Harness、M15 数据库 Harness、`study-notes.test.tsx`、Rust `note_persistence`/command Harness | Strong | 生产 `StudyInterface` 测试证明整段摘注、自由笔记、编辑、重开读取和引用跳转闭环；前端协议测试锁定单次 `insert_note_atomically` 调用；Rust 在一个 SQLite 连接和事务中写 Note 与全部 sentence 引用，并用第二条重复引用失败直接证明两张表一起回滚 |
 | AC-ST-07 | `assistant-context.test.ts`、`study-playback.test.tsx`、能力测试、schema v2 证据 | Strong + Evidence（文本） | 文本上下文、门禁、停止、迟到 token、可信引用和真实文本探针已覆盖；vision 明确不在此 AC |
 | AC-ST-08 | M16 状态/组件 Harness、`study-layout.test.tsx` | Strong | M16 只裁判三模式枚举和局部可见性；生产 `StudyInterface` 测试证明三模式复用同一个 media 实例，布局切换只隐藏视频，不清空当前视频、位置、选择、笔记、助手会话或播放状态 |
@@ -61,6 +61,8 @@
 | 原子导入持久化 seam | `database-import-atomic.test.ts`、`database-recovery.test.ts`、Pipeline/Stage2 tests、M04/M15/M18、Rust persistence tests | Strong（前端路径 + Rust 事务） | 锁定 SQLite command 参数和直接事务顺序；内存与 Rust 共同覆盖失败回滚、过期写保护、树关系和句子精确归属。真实应用完成状态仍由 Evidence 裁判 |
 | 学习内容持久化 seam | `database-content.test.ts`、M15、Pipeline/Stage2 tests、`study-load.test.tsx` | Strong（公共接口 + 双 adapter） | 公共 `database.ts` 导出不变；SQLite characterization 锁定完整 Node/Sentence 行、按 Node/Video 查询范围和映射，内存 adapter 与生产学习加载/导入测试覆盖可观察结果 |
 | 笔记持久化 seam | `database-notes.test.ts`、M08/M15、`study-notes.test.tsx`、Rust `note_persistence`/command Harness | Strong（前端路径 + Rust 事务） | 公共入口不变；SQLite 写入通过单次 Rust command，在独占连接的真实事务中提交 Note 与全部引用；前端 payload/错误传播、Rust 成功与回滚、内存约束和生产页面重开闭环均有裁判 |
+| Video 记录持久化 seam | `database-videos.test.ts`、M15 queries/CRUD、视频列表、`study-load.test.tsx`、`study-progress.test.tsx` | Strong（普通读写） | 公共导出不变；完整 Video 行往返、批准的三种排序、参数化搜索、状态、单调进度和最近学习时间均由 SQLite characterization 与内存/生产路径共同裁判 |
+| 视频级联删除 seam | M15 schema CRUD | Partial | 只有内存 ready-video 删除成功路径；当前内存实现会漏删 `node_id = videoId` 的 ASR 占位句子，SQLite 六次 SQL-plugin 删除没有单连接事务证明，且该行为尚无独立 AC |
 | progress 事件名称和字段 | M20/M21 前端 Harness、Rust `events`/`commands` Harness | Strong | 覆盖事件订阅转发、重复监听释放、Rust camelCase 序列化和 ASR 子阶段 |
 | Rust Harness 系统行为 | `src-tauri/tests/*_harness.rs` | Strong | 覆盖调度串行化、按视频取消、取消令牌、ffmpeg/Whisper/yt-dlp 非法输入、错误上下文和真实媒体 fixture |
 | 视觉令牌 | `harness/m13-visual.test.ts` | Strong | 读取并装载应用实际使用的 `src/index.css`，通过 CSSOM 检查变量；不再维护 TS 复制品 |

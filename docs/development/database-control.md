@@ -24,7 +24,8 @@
 | 职责 | 主要行为 | 关联 AC / 规则 | 当前裁判 |
 | --- | --- | --- | --- |
 | Schema 与 adapter 选择 | 创建内存数据库或 Tauri SQLite，保持表/字段一致 | 数据库边界规则 | M15 schema Harness、M20 SQL importer Harness |
-| 视频生命周期 | Video 创建、查询、列表、状态、进度和级联删除 | AC-LV-02/09、AC-ST-01/05 | M15、视频列表、学习加载/进度测试 |
+| Video 记录与进度 | Video 创建、查询、列表、搜索、状态和学习进度 | AC-LV-02/09、AC-ST-01/05 | `database-videos.test.ts`、M15、视频列表、学习加载/进度测试 |
+| 视频级联删除 | 删除 Video 及其 Node/Sentence/Note/checkpoint | 现有行为，尚无独立 AC | M15 内存 Harness；SQLite 原子性未证明（Partial） |
 | 学习内容读写 | Node/Sentence 普通写入和按 Node/Video 查询 | AC-LV-04/05/09、AC-ST-01 | `database-content.test.ts`、M15、Pipeline/Stage2、学习加载测试 |
 | 设置持久化 | 模型池、角色和能力记录使用的 key-value 设置 | AC-LV-01/12、AC-ST-07 | M15 settings/recovery、模型能力测试 |
 | 导入状态与恢复 | 批准状态转换、检查点、恢复判断 | AC-LV-03/06/07/08 | Pipeline 恢复测试、M03/M21、真实 Evidence |
@@ -46,6 +47,8 @@
 9. `database-import-atomic.ts` 统一负责 ASR 保存、句子归属、最终合并和直接原子句子插入；`database-content-rows.ts` 是普通 CRUD 与原子写入共享的 Node/Sentence 行格式事实源。
 10. `database-notes.ts` 统一负责 Note 与 sentence 引用持久化；内存 adapter 镜像主键/关联唯一约束和失败回滚。SQLite 创建通过单次 `insert_note_atomically` command 进入 `note_persistence.rs`，由一个连接上的真实事务提交 Note 与全部引用。
 11. `database-content.ts` 统一负责 Node/Sentence 的普通写入和查询；它通过 adapter seam 访问 SQLite 或内存表，并与原子导入模块共享 `database-content-rows.ts` 行格式。业务调用方仍从 `@/models/database` 导入。
+12. `database-videos.ts` 统一负责 Video 行映射、普通读写、列表/搜索和 `AC-ST-05` 进度更新。SQLite characterization 直接锁定 `position < $1`，防止真实数据库进度回退；级联删除不属于这个 module。
+13. `deleteVideoWithCascade` 仍在 `database.ts`。SQLite 路径通过 SQL-plugin 连续执行六次删除，不能证明单连接事务；内存路径当前只按 Node ID 删除 Sentence，会漏掉 ASR 阶段 `node_id = videoId` 的占位句子。此职责在建立 AC 和替代裁判前不得标记为完成。
 
 ## 4. 受控拆分顺序
 
@@ -53,7 +56,8 @@
 
 1. `Completed`：提取 schema 唯一事实源，公共 interface 不变。
 2. `Completed`：导入状态、检查点和原子合并。adapter interface、检查点、状态转换、恢复判断、ASR 保存、句子归属和最终合并均已移出公共入口，由 AC-LV-03 至 AC-LV-09 的测试和 Rust/Evidence 裁判。
-3. `In progress`：学习内容持久化。Note/reference 原子写入和 Node/Sentence 普通读写均已移出公共入口；Video 生命周期与 `AC-ST-05` 进度持久化仍在 `database.ts`。
+3. `Completed`：学习内容与 Video 普通持久化。Note/reference、Node/Sentence、Video 行映射、列表/搜索和 `AC-ST-05` 进度均有独立 module 与裁判。
 4. 设置持久化。由模型能力、设置恢复和预检测试裁判。
+5. 视频级联删除。先确定 AC，再修复内存占位句子遗漏，并通过明确批准的 Harness Migration 把 SQLite 多表删除收进单连接 Rust 事务。
 
 禁止一次性重写整个数据库层。每一步都必须保持 `@/models/database` 导出兼容、运行对应裁判、更新本文件和 `PROJECT_STATE.md`。

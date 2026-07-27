@@ -36,6 +36,7 @@ describe('database adapter seam', () => {
       'database-import-state',
       'database-notes',
       'database-schema',
+      'database-videos',
     ]
     const violations = sourceFiles(sourceRoot)
       .filter((path) => !path.includes(join('src', '__tests__')))

@@ -6,7 +6,6 @@
 // 公开 API（Database 接口 + 所有导出函数签名）两种后端完全一致。
 // ========================================
 
-import type { Video } from './types'
 import {
   isSqlDatabase,
   type Database,
@@ -49,6 +48,15 @@ export {
   insertNote,
   updateNoteContent,
 } from './database-notes'
+export {
+  getVideoById,
+  insertVideo,
+  listVideos,
+  searchVideosByTitle,
+  updateVideoLastStudiedAt,
+  updateVideoPosition,
+  updateVideoStatus,
+} from './database-videos'
 
 // ========================================
 // 内存数据库实现（SQL-like in-memory）
@@ -146,50 +154,6 @@ class TauriSqlDatabase implements SqlDatabaseAdapter {
   }
 }
 
-// ========================================
-// 行/对象转换（两种后端共用）
-// ========================================
-
-// 转换 Video 对象到行数据
-function videoToRow(video: Video): TableRow {
-  return {
-    id: video.id,
-    title: video.title,
-    source: video.source,
-    source_url: video.sourceUrl ?? null,
-    file_path: video.filePath ?? null,
-    thumbnail: video.thumbnail,
-    duration: video.duration,
-    language: video.language,
-    status: video.status,
-    stage: video.stage ?? null,
-    error_message: video.errorMessage ?? null,
-    created_at: video.createdAt,
-    position: video.position,
-    last_studied_at: video.lastStudiedAt,
-  }
-}
-
-// 转换行数据到 Video 对象
-function rowToVideo(row: TableRow): Video {
-  return {
-    id: row.id,
-    title: row.title,
-    source: row.source,
-    sourceUrl: row.source_url ?? undefined,
-    filePath: row.file_path ?? undefined,
-    thumbnail: row.thumbnail,
-    duration: row.duration,
-    language: row.language,
-    status: row.status,
-    stage: row.stage ?? undefined,
-    errorMessage: row.error_message ?? undefined,
-    createdAt: row.created_at,
-    position: row.position,
-    lastStudiedAt: row.last_studied_at,
-  }
-}
-
 // ===== 导出函数 =====
 
 export async function createDatabase(path: string = ':memory:'): Promise<Database> {
@@ -205,131 +169,8 @@ export async function createDatabase(path: string = ':memory:'): Promise<Databas
   return new MemoryDatabase()
 }
 
-export async function insertVideo(db: Database, video: Video): Promise<void> {
-  if (isTauriDb(db)) {
-    const r = videoToRow(video)
-    await db.exec(
-      'INSERT INTO video (id, title, source, source_url, file_path, thumbnail, duration, language, status, stage, error_message, created_at, position, last_studied_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)',
-      [r.id, r.title, r.source, r.source_url, r.file_path, r.thumbnail, r.duration, r.language, r.status, r.stage, r.error_message, r.created_at, r.position, r.last_studied_at]
-    )
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('video')
-  table.push(videoToRow(video))
-  memDb._setTable('video', table)
-}
-
-export async function getVideoById(db: Database, id: string): Promise<Video | null> {
-  if (isTauriDb(db)) {
-    const rows = await db.query<TableRow>('SELECT * FROM video WHERE id = $1', [id])
-    return rows.length > 0 ? rowToVideo(rows[0]) : null
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const row = memDb._getTable('video').find(r => r.id === id)
-  return row ? rowToVideo(row) : null
-}
-
 function isTauriDb(db: Database): db is SqlDatabaseAdapter {
   return isSqlDatabase(db)
-}
-
-export async function updateVideoStatus(db: Database, id: string, status: string): Promise<void> {
-  if (isTauriDb(db)) {
-    await db.exec('UPDATE video SET status = $1 WHERE id = $2', [status, id])
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('video')
-  for (const row of table) {
-    if (row.id === id) {
-      row.status = status
-    }
-  }
-  memDb._setTable('video', table)
-}
-
-export async function listVideos(db: Database, sortBy: string = 'lastStudied'): Promise<Video[]> {
-  if (isTauriDb(db)) {
-    let sql = 'SELECT * FROM video'
-    switch (sortBy) {
-      case 'lastStudied':
-        sql += ' ORDER BY last_studied_at DESC'
-        break
-      case 'createdAt':
-        sql += ' ORDER BY created_at DESC'
-        break
-      case 'title':
-        sql += ' ORDER BY title ASC'
-        break
-    }
-    const rows = await db.query<TableRow>(sql)
-    return rows.map(rowToVideo)
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const videos = memDb._getTable('video').map(rowToVideo)
-
-  const sorted = [...videos]
-  switch (sortBy) {
-    case 'lastStudied':
-      sorted.sort((a, b) => b.lastStudiedAt - a.lastStudiedAt)
-      break
-    case 'createdAt':
-      sorted.sort((a, b) => b.createdAt - a.createdAt)
-      break
-    case 'title':
-      sorted.sort((a, b) => a.title.localeCompare(b.title))
-      break
-  }
-  return sorted
-}
-
-export async function searchVideosByTitle(db: Database, keyword: string): Promise<Video[]> {
-  if (isTauriDb(db)) {
-    const rows = await db.query<TableRow>('SELECT * FROM video WHERE title LIKE $1', [`%${keyword}%`])
-    return rows.map(rowToVideo)
-  }
-  const memDb = db as unknown as MemoryDatabase
-  return memDb._getTable('video')
-    .filter(r => r.title.includes(keyword))
-    .map(rowToVideo)
-}
-
-export async function updateVideoPosition(db: Database, id: string, position: number): Promise<void> {
-  if (isTauriDb(db)) {
-    // position 单调递增：仅当新值严格大于当前值才更新（与内存版语义一致）
-    await db.exec(
-      'UPDATE video SET position = $1 WHERE id = $2 AND position < $1',
-      [position, id]
-    )
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('video')
-  for (const row of table) {
-    if (row.id === id) {
-      // position 单调递增：只能变大不能变小
-      if (position > row.position) {
-        row.position = position
-      }
-    }
-  }
-  memDb._setTable('video', table)
-}
-
-export async function updateVideoLastStudiedAt(db: Database, id: string, timestamp: number): Promise<void> {
-  if (isTauriDb(db)) {
-    await db.exec('UPDATE video SET last_studied_at = $1 WHERE id = $2', [timestamp, id])
-    return
-  }
-  const memDb = db as unknown as MemoryDatabase
-  const table = memDb._getTable('video')
-  for (const row of table) {
-    if (row.id === id) {
-      row.last_studied_at = timestamp
-    }
-  }
-  memDb._setTable('video', table)
 }
 
 export async function setSetting(db: Database, key: string, value: string): Promise<void> {
