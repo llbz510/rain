@@ -32,7 +32,7 @@ import { useRainStore } from '@/store/rain-store'
 
 interface RealE2eConfig {
   enabled: boolean
-  runMode: 'full' | 'ui-proof'
+  runMode: 'full' | 'ui-proof' | 'runtime-settings'
   evidenceId: string
   videoPath: string
   whisperModelPath: string
@@ -485,7 +485,7 @@ export function RealE2eRunner() {
     let cancelled = false
     void tauriInvoke<RealE2eConfig | null>('get_real_e2e_config')
       .then(async (config) => {
-        if (cancelled || !config?.enabled) return
+        if (cancelled || !config?.enabled || config.runMode === 'runtime-settings') return
         setStatus('running')
         window.__RAIN_E2E_RESULT__ = {
           status: 'running',

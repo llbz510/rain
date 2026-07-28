@@ -505,7 +505,7 @@ export function VideoListPage() {
             </div>
           )}
         </div>
-        <button onClick={handleSettingsClick} style={settingsButtonStyle}>
+        <button data-testid="open-settings" onClick={handleSettingsClick} style={settingsButtonStyle}>
           设置
         </button>
       </header>

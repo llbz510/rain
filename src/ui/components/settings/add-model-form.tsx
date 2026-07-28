@@ -204,6 +204,7 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label style={{ fontSize: 12, color: COLORS.muted }}>API Key</label>
             <input
+              data-testid="model-api-key"
               aria-label="API Key 密钥"
               type="password"
               style={s.input}
@@ -217,6 +218,7 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label style={{ fontSize: 12, color: COLORS.muted }}>模型名</label>
             <input
+              data-testid="model-name"
               aria-label="模型名"
               type="text"
               style={s.input}
@@ -303,6 +305,7 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <label style={{ fontSize: 12, color: COLORS.muted }}>别名（在池里显示的名字）</label>
           <input
+            data-testid="model-alias"
             aria-label="别名"
             type="text"
             style={s.input}
@@ -345,6 +348,7 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
           </div>
         )}
         <button
+          data-testid="add-model-save"
           style={s.primaryBtn}
           disabled={saveStatus === 'saving' || (isWhisper && downloadStatus !== 'done')}
           onClick={() => void handleSave()}

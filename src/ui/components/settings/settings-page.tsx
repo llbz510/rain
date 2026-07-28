@@ -17,6 +17,8 @@ export function SettingsPage() {
   const modelPool = useRainStore((state) => state.modelPool)
   const roleAssignment = useRainStore((state) => state.roleAssignment)
   const capabilityRecords = useRainStore((state) => state.capabilityRecords)
+  const settingsReady = useRainStore((state) => state.settingsReady)
+  const settingsError = useRainStore((state) => state.settingsError)
   const setCapabilityRecords = useRainStore((state) => state.setCapabilityRecords)
   const setPage = useRainStore((state) => state.setPage)
   const [modalOpen, setModalOpen] = useState(false)
@@ -91,6 +93,8 @@ export function SettingsPage() {
   return (
     <div
       data-testid="settings-page"
+      data-runtime-settings-status={settingsError ? 'error' : settingsReady ? 'ready' : 'loading'}
+      aria-busy={!settingsReady && !settingsError}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -184,7 +188,7 @@ export function SettingsPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>模型池</div>
                   <div style={{ flex: 1 }} />
-                  <button style={s.primaryBtn} onClick={() => setModalOpen(true)}>
+                  <button data-testid="add-model" style={s.primaryBtn} onClick={() => setModalOpen(true)}>
                     ＋ 添加模型
                   </button>
                 </div>

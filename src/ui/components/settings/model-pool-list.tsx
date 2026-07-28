@@ -121,7 +121,7 @@ export function ModelPoolList({
         {models.map((model) => (
           <div
             key={model.id}
-            data-testid={`model-${model.id}`}
+            data-testid={`model-entry-${model.id}`}
             style={{
               display: 'grid',
               gridTemplateColumns: '160px 150px 1fr 360px',
@@ -183,6 +183,7 @@ export function ModelPoolList({
                 </button>
               )}
               <button
+                data-testid={`remove-model-${model.id}`}
                 style={s.dangerBtn}
                 disabled={deletingModelId !== null}
                 onClick={() => void handleRemove(model)}

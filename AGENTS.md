@@ -74,6 +74,7 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 | `npm run test:rust` | 跑 Rust 测试（cargo test） |
 | `npm run harness:control` | 快速检查 Confirmed AC、Owner、Judge、覆盖行、裁判文件和当前事实冲突 |
 | `npm run harness:check` | 一键运行控制面校验、全部前端测试、生产构建和 Rust 测试 |
+| `npm run e2e:runtime-settings` | 真实 Tauri + 隔离 SQLite 的短设置重启 E2E；不需要 API Key，不调用模型 |
 | `npm run tauri dev` | 开发模式启动 Tauri 应用 |
 | `npm run tauri build` | 打包发布版 |
 | `cargo check --manifest-path src-tauri/Cargo.toml` | 仅检查 Rust 编译 |

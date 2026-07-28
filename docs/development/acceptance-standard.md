@@ -213,7 +213,7 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 实现归属：Store Runtime Settings 提交门禁、Runtime Settings 持久化规划、数据库批量 Settings interface、Rust SQLite 单事务。Settings UI 只能调用 Store 的公开动作，不得自行读取或拼装持久化快照。
 
-裁判：`runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
+裁判：`runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册，以及 `scripts/run-runtime-settings-e2e.ps1` 对真实 Tauri/SQL plugin/隔离 SQLite 的添加与重启持久化闭环。
 
 ### AC-LV-15 删除模型必须清理所有运行时引用
 
@@ -223,7 +223,7 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 实现归属：Store 模型删除动作负责构造无悬空引用的候选快照；`saveRuntimeSettings` 和 Rust SQLite 事务负责原子提交及旧 Key 清理。
 
-裁判：`runtime-settings-store.test.ts` 通过 Store 公开删除动作检查提交快照和发布状态；`runtime-settings-ui.test.tsx` 检查失败时条目仍可见；`model-pool.test.ts`、公共数据库 Settings 测试和 Rust `settings_persistence` 测试继续裁判 Key 清理与事务回滚。
+裁判：`runtime-settings-store.test.ts` 通过 Store 公开删除动作检查提交快照和发布状态；`runtime-settings-ui.test.tsx` 检查失败时条目仍可见；`model-pool.test.ts`、公共数据库 Settings 测试和 Rust `settings_persistence` 测试继续裁判 Key 清理与事务回滚；`scripts/run-runtime-settings-e2e.ps1` 在删除后再次启动真实桌面应用，证明模型不会复活。
 
 ### AC-LV-16 Runtime Settings 初始化与写入必须有确定顺序
 
@@ -233,7 +233,7 @@ Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝
 
 实现归属：`src/store/rain-store.ts` 的 Runtime Settings 提交队列、提交版本和加载代次门禁。数据库仍只负责单个快照的原子事务，不负责前端动作排序。
 
-裁判：`runtime-settings-store.test.ts` 分别证明未就绪时不持久化、并发动作串行且第二个快照包含第一个提交、晚返回的旧加载结果不能覆盖成功动作；既有 Store/UI/SQLite 裁判继续证明失败保留和单快照原子性。
+裁判：`runtime-settings-store.test.ts` 分别证明未就绪时不持久化、并发动作串行且第二个快照包含第一个提交、晚返回的旧加载结果不能覆盖成功动作；既有 Store/UI/SQLite 裁判继续证明失败保留和单快照原子性；`scripts/run-runtime-settings-e2e.ps1` 等待生产设置页公开的 hydration 状态后才写入，并通过两次真实进程重启补强启动顺序。
 
 ## 3. Whisper 模型下载
 

@@ -68,9 +68,10 @@ Read in this order:
 5. `docs/development/harness-coverage.md` — AC-to-test/evidence coverage and gaps.
 6. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
 7. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
-8. `package.json` — runnable frontend/test/E2E commands.
-9. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-10. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+8. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
+9. `package.json` — runnable frontend/test/E2E commands.
+10. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+11. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -125,6 +126,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
+17. Whole-repository `cargo fmt --check` is not currently a usable clean gate: it reports pre-existing formatting differences in `src-tauri/src/whisper.rs`, `src-tauri/src/ytdlp.rs` and locked files under `src-tauri/tests/`. Do not format or modify the locked Rust Harness without an approved Harness Migration. New Rust changes must still pass file-scoped `rustfmt --check` until this debt is separately authorized and resolved.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1364,6 +1366,26 @@ Confirmed and implemented `AC-LV-16` so Runtime Settings initialization and writ
 TDD evidence: the three new Store tests first failed independently: a pre-load add returned success and persisted, two concurrent adds invoked persistence twice before either completed, and a delayed reload erased a successful add. After the queue/readiness/revision gates were implemented, all three passed; the existing delayed-save test was updated to wait until its queued persistence call actually began.
 
 Verification on branch `master` before commit: `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 75 files / 442 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; Rust passed 95 tests with 1 real Whisper model test explicitly ignored. The multi-hour real E2E was not rerun because this slice changes settings action ordering without changing model inference, Tauri commands or SQLite payloads.
+
+## What changed in the 2026-07-28 Runtime Settings desktop E2E slice
+
+Started from a clean `master` checkout at `7518ca8 fix: order runtime settings mutations` and selected the no-live-key desktop restart check as the highest-value remaining Runtime Settings Harness gap:
+
+- Existing Store tests, public database tests and Rust transaction tests independently covered `AC-LV-14` through `AC-LV-16`, but no current Judge traversed real Tauri startup, the SQL plugin, schema initialization, Store hydration, production Settings UI and process restart after the ordering slice.
+- Added `npm run e2e:runtime-settings` and `scripts/run-runtime-settings-e2e.ps1`. The script builds the current desktop app, routes the production database singleton to a unique system-temp SQLite, drives the real Settings UI through WebDriver, adds an API-Key-free test LLM, restarts and proves it persists, deletes it, restarts again and proves it is gone.
+- Added a third `runtime-settings` mode to the existing E2E config command. It requires only an isolated database path. The full video `RealE2eRunner` explicitly ignores this mode, while `db-singleton.ts` continues using the same production config interface for isolation; no new Tauri command or locked M20 migration was needed.
+- Settings exposes only a `loading/ready/error` DOM hydration state plus stable ASCII action seams. These attributes contain no model data or secret and make the live application deterministic and legible to WebDriver instead of relying on sleeps or PowerShell-decoded Chinese labels.
+- The script clears known LLM Key environment variables in its child-process environment, verifies the form Key is empty, never clicks connection/capability checks, and removes the isolated temporary directory. It does not grant `Compatible`/`Verified`, exercise paid models, download Whisper or replace the multi-hour video Evidence.
+- Recorded the Owner/Judge/scope contract in `docs/development/runtime-settings-desktop-e2e.md` and mapped the new Judge to existing `AC-LV-14`, `AC-LV-15` and `AC-LV-16`. No new product behavior or AC was introduced, and no locked file under `harness/` or `src-tauri/tests/` changed.
+
+TDD evidence:
+
+- Rust first rejected `runtime-settings` with `RAIN_E2E_RUN_MODE must be full or ui-proof`; the focused config test turned green after the minimal isolated mode was added.
+- The component test first showed that `RealE2eRunner` incorrectly armed for the short mode; it turned green after ownership was left to WebDriver.
+- The settings observability test first found no hydration state; it turned green after the public page exposed the three-state boundary.
+- The first real runs exposed Harness defects rather than hidden product changes: cleanup masked the original error, a Chinese selector was corrupted by Windows PowerShell 5 UTF-8 decoding, and an overly broad model selector caused a false deletion timeout. The Harness now preserves primary errors, retries exact temp cleanup, uses ASCII test IDs and matches only `model-entry-*` rows.
+
+Focused verification passed the two new frontend tests and all six Rust E2E config tests. The final real desktop run passed all three launches: isolated initialization, add, first restart persistence, delete and second restart absence. Final `npm run harness:check` also passed end to end: Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and the Vite production build passed; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. File-scoped `rustfmt --check` passed for `e2e_config.rs`; the separate whole-repository formatting debt is recorded as risk 17. Tauri/Vite retained only the existing bundle-identifier and dynamic/static import warnings.
 
 ## Maintenance checklist for every future session
 

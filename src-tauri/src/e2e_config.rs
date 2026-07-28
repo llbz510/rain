@@ -27,8 +27,25 @@ where
     }
 
     let run_mode = get_env("RAIN_E2E_RUN_MODE").unwrap_or_else(|| "full".to_string());
-    if run_mode != "full" && run_mode != "ui-proof" {
-        return Err("RAIN_E2E_RUN_MODE must be full or ui-proof".to_string());
+    if run_mode != "full" && run_mode != "ui-proof" && run_mode != "runtime-settings" {
+        return Err("RAIN_E2E_RUN_MODE must be full, ui-proof, or runtime-settings".to_string());
+    }
+    let database_path = required_env(&get_env, "RAIN_E2E_DB_PATH")?;
+    if run_mode == "runtime-settings" {
+        return Ok(Some(RealE2eConfig {
+            enabled: true,
+            run_mode,
+            evidence_id: String::new(),
+            video_path: String::new(),
+            whisper_model_path: String::new(),
+            llm_base_url: String::new(),
+            llm_model: String::new(),
+            llm_api_key: String::new(),
+            whisper_backend: crate::runtime::runtime_capability()
+                .whisper_backend
+                .to_string(),
+            database_path,
+        }));
     }
     let evidence_id = required_env(&get_env, "RAIN_E2E_EVIDENCE_ID")?;
     let video_path = required_env(&get_env, "RAIN_E2E_VIDEO_PATH")?;
@@ -38,7 +55,6 @@ where
     } else {
         String::new()
     };
-    let database_path = required_env(&get_env, "RAIN_E2E_DB_PATH")?;
     let llm_base_url = get_env("RAIN_E2E_LLM_BASE_URL")
         .or_else(|| get_env("RAIN_E2E_QWEN_BASE_URL"))
         .unwrap_or_else(|| DEFAULT_LLM_BASE_URL.to_string());
@@ -209,5 +225,25 @@ mod tests {
 
         assert_eq!(config.run_mode, "ui-proof");
         assert_eq!(config.llm_api_key, "");
+    }
+
+    #[test]
+    fn e2e_runtime_settings_mode_needs_only_an_isolated_database() {
+        let config = read(&[
+            ("RAIN_E2E_MODE", "1"),
+            ("RAIN_E2E_RUN_MODE", "runtime-settings"),
+            ("RAIN_E2E_DB_PATH", "D:\\tmp\\rain-runtime-settings-e2e.db"),
+        ])
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(config.run_mode, "runtime-settings");
+        assert_eq!(
+            config.database_path,
+            "D:\\tmp\\rain-runtime-settings-e2e.db"
+        );
+        assert_eq!(config.llm_api_key, "");
+        assert_eq!(config.video_path, "");
+        assert_eq!(config.whisper_model_path, "");
     }
 }
