@@ -46,7 +46,40 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "tauri-driver installation failed with exit code $LASTEXITCODE" }
           'C:\Program Files\LLVM\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           'C:\Program Files\CMake\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          $env:EDGEWEBDRIVER | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install matching WebView2 driver
+        shell: pwsh
+        run: |
+          $runtimeRoots = @()
+          if (${env:ProgramFiles(x86)}) {
+            $runtimeRoots += Join-Path ${env:ProgramFiles(x86)} 'Microsoft\EdgeWebView\Application'
+          }
+          if ($env:ProgramFiles) {
+            $runtimeRoots += Join-Path $env:ProgramFiles 'Microsoft\EdgeWebView\Application'
+          }
+          $runtime = $runtimeRoots |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory } |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if (-not $runtime) {
+            throw 'Microsoft Edge WebView2 Runtime was not found.'
+          }
+
+          $driverVersion = $runtime.Name
+          $toolsRoot = Join-Path $env:RUNNER_TEMP 'rain-webview2-driver'
+          $archivePath = Join-Path $toolsRoot 'edgedriver_win64.zip'
+          $driverDirectory = Join-Path $toolsRoot $driverVersion
+          New-Item -ItemType Directory -Force -Path $toolsRoot, $driverDirectory | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri "https://msedgedriver.microsoft.com/$driverVersion/edgedriver_win64.zip" -OutFile $archivePath
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $driverDirectory -Force
+          $driverPath = Join-Path $driverDirectory 'msedgedriver.exe'
+          if (-not (Test-Path -LiteralPath $driverPath)) {
+            throw "msedgedriver.exe was not found after extracting $archivePath"
+          }
+          "RAIN_E2E_WEBVIEW2_VERSION=$driverVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $driverDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Verify desktop toolchain
         shell: pwsh
@@ -65,16 +98,11 @@ jobs:
           Get-Command tauri-driver | Select-Object -ExpandProperty Source
           $edgeDriver = Get-Command msedgedriver -ErrorAction Stop
           & $edgeDriver.Source --version
-          $edgeBinary = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
-          if (-not (Test-Path -LiteralPath $edgeBinary)) {
-            throw "Microsoft Edge was not found at $edgeBinary"
-          }
-          $edgeVersion = (Get-Item -LiteralPath $edgeBinary).VersionInfo.ProductVersion
           $driverText = (& $edgeDriver.Source --version | Out-String).Trim()
           $driverVersion = [regex]::Match($driverText, '\d+(?:\.\d+){3}').Value
-          Write-Output "Microsoft Edge $edgeVersion"
-          if ([string]::IsNullOrWhiteSpace($driverVersion) -or $edgeVersion -ne $driverVersion) {
-            throw "Microsoft Edge $edgeVersion does not exactly match msedgedriver $driverVersion"
+          Write-Output "Microsoft Edge WebView2 Runtime $env:RAIN_E2E_WEBVIEW2_VERSION"
+          if ([string]::IsNullOrWhiteSpace($driverVersion) -or $env:RAIN_E2E_WEBVIEW2_VERSION -ne $driverVersion) {
+            throw "Microsoft Edge WebView2 Runtime $env:RAIN_E2E_WEBVIEW2_VERSION does not exactly match msedgedriver $driverVersion"
           }
           if (-not (Test-Path -LiteralPath (Join-Path $env:LIBCLANG_PATH 'libclang.dll'))) {
             throw "libclang.dll was not found under $env:LIBCLANG_PATH"
