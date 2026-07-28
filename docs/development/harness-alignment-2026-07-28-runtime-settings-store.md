@@ -23,4 +23,4 @@ Rust/SQLite 已能原子提交完整 Runtime Settings，但 Store 的添加、�
 | 模块边界 | `settings-boundary.test.ts` | `src/ui/components/settings/` 不得导入数据库 interface |
 | 持久化与事务 | 原 `model-pool`、database Settings、M20、Rust tests | 完整 mutation batch、command 协议和 SQLite 回滚继续成立 |
 
-删除模型是否应在同一快照中主动清空引用它的角色，历史事实源没有明确规定。本次保留原行为，不由 AI 静默决定；后续如需改变，先建立独立 Proposed AC。
+本切片完成时，删除模型是否应在同一快照中主动清空引用它的角色尚未明确，因此当时保留原行为。用户随后已确认清理语义；现行事实为 `AC-LV-15`，迁移和裁判见 `harness-alignment-2026-07-28-model-pool-integrity.md`。

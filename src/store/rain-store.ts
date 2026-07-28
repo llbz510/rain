@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
 import { applyRuntimeSettings, createModelPoolEntry, createRuntimeSettingsInitializer, loadRuntimeSettings as loadPersistedRuntimeSettings, replaceModelPool, runtimeModelFromPoolEntry, runtimeSettingsFromEntries, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
 import { decideModelRoleAssignment, mergeCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
+import { requireInstalledWhisperModel } from '@/settings/whisper-model-download'
 
 export type LayoutMode = 'follow' | 'textExpand' | 'mapExpand'
 export type SelectionOrigin = 'tree' | 'diagram'
@@ -231,6 +232,9 @@ export const useRainStore = create<RainState>((set, get) => ({
 
   addModel: async (input) => {
     try {
+      if (input.type === 'whisper-local') {
+        await requireInstalledWhisperModel(input.modelName)
+      }
       const modelPool = [...get().modelPool, createModelPoolEntry(input)]
       await saveRuntimeSettings(runtimeSettingsFromEntries(
         modelPool,
@@ -242,21 +246,27 @@ export const useRainStore = create<RainState>((set, get) => ({
       return { ok: true }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      return { ok: false, error: `保存模型设置失败：${reason}` }
+      return { ok: false, error: `添加模型失败：${reason}` }
     }
   },
 
   removeModel: async (id) => {
     const modelPool = get().modelPool.filter((model) => model.id !== id)
     const capabilityRecords = get().capabilityRecords.filter((record) => record.modelId !== id)
+    const currentRoles = get().roleAssignment
+    const roleAssignment = {
+      asr: currentRoles.asr === id ? null : currentRoles.asr,
+      structuring: currentRoles.structuring === id ? null : currentRoles.structuring,
+      assistant: currentRoles.assistant === id ? null : currentRoles.assistant,
+    }
     try {
       await saveRuntimeSettings(runtimeSettingsFromEntries(
         modelPool,
-        get().roleAssignment,
+        roleAssignment,
         capabilityRecords,
       ))
       replaceModelPool(modelPool)
-      set({ modelPool, capabilityRecords })
+      set({ modelPool, roleAssignment, capabilityRecords })
       return { ok: true }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)

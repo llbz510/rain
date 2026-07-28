@@ -215,6 +215,16 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 裁判：`runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
 
+### AC-LV-15 删除模型必须清理所有运行时引用
+
+状态：`Confirmed`
+
+用户删除模型池条目时，模型条目、该模型的能力记录、引用该模型的 ASR/结构化/助手角色以及独立 API Key 必须在同一个 Runtime Settings 快照中清理。一个模型同时承担多个角色时必须清理全部引用；未引用它的角色和其他模型事实保持不变。保存失败时，Store、设置 UI 和持久化 setting 都必须保持删除前状态。
+
+实现归属：Store 模型删除动作负责构造无悬空引用的候选快照；`saveRuntimeSettings` 和 Rust SQLite 事务负责原子提交及旧 Key 清理。
+
+裁判：`runtime-settings-store.test.ts` 通过 Store 公开删除动作检查提交快照和发布状态；`runtime-settings-ui.test.tsx` 检查失败时条目仍可见；`model-pool.test.ts`、公共数据库 Settings 测试和 Rust `settings_persistence` 测试继续裁判 Key 清理与事务回滚。
+
 ## 3. Whisper 模型下载
 
 本节来自 2026-07-27 对当前设置页、Rust command 和历史模型管理规格的核对，并于同日经用户确认。三条 AC 均为当前生效的 `Confirmed` 产品事实。
@@ -252,6 +262,18 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 实现归属：设置页模型下载 workflow 负责订阅/释放事件和 UI 状态；表单只收集 model size 和展示 workflow 状态；Rust 是下载任务和文件状态的事实源。
 
 裁判：`whisper-model-download.test.tsx` 通过生产 Tauri adapter/event interface 驱动真实表单，覆盖进度、取消、失败、重试、监听释放和成功后刷新模型列表。静态文案、按钮存在或直接修改 React state 不构成通过。
+
+### AC-MM-04 本地 Whisper 只有安装后才能进入模型池
+
+状态：`Confirmed`
+
+本地 Whisper 模型池条目只有在其 model size 对应的最终文件可由生产 `list_whisper_models` 发现后才能保存。下载按钮的本地 `done` 状态只负责改善交互，不能作为唯一门禁；Store 的公开添加动作必须再次通过生产 installed-list interface 复核，防止其他 UI、测试替身或未来调用方绕过。未安装、型号不受支持或列表查询失败时不得修改模型池或 Runtime Settings，并必须向用户返回可见错误。
+
+已经安装且与 manifest 匹配的文件可通过 AC-MM-01 的幂等下载/复核流程进入模型池。模型进入池后仍为“已配置”，不因此获得 ASR `Compatible`；能力结论继续只由 ASR capability probe 签发。
+
+实现归属：`whisper-model-download.ts` 公开 installed-list 校验 interface；Store 模型添加动作是不可绕过的入池门禁；`AddModelForm` 在当前选择未完成安装验证时禁用保存。
+
+裁判：`runtime-settings-store.test.ts` 通过 Store 公开动作和生产 installed-list adapter seam 证明未安装时不保存；`whisper-model-download.test.tsx` 驱动真实表单，证明安装验证前不可保存、验证后才解锁。M20 与 Rust download tests 继续裁判 command、最终文件和列表协议；文件存在不替代 `asr-capability.test.ts`。
 
 ## 4. 学习页核心流程
 

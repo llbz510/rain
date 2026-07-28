@@ -23,6 +23,27 @@ export interface WhisperModelDownloadSession {
   dispose(): void
 }
 
+export async function requireInstalledWhisperModel(modelSize: string): Promise<void> {
+  const expectedFilename = MODEL_FILENAMES[modelSize]
+  if (!expectedFilename) {
+    throw new Error(`不支持的本地 Whisper 型号：${modelSize}`)
+  }
+
+  let installedPaths: string[]
+  try {
+    installedPaths = await tauriInvoke<string[]>('list_whisper_models')
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`无法确认本地 Whisper 安装状态：${reason}`)
+  }
+  const installed = installedPaths.some((path) => (
+    path.replaceAll('\\', '/').endsWith(`/${expectedFilename}`)
+  ))
+  if (!installed) {
+    throw new Error(`本地 Whisper ${modelSize} 尚未安装。请先下载并验证模型。`)
+  }
+}
+
 export async function createWhisperModelDownloadSession(
   modelSize: string,
   onProgress: (progress: WhisperModelDownloadProgress) => void,
@@ -40,14 +61,7 @@ export async function createWhisperModelDownloadSession(
       const downloadedPath = await tauriInvoke<string>('download_whisper_model', {
         modelSize,
       })
-      const installedPaths = await tauriInvoke<string[]>('list_whisper_models')
-      const expectedFilename = MODEL_FILENAMES[modelSize]
-      const installed = installedPaths.some((path) => (
-        path.replaceAll('\\', '/').endsWith(`/${expectedFilename}`)
-      ))
-      if (!installed) {
-        throw new Error(`Downloaded model is not installed: ${expectedFilename}`)
-      }
+      await requireInstalledWhisperModel(modelSize)
       return downloadedPath
     },
 

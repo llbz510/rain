@@ -38,14 +38,14 @@ describe('AC-LV-14 settings mutation feedback', () => {
   it('keeps the add form open and shows the persistence error', async () => {
     const onClose = vi.fn()
     useRainStore.setState({
-      addModel: vi.fn(async () => ({ ok: false, error: '保存模型设置失败：disk full' })),
+      addModel: vi.fn(async () => ({ ok: false, error: '添加模型失败：disk full' })),
     })
     render(<AddModelForm onClose={onClose} />)
 
     await userEvent.type(screen.getByLabelText('模型名'), 'model-a')
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('保存模型设置失败：disk full')
+    expect(await screen.findByRole('alert')).toHaveTextContent('添加模型失败：disk full')
     expect(onClose).not.toHaveBeenCalled()
   })
 

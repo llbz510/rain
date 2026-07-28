@@ -34,6 +34,7 @@
 | AC-LV-12 | 上述能力/运行时测试、`qwen-health.test.ts`、`live-qwen.test.ts`、`validate-evidence.test.ts`、`validate-evidence.ps1`、真实 E2E Runner、`rain-real-e2e-20260726-195652` | Strong + Evidence（限定已验证组合） | 三角色探针、角色门禁、导入门禁和文本助手门禁均复用生产接口。schema v2 已真实验证 `ggml-large-v3.bin` CUDA ASR + DashScope `qwen3-omni-flash` 结构化与文本助手：当前默认配置、设置连接测试、可选 live smoke 和 E2E 默认值已对齐，但 live smoke 没有 Key 时必须跳过，不能代替 Evidence。该结论只覆盖此配置指纹和文本助手，不推广到其他 OpenAI-compatible 模型或 vision；其他配置仍需各自探针和完整 E2E。旧 schema v1 证据继续按原固定运行时规则验证 |
 | AC-LV-13 | `database-video-deletion.test.ts`、M15/M20、Rust `video_deletion` tests | Strong（公共接口 + Rust 事务） | 前端锁定单 command 协议、错误传播和内存隔离；Rust 真实 SQLite 锁定全部归属数据清理、末步失败回滚和缺失 Video 幂等 |
 | AC-LV-14 | `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`database-settings.test.ts`、`model-pool.test.ts`、M20、Rust `settings_persistence` tests | Strong（UI/Store 提交门禁 + 业务批次 + Rust 事务） | 添加、删除和角色选择只在快照落库后发布；失败保留两个内存副本并可见报错；Settings UI 不得绕过 Store hydration。模型快照保存与旧格式迁移均组装单批 mutation，Rust 锁定成功提交、无关 key 隔离和末步失败全回滚 |
+| AC-LV-15 | `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`model-pool.test.ts`、database Settings tests、Rust `settings_persistence` tests | Strong（Store 候选快照 + 持久化事务） | 公开删除动作把模型、全部角色引用和能力记录放入同一候选快照；旧 Key 由同一 mutation batch 清理；失败时 UI、Store 和 SQLite 均保留旧事实 |
 
 ## 3. Whisper 模型下载
 
@@ -42,6 +43,7 @@
 | AC-MM-01 | Rust `whisper_model_download` tests、M20 | Strong | 固定上游 revision/文件名/字节数/SHA-256；本地 HTTP 与临时目录直接证明验证后提交、坏哈希清理、旧文件保留、替换失败保护和有效文件幂等复用；M20 锁定真实下载/列举 command |
 | AC-MM-02 | Rust `whisper_model_download` tests、M20 | Strong | `Response::chunk` 增量写入和增量哈希；recording reporter 锁定单调进度；并发 fixture 锁定每型号单 writer、取消清理和干净重试；停滞网络 fixture 证明取消会唤醒等待中的读取；M20 锁定独立取消 command |
 | AC-MM-03 | `whisper-model-download.test.tsx`、M19/M20 | Strong | 真实 `AddModelForm` 通过生产 Tauri adapter/event seam 展示数值进度、发出取消、区分取消/失败、允许重试、释放 listener，并在安装列表复核后才显示成功；浏览器仍禁用本地下载 |
+| AC-MM-04 | `runtime-settings-store.test.ts`、`whisper-model-download.test.tsx`、M20、Rust `whisper_model_download` tests | Strong（Store 门禁 + 真实表单 + command/list） | 表单在安装验证前禁用保存；Store 公开添加动作再次调用共享 installed-list 校验，未安装时不触发 Runtime Settings 保存；安装只允许入池，不签发 ASR 能力 |
 
 ## 4. 学习页核心流程
 

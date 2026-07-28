@@ -344,7 +344,11 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
             {saveError}
           </div>
         )}
-        <button style={s.primaryBtn} disabled={saveStatus === 'saving'} onClick={() => void handleSave()}>
+        <button
+          style={s.primaryBtn}
+          disabled={saveStatus === 'saving' || (isWhisper && downloadStatus !== 'done')}
+          onClick={() => void handleSave()}
+        >
           {saveStatus === 'saving' ? '保存中…' : '保存'}
         </button>
       </div>

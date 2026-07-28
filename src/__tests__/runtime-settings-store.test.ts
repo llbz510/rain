@@ -15,14 +15,23 @@ const emptySettings: RuntimeSettings = {
 }
 
 const persistence = vi.hoisted(() => ({
-  load: vi.fn(async () => emptySettings),
-  save: vi.fn(async (_settings: RuntimeSettings) => undefined),
+  load: vi.fn(async (): Promise<RuntimeSettings> => emptySettings),
+  save: vi.fn(async (_settings: RuntimeSettings): Promise<void> => undefined),
+}))
+
+const whisperInstallation = vi.hoisted(() => ({
+  requireInstalled: vi.fn(async (_modelSize: string): Promise<void> => undefined),
 }))
 
 vi.mock('@/settings/model-pool', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/settings/model-pool')>(),
   loadRuntimeSettings: persistence.load,
   saveRuntimeSettings: persistence.save,
+}))
+
+vi.mock('@/settings/whisper-model-download', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/settings/whisper-model-download')>(),
+  requireInstalledWhisperModel: whisperInstallation.requireInstalled,
 }))
 
 const model: ModelPoolEntry = {
@@ -39,6 +48,8 @@ const model: ModelPoolEntry = {
 beforeEach(() => {
   persistence.save.mockReset()
   persistence.save.mockResolvedValue(undefined)
+  whisperInstallation.requireInstalled.mockReset()
+  whisperInstallation.requireInstalled.mockResolvedValue(undefined)
   replaceModelPool([])
   useRainStore.setState({
     modelPool: [],
@@ -88,7 +99,29 @@ describe('AC-LV-14 Store runtime settings commit', () => {
       supportsVision: false,
     })
 
-    expect(result).toEqual({ ok: false, error: '保存模型设置失败：disk full' })
+    expect(result).toEqual({ ok: false, error: '添加模型失败：disk full' })
+    expect(useRainStore.getState().modelPool).toEqual([])
+    expect(listModels()).toEqual([])
+  })
+
+  it('AC-MM-04 rejects an uninstalled local Whisper model before persistence', async () => {
+    whisperInstallation.requireInstalled.mockRejectedValueOnce(
+      new Error('本地 Whisper medium 尚未安装。请先下载并验证模型。'),
+    )
+
+    const result = await useRainStore.getState().addModel({
+      type: 'whisper-local',
+      provider: 'local',
+      modelName: 'medium',
+      alias: 'Whisper Medium',
+      supportsVision: false,
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      error: '添加模型失败：本地 Whisper medium 尚未安装。请先下载并验证模型。',
+    })
+    expect(persistence.save).not.toHaveBeenCalled()
     expect(useRainStore.getState().modelPool).toEqual([])
     expect(listModels()).toEqual([])
   })
@@ -118,6 +151,35 @@ describe('AC-LV-14 Store runtime settings commit', () => {
       capabilityRecords: [capability],
     })
     expect(listModels()).toEqual([model])
+  })
+
+  it('AC-LV-15 removes every role and capability reference in the persisted snapshot', async () => {
+    replaceModelPool([model])
+    const capability = recordCapabilityCheck({
+      model: { ...model, model: model.modelName },
+      role: 'structuring',
+      ok: true,
+      message: 'compatible',
+      checkedAt: 100,
+    })
+    useRainStore.setState({
+      modelPool: [model],
+      roleAssignment: { asr: 'whisper-other', structuring: model.id, assistant: model.id },
+      capabilityRecords: [capability],
+    })
+
+    await expect(useRainStore.getState().removeModel(model.id)).resolves.toEqual({ ok: true })
+
+    expect(persistence.save).toHaveBeenCalledWith({
+      models: [],
+      roles: { asr: 'whisper-other', structuring: null, assistant: null },
+      capabilities: [],
+    })
+    expect(useRainStore.getState()).toMatchObject({
+      modelPool: [],
+      roleAssignment: { asr: 'whisper-other', structuring: null, assistant: null },
+      capabilityRecords: [],
+    })
   })
 
   it('does not publish a role assignment when snapshot persistence fails', async () => {

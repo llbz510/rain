@@ -134,6 +134,8 @@ cancelImport(videoId)
 
 模型添加、删除和角色分配都必须先由 Store 生成完整候选 Runtime Settings 快照，等待 `saveRuntimeSettings` 成功后再同时发布 Zustand 与模块内模型池副本。失败时两个内存副本都保持原状并把错误返回 UI。`SettingsPage` 不得另行调用数据库做第二次 hydration；唯一启动加载入口是 Store 的 `createRuntimeSettingsInitializer`。该边界由 `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx` 和 `settings-boundary.test.ts` 裁判。
 
+本地 Whisper 入池前，Store 必须调用 `requireInstalledWhisperModel`，通过生产 `list_whisper_models` 复核所选 size 的最终文件；表单 `done` 只控制交互，不能替代门禁。删除模型时，Store 在同一候选快照中移除模型、能力记录和所有引用它的角色，再交给 Runtime Settings 原子保存。两条规则分别由 `AC-MM-04` 和 `AC-LV-15` 管理。
+
 学习页每次启动助手请求前必须从 Store 创建模型与能力记录快照，并通过同一个 `decideModelRoleAssignment` 裁决助手角色。通过后的请求使用快照中的 OpenAI-compatible endpoint、Key 和模型名，不得再硬编码供应商；此门禁只授权文本问答，不授权 vision。
 
 结构化探针必须复用生产 `STAGE2_BLOCK_SYSTEM_PROMPT`、`buildStage2Blocks`、输出归一化和 `validateStage2BlockOutput`。不得另建一份更宽松的测试 schema，否则探针通过不能证明生产 Stage2 可用。

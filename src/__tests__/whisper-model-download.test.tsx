@@ -38,7 +38,7 @@ afterEach(() => {
   tauri.progress = undefined
 })
 
-describe('AC-MM-03 Whisper model download workflow', () => {
+describe('AC-MM-03 / AC-MM-04 Whisper model download workflow', () => {
   it('shows production event progress and verifies the installed list before success', async () => {
     const download = deferred<string>()
     tauri.listen.mockImplementation(async (_eventName, callback) => {
@@ -52,6 +52,7 @@ describe('AC-MM-03 Whisper model download workflow', () => {
     })
     renderWhisperForm()
     expect(screen.getByRole('option', { name: /medium.*1\.43 GiB/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
 
     fireEvent.click(screen.getByTestId('whisper-download-action'))
     await waitFor(() => expect(tauri.progress).toBeTypeOf('function'))
@@ -67,6 +68,7 @@ describe('AC-MM-03 Whisper model download workflow', () => {
 
     download.resolve('C:/models/ggml-medium.bin')
     await waitFor(() => expect(screen.getByTestId('whisper-download-status')).toHaveTextContent('已下载'))
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
     expect(tauri.invoke).toHaveBeenCalledWith('list_whisper_models')
     expect(tauri.unlisten).toHaveBeenCalledOnce()
   })

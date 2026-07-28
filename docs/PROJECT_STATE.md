@@ -1317,9 +1317,24 @@ Continued the model-download-to-role-selection audit and closed the UI/Store pub
 - Added `runtime-settings-store.test.ts` for commit ordering and failure preservation, `runtime-settings-ui.test.tsx` for visible failure behavior, and `settings-boundary.test.ts` for module ownership. Updated the existing role gate judge to await the now-transactional public action.
 - Recorded the ownership and judge alignment in `docs/development/harness-alignment-2026-07-28-runtime-settings-store.md`; no locked `harness/` file changed.
 
-The historical facts do not state whether explicitly deleting a model must also clear roles that reference it. This slice preserves the existing behavior and records that question for a future Proposed AC instead of silently deciding it. A second remaining product question is whether a local Whisper pool entry may be saved before its download reaches `done`; M19 says "下完入池", but the current Confirmed download AC only governs when UI may claim the file is installed. Resolve both semantics before changing them.
+At the end of this slice, the historical facts still did not state whether explicitly deleting a model must clear its roles or whether a local Whisper entry may be saved before download reaches `done`. Both questions were subsequently confirmed by the user and are resolved in the next section through `AC-LV-15` and `AC-MM-04`; they are no longer open decisions.
 
 Verification on branch `master` before commit: full frontend passed 74 files / 431 tests with 1 live-key test skipped by its existing environment guard; Rust passed 95 tests with 1 real Whisper model test explicitly ignored; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; `git diff --check` passed apart from expected Windows line-ending notices. The multi-hour real E2E was not rerun because this slice changes Runtime Settings publication and is directly judged from UI through Store, mutation batch and existing Rust transaction tests; model inference behavior and production command protocols are unchanged.
+
+## What changed in the 2026-07-28 model-pool integrity slice
+
+The user confirmed the two product boundaries left open by the preceding Store commit slice. They are now explicit, owned and directly judged:
+
+- Added Confirmed `AC-MM-04`: a local Whisper model may enter the pool only after the production `list_whisper_models` interface can discover the final file for its selected size. Entering the pool remains configuration, not ASR capability evidence.
+- Extracted `requireInstalledWhisperModel` in `whisper-model-download.ts`. The download session uses it before reporting success, and the Store calls the same interface again before constructing a Whisper model entry, so a future UI or direct Store caller cannot bypass installation verification.
+- The Whisper form keeps Save disabled until the selected download session reaches verified `done`. Changing the selected size still resets that status; the Store recheck protects against file removal or stale UI state between download and save.
+- Added Confirmed `AC-LV-15`: deleting a model atomically removes its pool entry, capability records, all ASR/structuring/assistant role references and separately stored API Key while preserving unrelated roles and models.
+- The Store deletion action now creates the role-cleaned candidate snapshot before persistence, then publishes model pool, roles and capabilities together only after success. Existing failure judges continue to prove that no in-memory deletion appears when the snapshot save fails.
+- Recorded the decisions as `DEC-002` and `DEC-003`, mapped owners/judges in acceptance, coverage, module and database control documents, and added `harness-alignment-2026-07-28-model-pool-integrity.md`. No locked Harness changed.
+
+TDD evidence: the new Store judge first showed that an uninstalled Whisper returned `{ ok: true }` and persisted; the deletion judge showed both assigned roles survived in the saved snapshot; the real form judge showed Save enabled before installation. After the shared installed-list gate and role-cleaned snapshot were implemented, all three turned green.
+
+Verification on branch `master` before commit: full frontend passed 74 files / 433 tests with 1 live-key test skipped by its existing environment guard; Rust passed 95 tests with 1 real Whisper model test explicitly ignored; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; `git diff --check` passed apart from expected Windows line-ending notices. The multi-hour real E2E and GB-scale download were not rerun because the new behavior is directly judged through the production Store/list adapter seam, real settings form, existing Rust command/download tests and Runtime Settings transaction tests; inference behavior is unchanged.
 
 ## Maintenance checklist for every future session
 
