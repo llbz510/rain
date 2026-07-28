@@ -140,6 +140,8 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 `scripts/run-runtime-settings-e2e.ps1` 是该边界的短桌面 Judge。它使用 `runtime-settings` E2E 配置把生产数据库 singleton 路由到系统临时目录中的隔离 SQLite，等待设置页公开 `loading/ready/error` hydration 状态，通过真实 UI 添加无 Key 测试 LLM，关闭并重启应用验证存在，再删除并第二次重启验证消失。该模式由 WebDriver 驱动；`RealE2eRunner` 只通过数据库公共 metadata interface 报告真实表/列供脚本按独立合同裁判，不启动视频 E2E 工作流，不调用模型、不下载 Whisper，也不产生 `Verified` Evidence。
 
+同一脚本拥有短桌面 Judge 的失败可诊断性：每个关键阶段先更新阶段名；失败时在停止 driver 后把阶段、主错误和脱敏 stdout/stderr 写入系统临时目录的单份 `rain-runtime-settings-e2e-latest-failure`，再删除隔离 SQLite 与运行目录。新失败替换旧失败，成功清除 stale 诊断；诊断写入错误只能告警，不能替代主错误。
+
 普通 `App` 只调用 `E2eAutomation` interface。Vite 默认把它解析到空 adapter，使 `real-e2e-runner.tsx` 及其 window interface 不进入普通生产产物；只有 E2E 脚本设置 `RAIN_E2E_BUILD=1` 时才解析到真实 adapter。`verify-e2e-build-isolation.mjs` 对两种真实 `dist` 执行互补裁判，避免普通 bundle 泄漏或 E2E bundle 被错误禁用。
 
 本地 Whisper 入池前，Store 必须调用 `requireInstalledWhisperModel`，通过生产 `list_whisper_models` 复核所选 size 的最终文件；表单 `done` 只控制交互，不能替代门禁。删除模型时，Store 在同一候选快照中移除模型、能力记录和所有引用它的角色，再交给 Runtime Settings 原子保存。两条规则分别由 `AC-MM-04` 和 `AC-LV-15` 管理。

@@ -38,3 +38,18 @@ npm run e2e:runtime-settings
 边界外：schema 版本迁移和新增列兼容政策、其他业务 CRUD 语义、模型连接、能力探针、收费调用、API Key 持久化、Whisper 下载、角色分配、事务故障注入、完整视频导入和 `Verified` Evidence。脚本在启动 driver 前清空当前进程中的已知 LLM Key 环境变量，并确认表单 Key 为空；成功不代表任何模型 `Compatible` 或 `Verified`。
 
 该 Judge 不进入默认 `harness:check`，因为它依赖 Windows WebView2、`tauri-driver` 和匹配的 `msedgedriver`。相关代码改动交付时仍必须显式运行它，并在 `PROJECT_STATE.md` 记录结果。带 `RAIN_E2E_BUILD=1` 的产物只用于自动化，不得作为普通发布包；默认 `npm run build` 会反向验证普通产物不包含自动化标记。
+
+## 失败诊断
+
+失败时脚本保留单份诊断：
+
+```text
+%TEMP%\rain-runtime-settings-e2e-latest-failure\
+  summary.json
+  tauri-driver.log
+  tauri-driver.err.log
+```
+
+`summary.json` 包含失败阶段、主错误、时间和公开命令。脚本在任何构建/启动动作前捕获并清空当前进程中的已知 LLM Key，写文件时再次替换这些值、`sk-*` 凭据和 Bearer token。日志文件只在 driver 已产生对应输出时存在，不保留隔离 SQLite。
+
+新失败替换旧诊断，避免无限积累；完整成功会删除 stale `latest-failure`。诊断写入或清理异常不得掩盖原始失败。开发者可对已构建的 E2E 二进制使用 `-SkipBuild -MaxSeconds 0` 制造非零退出，机械复核失败诊断；该命令是负向 Judge，不应被报告为正常 E2E 通过。

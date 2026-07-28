@@ -1417,6 +1417,20 @@ The paid multi-hour `full` E2E was not rerun. Its `ui-proof` alternative is also
 
 Final verification on `master` before commit: `npm run e2e:runtime-settings` passed the enabled E2E build Judge and the complete no-key Tauri/schema/UI/restart flow. `npm run harness:check` passed end to end: Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; the default TypeScript/Vite production build passed and verified 5 JavaScript output files contained no E2E markers; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. Existing Vite dynamic/static import warnings remain, but the normal-build warnings no longer name `real-e2e-runner.tsx` as a static importer.
 
+## What changed in the 2026-07-28 Runtime Settings E2E diagnostics slice
+
+The user confirmed `DEC-006` and `AC-HE-03` after the short desktop Judge was found to delete its driver logs and isolated run directory on every failure:
+
+- The script captures any known LLM Key values before clearing them at process startup. Diagnostic text replaces those exact values plus `sk-*` credentials and Bearer tokens; the desktop flow still performs no model call.
+- Each critical startup/mutation/restart segment has a stable phase name. After a failure, the script stops WebDriver, writes `summary.json` and available redacted driver stdout/stderr to `%TEMP%\rain-runtime-settings-e2e-latest-failure`, then removes the isolated SQLite and per-run directory as before.
+- Only one latest-failure directory is retained. A new failure replaces it and a successful full desktop run removes it, preventing unbounded accumulation or a stale failure being mistaken for current state.
+- Diagnostic capture failure emits a warning and preserves the primary E2E error. Destructive cleanup is restricted by an exact resolved system-temp path check.
+- No product behavior, Tauri command, database contract, locked `harness/` file or locked Rust Harness changed.
+
+TDD evidence: the pre-change real Tauri run with `-SkipBuild -MaxSeconds 0` failed at `video list page` and the expected diagnostic path did not exist. After implementation, the same forced failure returned the original timeout, reported `initial-startup`, retained three diagnostic files and excluded an injected `sk-rain-diagnostic-probe-secret` from their combined contents. A following normal no-key desktop run passed schema/add/restart/delete/restart and confirmed `latest-failure` was removed.
+
+Final verification on `master` before commit: PowerShell parsed the changed runner successfully; the real forced-failure and normal-success desktop runs passed their complementary diagnostic assertions; `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; the normal TypeScript/Vite build and production E2E-isolation Judge passed; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. Existing Vite dynamic/static import warnings remain.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

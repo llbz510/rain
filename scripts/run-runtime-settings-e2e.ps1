@@ -10,11 +10,19 @@ $repoRoot = (Get-Item -LiteralPath (Split-Path -Parent $PSScriptRoot)).FullName
 $testAlias = 'Rain Runtime Settings E2E'
 $testModel = 'rain-runtime-settings-e2e-model'
 $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$diagnosticsRoot = Join-Path $temporaryRoot 'rain-runtime-settings-e2e-latest-failure'
 $runRoot = Join-Path $temporaryRoot ("rain-runtime-settings-e2e-" + [Guid]::NewGuid().ToString('N'))
 $runRoot = (New-Item -ItemType Directory -Path $runRoot).FullName
 $databasePath = Join-Path $runRoot 'rain-runtime-settings.db'
 $driverLog = Join-Path $runRoot 'tauri-driver.log'
 $driverErrorLog = Join-Path $runRoot 'tauri-driver.err.log'
+$secretVariableNames = @('RAIN_E2E_LLM_API_KEY', 'RAIN_QWEN_API_KEY', 'RAIN_LIVE_LLM_API_KEY')
+$diagnosticSecrets = @($secretVariableNames | ForEach-Object {
+  [Environment]::GetEnvironmentVariable($_, 'Process')
+} | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+foreach ($secretVariable in $secretVariableNames) {
+  [Environment]::SetEnvironmentVariable($secretVariable, $null, 'Process')
+}
 
 $localToolPaths = @(
   (Join-Path $repoRoot '.worktrees\.tooling\cargo-bin\bin'),
@@ -33,6 +41,72 @@ function Require-Command([string]$Name, [string]$InstallHint) {
   $command = Get-Command $Name -ErrorAction SilentlyContinue
   if (-not $command) { throw "$Name is required for Runtime Settings desktop E2E. $InstallHint" }
   return $command.Source
+}
+
+function Protect-DiagnosticText([string]$Value) {
+  if ($null -eq $Value) { return '' }
+  $protected = $Value
+  foreach ($secret in $diagnosticSecrets) {
+    if ([string]::IsNullOrWhiteSpace([string]$secret)) { continue }
+    $protected = $protected.Replace([string]$secret, '[REDACTED]')
+  }
+  $protected = [regex]::Replace($protected, 'sk-[A-Za-z0-9._-]+', '[REDACTED]')
+  return [regex]::Replace($protected, '(?i)Bearer\s+[^\s"'']+', 'Bearer [REDACTED]')
+}
+
+function Assert-DiagnosticsPath() {
+  $resolvedDiagnostics = [System.IO.Path]::GetFullPath($diagnosticsRoot)
+  $expectedDiagnostics = [System.IO.Path]::GetFullPath(
+    (Join-Path $temporaryRoot 'rain-runtime-settings-e2e-latest-failure')
+  )
+  if (-not $resolvedDiagnostics.Equals($expectedDiagnostics, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to modify unexpected Runtime Settings E2E diagnostics directory: $resolvedDiagnostics"
+  }
+  return $resolvedDiagnostics
+}
+
+function Save-FailureDiagnostics([string]$Phase, $ErrorRecord) {
+  $resolvedDiagnostics = Assert-DiagnosticsPath
+  if (Test-Path -LiteralPath $resolvedDiagnostics) {
+    Remove-Item -LiteralPath $resolvedDiagnostics -Recurse -Force
+  }
+  New-Item -ItemType Directory -Path $resolvedDiagnostics | Out-Null
+
+  $summary = [ordered]@{
+    version = 1
+    status = 'failed'
+    phase = $Phase
+    error = Protect-DiagnosticText ([string]$ErrorRecord.Exception.Message)
+    createdAt = [DateTimeOffset]::Now.ToString('o')
+    command = 'npm run e2e:runtime-settings'
+  }
+  $summaryJson = ConvertTo-Json -InputObject $summary -Depth 5
+  [System.IO.File]::WriteAllText(
+    (Join-Path $resolvedDiagnostics 'summary.json'),
+    $summaryJson,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+
+  foreach ($log in @(
+    @{ Source = $driverLog; Name = 'tauri-driver.log' },
+    @{ Source = $driverErrorLog; Name = 'tauri-driver.err.log' }
+  )) {
+    if (-not (Test-Path -LiteralPath $log.Source)) { continue }
+    $content = Get-Content -LiteralPath $log.Source -Raw -ErrorAction Stop
+    [System.IO.File]::WriteAllText(
+      (Join-Path $resolvedDiagnostics $log.Name),
+      (Protect-DiagnosticText $content),
+      [System.Text.UTF8Encoding]::new($false)
+    )
+  }
+  Write-Warning "Runtime Settings E2E diagnostics retained at: $resolvedDiagnostics"
+}
+
+function Remove-FailureDiagnostics() {
+  $resolvedDiagnostics = Assert-DiagnosticsPath
+  if (Test-Path -LiteralPath $resolvedDiagnostics) {
+    Remove-Item -LiteralPath $resolvedDiagnostics -Recurse -Force
+  }
 }
 
 function Wait-WebDriver([int]$Port) {
@@ -247,6 +321,8 @@ $tauriDriver = $null
 $driverProcess = $null
 $sessionId = $null
 $runSucceeded = $false
+$phase = 'bootstrap'
+$primaryError = $null
 try {
   $tauriDriver = Require-Command 'tauri-driver' 'Install with: cargo install tauri-driver --locked'
   $edgeDriver = Require-Command 'msedgedriver' 'Install a Microsoft Edge driver matching the local browser.'
@@ -254,6 +330,7 @@ try {
   $env:RAIN_E2E_BUILD = '1'
 
   if (-not $SkipBuild) {
+    $phase = 'build'
     & $npmCmd run build
     if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
     $env:LIBCLANG_PATH = if ($env:LIBCLANG_PATH) { $env:LIBCLANG_PATH } else { 'C:\Program Files\LLVM\bin' }
@@ -271,10 +348,8 @@ try {
   $env:RAIN_E2E_MODE = '1'
   $env:RAIN_E2E_RUN_MODE = 'runtime-settings'
   $env:RAIN_E2E_DB_PATH = $databasePath
-  foreach ($secretVariable in @('RAIN_E2E_LLM_API_KEY', 'RAIN_QWEN_API_KEY', 'RAIN_LIVE_LLM_API_KEY')) {
-    [Environment]::SetEnvironmentVariable($secretVariable, $null, 'Process')
-  }
 
+  $phase = 'driver-start'
   $driverProcess = Start-Process -FilePath $tauriDriver -ArgumentList @(
     '--port', [string]$DriverPort,
     '--native-port', [string]$NativeDriverPort,
@@ -282,26 +357,32 @@ try {
   ) -RedirectStandardOutput $driverLog -RedirectStandardError $driverErrorLog -WindowStyle Hidden -PassThru
   Wait-WebDriver $DriverPort
 
+  $phase = 'initial-startup'
   $sessionId = New-WebDriverSession $appBinary
   Open-ReadySettingsPage $sessionId
   Write-Output 'Runtime Settings E2E phase: verify real SQLite schema'
   Assert-RealDatabaseSchema $sessionId
+  $phase = 'initial-state'
   Write-Output 'Runtime Settings E2E phase: initial isolated state'
   if (Test-ModelVisible $sessionId) { throw 'The isolated database unexpectedly contained the test model.' }
   Write-Output 'Runtime Settings E2E phase: add model'
+  $phase = 'add-model'
   Add-TestModel $sessionId
   Close-WebDriverSession $sessionId
   $sessionId = $null
 
+  $phase = 'first-restart'
   $sessionId = New-WebDriverSession $appBinary
   Open-ReadySettingsPage $sessionId
   Write-Output 'Runtime Settings E2E phase: verify first restart'
   if (-not (Test-ModelVisible $sessionId)) { throw 'The test model did not survive the first desktop restart.' }
   Write-Output 'Runtime Settings E2E phase: delete model'
+  $phase = 'delete-model'
   Remove-TestModel $sessionId
   Close-WebDriverSession $sessionId
   $sessionId = $null
 
+  $phase = 'second-restart'
   $sessionId = New-WebDriverSession $appBinary
   Open-ReadySettingsPage $sessionId
   Write-Output 'Runtime Settings E2E phase: verify second restart'
@@ -309,6 +390,8 @@ try {
 
   $runSucceeded = $true
   Write-Output 'Runtime Settings desktop E2E passed: initialize -> add -> restart -> delete -> restart.'
+} catch {
+  $primaryError = $_
 } finally {
   if ($sessionId) {
     try { Close-WebDriverSession $sessionId } catch { }
@@ -316,6 +399,11 @@ try {
   if ($driverProcess -and -not $driverProcess.HasExited) {
     Stop-Process -Id $driverProcess.Id -Force -ErrorAction SilentlyContinue
     $driverProcess.WaitForExit(5000) | Out-Null
+  }
+  if ($primaryError) {
+    try { Save-FailureDiagnostics $phase $primaryError } catch {
+      Write-Warning "Runtime Settings E2E diagnostic capture also failed: $($_.Exception.Message)"
+    }
   }
   if (Test-Path -LiteralPath $runRoot) {
     $resolvedRunRoot = [System.IO.Path]::GetFullPath($runRoot)
@@ -338,4 +426,6 @@ try {
       Write-Warning "Runtime Settings E2E cleanup also failed: $cleanupError"
     }
   }
+  if (-not $primaryError) { Remove-FailureDiagnostics }
 }
+if ($primaryError) { throw $primaryError }

@@ -81,6 +81,8 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 | `cargo check --manifest-path src-tauri/Cargo.toml` | 仅检查 Rust 编译 |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | 跑 Rust 测试 |
 
+`e2e:runtime-settings` 失败时会在系统临时目录的 `rain-runtime-settings-e2e-latest-failure/` 保留单份脱敏 `summary.json` 和 driver logs；正常成功会清除该 stale 诊断。
+
 ## 第一次跑 cargo check 会发生什么
 
 首次 `cargo check` / `cargo build` 会：

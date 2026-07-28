@@ -21,6 +21,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | Runtime Settings 是否真实跨桌面重启持久化 | `npm run e2e:runtime-settings` | 真实 Tauri、生产设置 UI、SQL plugin 和隔离 SQLite 的短 Judge；不证明模型能力或完整视频流程 |
 | 真实 SQLite 是否具备当前必需表/列 | `npm run e2e:runtime-settings` | 应用经公共数据库 metadata interface 报告实际形状，脚本按独立字面合同裁判；不证明 schema 升级兼容或其他业务 CRUD |
 | 普通生产构建是否排除了 E2E 自动化 | `npm run build` | 构建完成后扫描真实 `dist`；显式 E2E 构建由同一 Judge 反向确认自动化存在 |
+| Runtime Settings 桌面 Judge 失败在哪里诊断 | 系统临时目录 `rain-runtime-settings-e2e-latest-failure/summary.json` | 单份脱敏失败阶段、主错误和 driver logs；正常成功会清除 stale 诊断 |
 | 哪个模块负责什么 | `docs/development/module-map.md` | 模块接口、依赖方向和迁移中的违规点 |
 | 某一次真实运行发生了什么 | 对应 `evidence/rain-real-e2e-*/manifest.json` 及其证据包 | 只证明该次运行，不自动证明当前代码 |
 
@@ -128,3 +129,9 @@ Rain 正式支持模型池中的多种配置。模型是否可用于某个角色
 状态：`Confirmed`（用户于 2026-07-28 确认）
 
 应用根模块只依赖 `E2eAutomation` interface。普通构建选择返回空的 adapter，显式 E2E 构建选择真实 Runner adapter；不得用普通运行时条件把完整自动化实现保留在发布 bundle 中。`RAIN_E2E_BUILD=1` 产物是自动化构建，不是普通发布产物。
+
+### DEC-006 Runtime Settings 桌面失败只保留单份脱敏诊断
+
+状态：`Confirmed`（用户于 2026-07-28 确认）
+
+短桌面 Judge 失败时，在系统临时目录保留单份 `rain-runtime-settings-e2e-latest-failure`，包含结构化阶段、主错误和脱敏 driver logs；新失败替换旧失败，成功清除 stale 诊断。诊断逻辑不得保存隔离 SQLite，不得泄露已知 LLM Key，也不得掩盖主错误。

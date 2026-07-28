@@ -395,6 +395,18 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：`verify-e2e-build-isolation.mjs` 扫描真实 `dist`，要求普通产物不存在三项自动化标记、E2E 产物全部存在；`npm run build` 默认执行普通产物裁判；`run-runtime-settings-e2e.ps1` 证明显式 E2E adapter 能在真实 Tauri 中运行。
 
+### AC-HE-03 Runtime Settings 桌面 Judge 失败必须留下脱敏诊断
+
+状态：`Confirmed`
+
+`npm run e2e:runtime-settings` 失败时，必须在输出中报告一个确定的诊断目录，并保留结构化失败阶段、主错误和可用的 `tauri-driver` stdout/stderr。诊断不得包含运行前进程中的已知 LLM API Key、`sk-*` 凭据或 Bearer token；诊断捕获自身失败只能追加警告，不得覆盖原始 E2E 错误。
+
+诊断采用单份 `rain-runtime-settings-e2e-latest-failure`，新失败替换旧失败，避免无限积累。正常成功必须清理该诊断和本次隔离数据库/运行目录，不能留下会被误认为当前失败的 stale 事实。
+
+实现归属：`scripts/run-runtime-settings-e2e.ps1` 的阶段追踪、脱敏诊断写入、固定安全路径校验和成功/失败清理顺序。
+
+裁判：用 `-SkipBuild -MaxSeconds 0` 对已经构建的 E2E 二进制制造确定性启动超时，检查 `summary.json` 的 `failed`/阶段/主错误、两份 driver 日志和注入 Key 缺失；随后正常运行 `npm run e2e:runtime-settings`，证明业务闭环通过且 `latest-failure` 被清理。
+
 ## 6. 当前明确不在已验收范围
 
 - 在线 URL 下载和完整处理链路尚未通过真实验收。
