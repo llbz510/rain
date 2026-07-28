@@ -87,6 +87,25 @@ where
     }))
 }
 
+pub fn read_runtime_settings_webview_args_from_env<F>(get_env: F) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    if get_env("RAIN_E2E_MODE").as_deref() != Some("1")
+        || get_env("RAIN_E2E_RUN_MODE").as_deref() != Some("runtime-settings")
+    {
+        return None;
+    }
+
+    get_env("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+pub fn runtime_settings_webview_args() -> Option<String> {
+    read_runtime_settings_webview_args_from_env(|key| std::env::var(key).ok())
+}
+
 fn required_env<F>(get_env: &F, key: &str) -> Result<String, String>
 where
     F: Fn(&str) -> Option<String>,
@@ -134,6 +153,14 @@ mod tests {
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect();
         read_real_e2e_config_from_env(|key| map.get(key).cloned())
+    }
+
+    fn read_webview_args(vars: &[(&str, &str)]) -> Option<String> {
+        let map: HashMap<String, String> = vars
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect();
+        read_runtime_settings_webview_args_from_env(|key| map.get(key).cloned())
     }
 
     #[test]
@@ -245,5 +272,37 @@ mod tests {
         assert_eq!(config.llm_api_key, "");
         assert_eq!(config.video_path, "");
         assert_eq!(config.whisper_model_path, "");
+    }
+
+    #[test]
+    fn runtime_settings_e2e_forwards_explicit_webview2_arguments() {
+        let arguments = "--remote-debugging-port=9222 --disable-gpu";
+
+        assert_eq!(
+            read_webview_args(&[
+                ("RAIN_E2E_MODE", "1"),
+                ("RAIN_E2E_RUN_MODE", "runtime-settings"),
+                ("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments),
+            ]),
+            Some(arguments.to_string())
+        );
+    }
+
+    #[test]
+    fn ordinary_or_non_runtime_settings_runs_do_not_override_webview2() {
+        let arguments = "--remote-debugging-port=9222";
+
+        assert_eq!(
+            read_webview_args(&[("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments)]),
+            None
+        );
+        assert_eq!(
+            read_webview_args(&[
+                ("RAIN_E2E_MODE", "1"),
+                ("RAIN_E2E_RUN_MODE", "full"),
+                ("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments),
+            ]),
+            None
+        );
     }
 }
