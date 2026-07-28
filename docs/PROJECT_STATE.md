@@ -1502,7 +1502,7 @@ The user explicitly chose public visibility after GitHub rejected branch protect
 The user confirmed `AC-HE-05` after an independent review found that the existing no-key desktop command was a high-value product Judge but depended on one developer machine's WebDriver/tool cache:
 
 - RED was established through the public seam: `gh workflow view 'Runtime Settings Desktop E2E' --repo llbz510/rain` reported that no such workflow existed.
-- `.github/workflows/runtime-settings-desktop-e2e.yml` defines a workflow_dispatch-only `windows-2025` environment with read-only repository permission, non-persistent checkout credentials, fixed Node 22.23.1, Rust 1.96.1, LLVM 22.1.7, CMake 4.1.2 and `tauri-driver` 2.0.6. It mechanically requires the runner's Edge and `msedgedriver` versions to match exactly.
+- `.github/workflows/runtime-settings-desktop-e2e.yml` defines a workflow_dispatch-only `windows-2025` environment with read-only repository permission, non-persistent checkout credentials, fixed Node 22.23.1, Rust 1.96.1, LLVM 22.1.7 and `tauri-driver` 2.0.6. It mechanically requires CMake 4+ and requires the runner's Edge and `msedgedriver` versions to match exactly.
 - The environment delegates all behavior to the existing `npm run e2e:runtime-settings` command without `-SkipBuild`; it does not copy schema/DOM/restart assertions, receive Rain secrets, call a model, download Whisper, import video or generate Evidence.
 - A failed run may upload only the runner's fixed `rain-runtime-settings-e2e-latest-failure` directory for 7 days. The existing script redacts that directory and removes isolated SQLite before upload; the workflow does not upload a broader temp path.
 - Owner is the hosted workflow environment plus the existing public package command. Judge is a real workflow_dispatch run on the target commit. The existing script remains Owner/Judge for product behavior under `AC-LV-14/15/16`.
@@ -1514,6 +1514,10 @@ Bootstrap verification before commit: `npm run e2e:runtime-settings` passed the 
 After the bootstrap merged as `d8fe1b1`, the first dispatch request supplied the next RED before a runner was allocated: GitHub returned HTTP 422 because the `runner` context is unavailable in job-level `env`. The environment contract was kept intact and the two uses of `${{ runner.temp }}` were moved to the actual desktop command step, where GitHub supports that context; the failure-artifact step continues to reference the same exact directory and no broader path.
 
 The runner-context fix passed `git diff --check` and the full local `npm run harness:check`. AC-HE-05 remains Gap until this minimal fix passes the protected PR and a real workflow_dispatch allocates a Hosted Windows runner and completes the desktop command.
+
+Real workflow_dispatch run `30333333637` then allocated the first Hosted Windows runner and supplied an environment RED before JavaScript installation: Rust 1.96.1 and LLVM 22.1.7 installed successfully, but the image already held `cmake.install` 4.4.0 and Chocolatey refused the requested downgrade to 4.1.2. Rain's actual contract is CMake 4+, so the workflow now places the image's standard CMake directory on PATH and mechanically rejects versions below 4.0 instead of manufacturing a patch-version downgrade. The failed run never reached the product desktop Judge and did not change AC-LV-14/15/16 status.
+
+The CMake contract fix passed `git diff --check` and the full local `npm run harness:check`. It must still pass the protected PR and a new real workflow_dispatch before AC-HE-05 can move out of Gap.
 
 ## Maintenance checklist for every future session
 

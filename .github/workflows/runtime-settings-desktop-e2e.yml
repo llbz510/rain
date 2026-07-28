@@ -42,8 +42,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Rust selection failed with exit code $LASTEXITCODE" }
           choco upgrade llvm --version=22.1.7 --yes --no-progress
           if ($LASTEXITCODE -ne 0) { throw "LLVM installation failed with exit code $LASTEXITCODE" }
-          choco upgrade cmake --version=4.1.2 --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "CMake installation failed with exit code $LASTEXITCODE" }
           cargo install tauri-driver --version=2.0.6 --locked
           if ($LASTEXITCODE -ne 0) { throw "tauri-driver installation failed with exit code $LASTEXITCODE" }
           'C:\Program Files\LLVM\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -57,7 +55,12 @@ jobs:
           npm --version
           rustc --version
           cargo --version
-          cmake --version
+          $cmakeText = (cmake --version | Out-String).Trim()
+          Write-Output $cmakeText
+          $cmakeVersionText = [regex]::Match($cmakeText, '\d+(?:\.\d+){2}').Value
+          if ([string]::IsNullOrWhiteSpace($cmakeVersionText) -or [version]$cmakeVersionText -lt [version]'4.0.0') {
+            throw "CMake 4 or newer is required; observed $cmakeVersionText"
+          }
           clang --version
           Get-Command tauri-driver | Select-Object -ExpandProperty Source
           $edgeDriver = Get-Command msedgedriver -ErrorAction Stop
