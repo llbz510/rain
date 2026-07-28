@@ -5,7 +5,7 @@
 Control status: `Active`
 Primary checkout: `D:\gongju\shengcan\rain`
 Volatile checkout facts are intentionally not stored here. Run `git status --short`, `git branch --show-current` and `git log -1 --oneline` for the current worktree state.
-Remote status: no git remote is configured; `git push` remains unavailable until the user configures one.
+Remote status: private GitHub remote `origin` is configured at `https://github.com/llbz510/rain.git`; local `master` tracks `origin/master`. CI and branch protection are not configured yet.
 
 ## Current verified status
 
@@ -110,7 +110,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 
 ## Known defects and risks
 
-1. No remote is configured, so push currently fails until a remote is added.
+1. The private GitHub remote is now configured and `master` is published, but no independent CI or branch protection is configured yet; merge safety still depends on developers running the local Harness.
 2. The main workspace has a lot of local build/cache data: `.worktrees/` was about 86.62GB during the 2026-07-22 check; `src-tauri/target` in the main workspace was about 15.33GB.
 3. Historical failed evidence runs exist locally. `.gitignore` now hides new/old untracked run directories from normal status, but no destructive cleanup has been performed.
 4. `sql:allow-execute` is currently enabled because the frontend database layer executes SQL through the Tauri SQL plugin. This is acceptable for a local-only trusted WebView, but it is broader than ideal if remote/untrusted content is ever loaded.
@@ -1456,6 +1456,18 @@ Final verification on `master` before commit: PowerShell parsed the changed runn
 - 未修改 `harness/`、`src-tauri/tests/` 或产品代码。
 
 聚焦 GREEN 依次通过 `npm run build:e2e` 和 `npm run build`：E2E 主 bundle 为 284.11 kB 并包含全部标记，随后普通主 bundle 为 275.85 kB 并排除全部标记。最终 `npm run harness:check` 全绿并实际按新顺序运行：Control Plane validation 通过；前端通过 78 个文件 / 445 个测试，1 个 live-key 测试按环境门禁跳过；E2E 与普通 TypeScript/Vite 构建及各自互补 Judge 均通过，结束后的 `dist` 为普通产物；Rust 通过 96 个测试，1 个真实 Whisper 模型测试明确 ignored。只有既有 Vite dynamic/static import warnings 保留。本边界不需要启动桌面、调用收费模型或改写 Evidence。
+
+## What changed in the 2026-07-28 private remote bootstrap
+
+The user authorized creation and first publication of the repository after the local Harness Engineering audit:
+
+- Authenticated GitHub account: `llbz510`.
+- Created private repository `https://github.com/llbz510/rain` with default branch `master`.
+- Added `origin` as `https://github.com/llbz510/rain.git`, pushed the complete current history and configured local `master` to track `origin/master`.
+- Before publication, confirmed the worktree was clean, `harness:control` passed, no tracked file was at least 50 MB, and every current/history secret-pattern match came from an explicit fake test credential, prototype placeholder or redaction probe rather than a live credential.
+- This establishes durable off-machine history but does not yet establish an independent evaluator: CI and branch protection remain the next infrastructure boundary.
+
+No product source, locked `harness/`, locked Rust Harness, Evidence contract or acceptance behavior changed in this bootstrap. The state-document update is committed separately after the full local gate and pushed to the new remote.
 
 ## Maintenance checklist for every future session
 
