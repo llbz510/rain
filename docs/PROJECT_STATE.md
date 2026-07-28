@@ -5,7 +5,7 @@
 Control status: `Active`
 Primary checkout: `D:\gongju\shengcan\rain`
 Volatile checkout facts are intentionally not stored here. Run `git status --short`, `git branch --show-current` and `git log -1 --oneline` for the current worktree state.
-Remote status: private GitHub remote `origin` is configured at `https://github.com/llbz510/rain.git`; local `master` tracks `origin/master`. The independent Windows CI Judge is configured and proven green on pull request #1; branch protection is not configured yet.
+Remote status: public GitHub remote `origin` is configured at `https://github.com/llbz510/rain.git`; local `master` tracks `origin/master`. The independent Windows CI Judge is proven on pull request and `master` push runs. GitHub branch protection requires the `Clean Windows Harness` check, including for administrators, and rejects force-pushes and branch deletion.
 
 ## Current verified status
 
@@ -110,7 +110,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 
 ## Known defects and risks
 
-1. The private GitHub remote and `AC-HE-04` Windows Harness workflow are configured and a clean pull-request run is green. Branch protection is not configured yet, so GitHub does not currently prevent a direct or unchecked merge to `master`.
+1. The repository is public, so every tracked file and retained Git object must be treated as world-readable. Branch protection requires the independent Harness before `master` changes, but it does not replace credential, sensitive-evidence or large-file review before a commit is published.
 2. The main workspace has a lot of local build/cache data: `.worktrees/` was about 86.62GB during the 2026-07-22 check; `src-tauri/target` in the main workspace was about 15.33GB.
 3. Historical failed evidence runs exist locally. `.gitignore` now hides new/old untracked run directories from normal status, but no destructive cleanup has been performed.
 4. `sql:allow-execute` is currently enabled because the frontend database layer executes SQL through the Tauri SQL plugin. This is acceptable for a local-only trusted WebView, but it is broader than ideal if remote/untrusted content is ever loaded.
@@ -1483,6 +1483,16 @@ After the private remote bootstrap, the user confirmed `AC-HE-04` to move the de
 The first real pull-request run, [30325680481](https://github.com/llbz510/rain/actions/runs/30325680481), supplied the required remote RED: checkout, Node 22, LLVM 22, native-toolchain verification and `npm ci` passed, then the Harness found that Windows PowerShell 5.1 on the hosted English image parsed the UTF-8-without-BOM mojibake literals in `validate-evidence.ps1` through the ANSI code page and failed before its assertions. The validator now expresses the same code points as ASCII `\uNNNN` regex escapes; its 18 focused tests remain green and the script is ASCII-safe. The second run, [30326004483](https://github.com/llbz510/rain/actions/runs/30326004483), passed parsing and exposed a second clean-host dependency: its `powershell.exe` environment did not provide `Get-FileHash`. SHA-256 calculation now uses the validator-owned .NET cryptography API with identical comparisons instead of relying on a host cmdlet. The third run, [30326307313](https://github.com/llbz510/rain/actions/runs/30326307313), passed all 445 frontend tests, both builds, a clean 9-minute Rust/whisper compilation and the first 78 Rust tests, then proved the final undeclared dependency: the real media fixture tests could not find `ffmpeg` or `ffprobe`. The workflow now pins and verifies FFmpeg 8.1.2 alongside LLVM, and `AGENTS.md` names the dependency.
 
 The fourth run, [30327093540](https://github.com/llbz510/rain/actions/runs/30327093540), is the remote GREEN and promotes `AC-HE-04` to Strong: the observed `Clean Windows Harness` check completed in 15m34s on a fresh hosted runner; control-plane validation, 445 frontend tests (one explicit live-key skip), the E2E and production builds, and 96 Rust tests passed, with the one real-model Whisper case remaining explicitly ignored by its existing contract. No live key, desktop E2E, Whisper download or Evidence mutation was used.
+
+## What changed in the 2026-07-28 public repository protection slice
+
+The user explicitly chose public visibility after GitHub rejected branch protection for the private repository under the current account plan:
+
+- Before changing visibility, the tracked tree had no file at or above 50 MiB. A credential-pattern scan found only the documented fake diagnostic probe string, not a real credential; local `master` and `origin/master` both resolved to `64c7d83` and the worktree was clean.
+- GitHub reports `llbz510/rain` as `PUBLIC` with `master` as its default branch.
+- The `master` protection API reports `Clean Windows Harness` as a required GitHub Actions check with strict up-to-date enforcement. Administrators are included; force-push and branch deletion are disabled; conversation resolution is required. No approving review count or linear-history policy was added, so a single-owner repository is not locked behind an unavailable reviewer or a changed merge strategy.
+- These settings close the unchecked-merge risk recorded after `AC-HE-04`. They do not make secrets safe to commit and do not extend the default no-key Harness into desktop, live-key or full Evidence execution.
+- This slice changes GitHub repository settings and the current-fact record only. It does not change product code, locked `harness/`, locked Rust Harness or an acceptance contract.
 
 ## Maintenance checklist for every future session
 
