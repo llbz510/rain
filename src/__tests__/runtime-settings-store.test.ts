@@ -80,6 +80,7 @@ describe('AC-LV-14 Store runtime settings commit', () => {
     expect(useRainStore.getState().modelPool).toEqual([])
     expect(listModels()).toEqual([])
 
+    await vi.waitFor(() => expect(persistence.save).toHaveBeenCalledTimes(1))
     finishSave()
     await expect(pending).resolves.toEqual({ ok: true })
     expect(useRainStore.getState().modelPool).toMatchObject([{ alias: 'Main LLM' }])
@@ -198,5 +199,81 @@ describe('AC-LV-14 Store runtime settings commit', () => {
 
     expect(result).toEqual({ ok: false, error: '保存角色选择失败：read only' })
     expect(useRainStore.getState().roleAssignment.structuring).toBeNull()
+  })
+})
+
+describe('AC-LV-16 Store runtime settings ordering', () => {
+  it('rejects mutations until the initial settings load is ready', async () => {
+    useRainStore.setState({ settingsReady: false, settingsError: null })
+
+    const result = await useRainStore.getState().addModel({
+      type: 'llm',
+      provider: 'custom',
+      baseUrl: 'https://models.example.test/v1',
+      apiKey: 'dummy-key',
+      modelName: 'model-a',
+      alias: 'Main LLM',
+      supportsVision: false,
+    })
+
+    expect(result).toMatchObject({ ok: false })
+    expect(persistence.save).not.toHaveBeenCalled()
+    expect(useRainStore.getState().modelPool).toEqual([])
+  })
+
+  it('serializes mutations and builds the second snapshot from the first commit', async () => {
+    let finishFirstSave!: () => void
+    persistence.save.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishFirstSave = resolve
+    }))
+
+    const first = useRainStore.getState().addModel({
+      type: 'llm', provider: 'custom', baseUrl: 'https://models.example.test/v1',
+      modelName: 'model-a', alias: 'Model A', supportsVision: false,
+    })
+    await vi.waitFor(() => expect(persistence.save).toHaveBeenCalledTimes(1))
+
+    const second = useRainStore.getState().addModel({
+      type: 'llm', provider: 'custom', baseUrl: 'https://models.example.test/v1',
+      modelName: 'model-b', alias: 'Model B', supportsVision: false,
+    })
+    await Promise.resolve()
+    expect(persistence.save).toHaveBeenCalledTimes(1)
+
+    finishFirstSave()
+    await expect(first).resolves.toEqual({ ok: true })
+    await expect(second).resolves.toEqual({ ok: true })
+
+    expect(persistence.save).toHaveBeenCalledTimes(2)
+    expect(persistence.save.mock.calls[1][0].models.map((entry) => entry.alias)).toEqual([
+      'Model A',
+      'Model B',
+    ])
+    expect(useRainStore.getState().modelPool.map((entry) => entry.alias)).toEqual([
+      'Model A',
+      'Model B',
+    ])
+  })
+
+  it('does not let a stale reload overwrite a successful mutation', async () => {
+    let finishReload!: (settings: RuntimeSettings) => void
+    persistence.load.mockImplementationOnce(() => new Promise<RuntimeSettings>((resolve) => {
+      finishReload = resolve
+    }))
+
+    const reload = useRainStore.getState().retryRuntimeSettings()
+    const mutation = useRainStore.getState().addModel({
+      type: 'llm', provider: 'custom', baseUrl: 'https://models.example.test/v1',
+      modelName: 'model-a', alias: 'Committed Model', supportsVision: false,
+    })
+
+    await expect(mutation).resolves.toEqual({ ok: true })
+    finishReload(emptySettings)
+    await reload
+
+    expect(useRainStore.getState().modelPool.map((entry) => entry.alias)).toEqual([
+      'Committed Model',
+    ])
+    expect(listModels().map((entry) => entry.alias)).toEqual(['Committed Model'])
   })
 })

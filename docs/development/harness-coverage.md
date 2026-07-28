@@ -35,6 +35,7 @@
 | AC-LV-13 | `database-video-deletion.test.ts`、M15/M20、Rust `video_deletion` tests | Strong（公共接口 + Rust 事务） | 前端锁定单 command 协议、错误传播和内存隔离；Rust 真实 SQLite 锁定全部归属数据清理、末步失败回滚和缺失 Video 幂等 |
 | AC-LV-14 | `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`database-settings.test.ts`、`model-pool.test.ts`、M20、Rust `settings_persistence` tests | Strong（UI/Store 提交门禁 + 业务批次 + Rust 事务） | 添加、删除和角色选择只在快照落库后发布；失败保留两个内存副本并可见报错；Settings UI 不得绕过 Store hydration。模型快照保存与旧格式迁移均组装单批 mutation，Rust 锁定成功提交、无关 key 隔离和末步失败全回滚 |
 | AC-LV-15 | `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`model-pool.test.ts`、database Settings tests、Rust `settings_persistence` tests | Strong（Store 候选快照 + 持久化事务） | 公开删除动作把模型、全部角色引用和能力记录放入同一候选快照；旧 Key 由同一 mutation batch 清理；失败时 UI、Store 和 SQLite 均保留旧事实 |
+| AC-LV-16 | `runtime-settings-store.test.ts`、既有 Runtime Settings Store/UI/SQLite tests | Strong（独立时序 + 既有纵向裁判） | 直接控制加载与保存 Promise 的完成顺序，证明未就绪拒绝、跨动作串行、第二快照继承首个提交和 stale hydration 失效；数据库事务协议不变 |
 
 ## 3. Whisper 模型下载
 

@@ -225,6 +225,16 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 裁判：`runtime-settings-store.test.ts` 通过 Store 公开删除动作检查提交快照和发布状态；`runtime-settings-ui.test.tsx` 检查失败时条目仍可见；`model-pool.test.ts`、公共数据库 Settings 测试和 Rust `settings_persistence` 测试继续裁判 Key 清理与事务回滚。
 
+### AC-LV-16 Runtime Settings 初始化与写入必须有确定顺序
+
+状态：`Confirmed`
+
+Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝写入且不得调用持久化。加载完成后，添加、删除、角色分配和能力记录写入必须进入同一提交队列；后一个动作只能在前一个动作结束后读取最新 Store 状态并构造候选快照，前一个动作失败也不能阻塞队列。任何设置加载或重试结果，如果早于其后成功提交的设置动作启动，则该加载结果已经过期，不得覆盖成功提交后的 Zustand 状态或模块内模型池副本。
+
+实现归属：`src/store/rain-store.ts` 的 Runtime Settings 提交队列、提交版本和加载代次门禁。数据库仍只负责单个快照的原子事务，不负责前端动作排序。
+
+裁判：`runtime-settings-store.test.ts` 分别证明未就绪时不持久化、并发动作串行且第二个快照包含第一个提交、晚返回的旧加载结果不能覆盖成功动作；既有 Store/UI/SQLite 裁判继续证明失败保留和单快照原子性。
+
 ## 3. Whisper 模型下载
 
 本节来自 2026-07-27 对当前设置页、Rust command 和历史模型管理规格的核对，并于同日经用户确认。三条 AC 均为当前生效的 `Confirmed` 产品事实。

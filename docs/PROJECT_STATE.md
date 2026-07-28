@@ -1351,6 +1351,20 @@ TDD evidence: the test suite first failed because the production module did not 
 
 Verification on branch `master` before commit: `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 75 files / 439 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; Rust passed 95 tests with 1 real Whisper model test explicitly ignored. The real E2E was not rerun because this slice changes repository tooling and documentation rather than runtime behavior.
 
+## What changed in the 2026-07-28 Runtime Settings ordering slice
+
+Confirmed and implemented `AC-LV-16` so Runtime Settings initialization and writes now have a deterministic owner and order:
+
+- Store mutation actions reject before the first successful settings load and do not call persistence in that state.
+- Model, role and capability writes share one Store submission queue. Each queued action constructs its candidate snapshot only when it receives execution, so a later action includes the prior successful commit instead of overwriting it from an older snapshot.
+- Every successful settings commit advances a Store-local revision. Initialize/retry captures that revision and a load generation before awaiting persistence; a result that becomes stale cannot replace Zustand or the module model-pool copy.
+- The SQLite contract did not change: it still atomically commits one complete Runtime Settings snapshot. Ordering multiple frontend actions remains the Store's responsibility.
+- Added `DEC-004`, acceptance ownership, coverage and module/database boundary notes. Locked `harness/` files were not modified.
+
+TDD evidence: the three new Store tests first failed independently: a pre-load add returned success and persisted, two concurrent adds invoked persistence twice before either completed, and a delayed reload erased a successful add. After the queue/readiness/revision gates were implemented, all three passed; the existing delayed-save test was updated to wait until its queued persistence call actually began.
+
+Verification on branch `master` before commit: `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 75 files / 442 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; Rust passed 95 tests with 1 real Whisper model test explicitly ignored. The multi-hour real E2E was not rerun because this slice changes settings action ordering without changing model inference, Tauri commands or SQLite payloads.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

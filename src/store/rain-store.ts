@@ -110,6 +110,19 @@ const initialState = {
 }
 
 const runtimeSettingsInitializer = createRuntimeSettingsInitializer(loadPersistedRuntimeSettings)
+let runtimeSettingsMutationQueue: Promise<void> = Promise.resolve()
+let runtimeSettingsRevision = 0
+let runtimeSettingsLoadGeneration = 0
+
+function enqueueRuntimeSettingsMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = runtimeSettingsMutationQueue.then(operation)
+  runtimeSettingsMutationQueue = result.then(() => undefined, () => undefined)
+  return result
+}
+
+function settingsNotReadyResult(): { ok: false; error: string } {
+  return { ok: false, error: '设置尚未加载完成，请稍后重试。' }
+}
 
 export const useRainStore = create<RainState>((set, get) => ({
   ...initialState,
@@ -201,7 +214,10 @@ export const useRainStore = create<RainState>((set, get) => ({
   setPage: (page) => set({ currentPage: page }),
 
   loadRuntimeSettings: async () => {
+    const loadGeneration = ++runtimeSettingsLoadGeneration
+    const revisionAtStart = runtimeSettingsRevision
     const result = await runtimeSettingsInitializer.initialize()
+    if (loadGeneration !== runtimeSettingsLoadGeneration || revisionAtStart !== runtimeSettingsRevision) return
     if (result.ok) {
       set({
         modelPool: applyRuntimeSettings(result.settings),
@@ -216,7 +232,10 @@ export const useRainStore = create<RainState>((set, get) => ({
   },
 
   retryRuntimeSettings: async () => {
+    const loadGeneration = ++runtimeSettingsLoadGeneration
+    const revisionAtStart = runtimeSettingsRevision
     const result = await runtimeSettingsInitializer.retry()
+    if (loadGeneration !== runtimeSettingsLoadGeneration || revisionAtStart !== runtimeSettingsRevision) return
     if (result.ok) {
       set({
         modelPool: applyRuntimeSettings(result.settings),
@@ -231,83 +250,103 @@ export const useRainStore = create<RainState>((set, get) => ({
   },
 
   addModel: async (input) => {
-    try {
-      if (input.type === 'whisper-local') {
-        await requireInstalledWhisperModel(input.modelName)
+    if (!get().settingsReady) return settingsNotReadyResult()
+    return enqueueRuntimeSettingsMutation(async () => {
+      if (!get().settingsReady) return settingsNotReadyResult()
+      try {
+        if (input.type === 'whisper-local') {
+          await requireInstalledWhisperModel(input.modelName)
+        }
+        const modelPool = [...get().modelPool, createModelPoolEntry(input)]
+        await saveRuntimeSettings(runtimeSettingsFromEntries(
+          modelPool,
+          get().roleAssignment,
+          get().capabilityRecords,
+        ))
+        runtimeSettingsRevision++
+        replaceModelPool(modelPool)
+        set({ modelPool })
+        return { ok: true }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        return { ok: false, error: `添加模型失败：${reason}` }
       }
-      const modelPool = [...get().modelPool, createModelPoolEntry(input)]
-      await saveRuntimeSettings(runtimeSettingsFromEntries(
-        modelPool,
-        get().roleAssignment,
-        get().capabilityRecords,
-      ))
-      replaceModelPool(modelPool)
-      set({ modelPool })
-      return { ok: true }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      return { ok: false, error: `添加模型失败：${reason}` }
-    }
+    })
   },
 
   removeModel: async (id) => {
-    const modelPool = get().modelPool.filter((model) => model.id !== id)
-    const capabilityRecords = get().capabilityRecords.filter((record) => record.modelId !== id)
-    const currentRoles = get().roleAssignment
-    const roleAssignment = {
-      asr: currentRoles.asr === id ? null : currentRoles.asr,
-      structuring: currentRoles.structuring === id ? null : currentRoles.structuring,
-      assistant: currentRoles.assistant === id ? null : currentRoles.assistant,
-    }
-    try {
-      await saveRuntimeSettings(runtimeSettingsFromEntries(
-        modelPool,
-        roleAssignment,
-        capabilityRecords,
-      ))
-      replaceModelPool(modelPool)
-      set({ modelPool, roleAssignment, capabilityRecords })
-      return { ok: true }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      return { ok: false, error: `删除模型失败：${reason}` }
-    }
+    if (!get().settingsReady) return settingsNotReadyResult()
+    return enqueueRuntimeSettingsMutation(async () => {
+      if (!get().settingsReady) return settingsNotReadyResult()
+      const modelPool = get().modelPool.filter((model) => model.id !== id)
+      const capabilityRecords = get().capabilityRecords.filter((record) => record.modelId !== id)
+      const currentRoles = get().roleAssignment
+      const roleAssignment = {
+        asr: currentRoles.asr === id ? null : currentRoles.asr,
+        structuring: currentRoles.structuring === id ? null : currentRoles.structuring,
+        assistant: currentRoles.assistant === id ? null : currentRoles.assistant,
+      }
+      try {
+        await saveRuntimeSettings(runtimeSettingsFromEntries(
+          modelPool,
+          roleAssignment,
+          capabilityRecords,
+        ))
+        runtimeSettingsRevision++
+        replaceModelPool(modelPool)
+        set({ modelPool, roleAssignment, capabilityRecords })
+        return { ok: true }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        return { ok: false, error: `删除模型失败：${reason}` }
+      }
+    })
   },
 
   setRoleModel: async (role, modelId) => {
-    if (modelId) {
-      const model = get().modelPool.find((entry) => entry.id === modelId)
-      if (!model) {
-        return { ok: false, error: '未找到要分配的模型配置。' }
+    if (!get().settingsReady) return settingsNotReadyResult()
+    return enqueueRuntimeSettingsMutation(async () => {
+      if (!get().settingsReady) return settingsNotReadyResult()
+      if (modelId) {
+        const model = get().modelPool.find((entry) => entry.id === modelId)
+        if (!model) {
+          return { ok: false, error: '未找到要分配的模型配置。' }
+        }
+        const decision = decideModelRoleAssignment(
+          runtimeModelFromPoolEntry(model),
+          role,
+          get().capabilityRecords,
+        )
+        if (!decision.allowed) {
+          return { ok: false, error: decision.capability.message }
+        }
       }
-      const decision = decideModelRoleAssignment(
-        runtimeModelFromPoolEntry(model),
-        role,
-        get().capabilityRecords,
-      )
-      if (!decision.allowed) {
-        return { ok: false, error: decision.capability.message }
+      const roleAssignment = { ...get().roleAssignment, [role]: modelId }
+      try {
+        await saveRuntimeSettings(runtimeSettingsFromEntries(
+          get().modelPool,
+          roleAssignment,
+          get().capabilityRecords,
+        ))
+        runtimeSettingsRevision++
+        set({ roleAssignment })
+        return { ok: true }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        return { ok: false, error: `保存角色选择失败：${reason}` }
       }
-    }
-    const roleAssignment = { ...get().roleAssignment, [role]: modelId }
-    try {
-      await saveRuntimeSettings(runtimeSettingsFromEntries(
-        get().modelPool,
-        roleAssignment,
-        get().capabilityRecords,
-      ))
-      set({ roleAssignment })
-      return { ok: true }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      return { ok: false, error: `保存角色选择失败：${reason}` }
-    }
+    })
   },
 
   setCapabilityRecords: async (records) => {
-    const capabilityRecords = mergeCapabilityRecords(get().capabilityRecords, records)
-    await saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, capabilityRecords))
-    set({ capabilityRecords })
+    if (!get().settingsReady) throw new Error(settingsNotReadyResult().error)
+    await enqueueRuntimeSettingsMutation(async () => {
+      if (!get().settingsReady) throw new Error(settingsNotReadyResult().error)
+      const capabilityRecords = mergeCapabilityRecords(get().capabilityRecords, records)
+      await saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, capabilityRecords))
+      runtimeSettingsRevision++
+      set({ capabilityRecords })
+    })
   },
 }))
 

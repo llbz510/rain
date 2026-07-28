@@ -55,6 +55,7 @@
 15. `saveRuntimeSettings` 和旧格式迁移把模型列表、Key、角色和能力记录组装为一个有序 `SettingMutation[]`，再调用 `applySettingMutationsAtomically`。SQLite 只发送一次 `apply_settings_atomically` command，由 `settings_persistence.rs` 在单连接事务中提交；内存 adapter 先计算完整结果再替换表。
 16. Store 是 Runtime Settings 的发布门禁：添加模型、删除模型和角色分配先从当前 Store 状态构造候选快照，保存成功后才替换 Zustand 和模块内模型池副本。Settings UI 只消费这些公开动作，不得直接访问数据库进行影子 hydration。
 17. 删除模型的候选快照必须同时清理该模型的能力记录和全部角色引用；`saveRuntimeSettings` 根据同一模型集合删除独立 API Key。该组合由 `AC-LV-15` 管理，不能退回 UI 删除后再分步修补角色。
+18. Store 通过 `AC-LV-16` 的单提交队列排序所有 Runtime Settings 写动作，并用提交版本拒绝 stale hydration。数据库不承担前端动作排队，但队列中的每个候选快照仍必须通过同一个原子 Settings interface 提交。
 
 ## 4. 受控拆分顺序
 
