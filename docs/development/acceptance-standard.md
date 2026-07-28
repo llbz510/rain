@@ -419,6 +419,18 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：GitHub Actions 真实 pull request/push run 必须在 `Harness` workflow 中产生 `Clean Windows Harness` check，并在干净 `windows-2025` runner 上完成 `npm ci` 和 `npm run harness:check`；本地 YAML 读取或只断言 workflow 文件存在不能签发通过。
 
+### AC-HE-05 Runtime Settings 桌面 Judge 必须可在独立 Hosted Windows 环境重放
+
+状态：`Confirmed`
+
+仓库必须提供一个仅由人工显式触发的 GitHub Hosted Windows 入口，从目标提交的干净 checkout 和锁定或机械核对的桌面工具链执行唯一公开行为命令 `npm run e2e:runtime-settings`。入口不得复制脚本中的 schema、DOM、持久化或重启断言，不得使用 `-SkipBuild`，也不得因环境失败跳过真实 Tauri Judge。
+
+该入口必须保持最小只读仓库权限、不持久化 checkout 凭据、不接收 Rain secrets，并且不得进行模型连接、收费调用、Whisper 下载、完整视频导入或 Evidence 生成。它不属于默认 `harness:check`，不在 pull request 或 push 时自动执行，也不是必需合并检查；手动成功只证明该目标提交在该次 Hosted Windows 环境中通过 `AC-LV-14/15/16` 的短桌面闭环。
+
+实现归属：`.github/workflows/runtime-settings-desktop-e2e.yml` 负责干净 Hosted Windows 环境、桌面工具链、安全权限和对现有 package 命令的单次委托；`package.json` 与 `scripts/run-runtime-settings-e2e.ps1` 继续分别拥有公开命令和全部产品行为裁判。
+
+裁判：目标提交上的 GitHub Actions `Runtime Settings Desktop E2E` workflow_dispatch 真实 run 必须执行未带 `-SkipBuild` 的 `npm run e2e:runtime-settings` 并成功；YAML 存在、静态解析、本机运行或默认 `Harness` workflow 通过都不能单独签发本 AC。
+
 ## 6. 当前明确不在已验收范围
 
 - 在线 URL 下载和完整处理链路尚未通过真实验收。

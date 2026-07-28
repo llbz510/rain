@@ -11,6 +11,8 @@ Remote status: public GitHub remote `origin` is configured at `https://github.co
 
 Rain is a Tauri + React + TypeScript desktop study app with a Rust backend. The real local-video pipeline has been repaired enough to run a real lecture video through local Whisper ASR, Qwen/DashScope structuring, persistence, cancellation/retry proof, and final UI screenshot evidence.
 
+The no-key Runtime Settings desktop behavior Judge is locally proven, but `AC-HE-05` remains a current Gap until the manual `Runtime Settings Desktop E2E` workflow exists on the default branch and a real target-commit workflow_dispatch run succeeds. Workflow YAML or the default Harness cannot substitute for that hosted result.
+
 The verified real input video is:
 
 `D:\xiazaiwenjian\bilidown\【华中科技大学】电子技术基础 张林（全138讲）电子信息工程专业必修课\1.2.1 信号及其放大.mp4`
@@ -127,6 +129,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
 17. Whole-repository `cargo fmt --check` is not currently a usable clean gate: it reports pre-existing formatting differences in `src-tauri/src/whisper.rs`, `src-tauri/src/ytdlp.rs` and locked files under `src-tauri/tests/`. Do not format or modify the locked Rust Harness without an approved Harness Migration. New Rust changes must still pass file-scoped `rustfmt --check` until this debt is separately authorized and resolved.
+18. `AC-HE-05` is Confirmed but not yet Strong. GitHub only accepts workflow_dispatch for workflow files already present on the default branch, so the first protected bootstrap merge must retain an explicit Gap until the real Hosted Windows desktop run succeeds. Do not add automatic PR/push triggers or claim YAML existence as GREEN to bypass this constraint.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1493,6 +1496,20 @@ The user explicitly chose public visibility after GitHub rejected branch protect
 - The `master` protection API reports `Clean Windows Harness` as a required GitHub Actions check with strict up-to-date enforcement. Administrators are included; force-push and branch deletion are disabled; conversation resolution is required. No approving review count or linear-history policy was added, so a single-owner repository is not locked behind an unavailable reviewer or a changed merge strategy.
 - These settings close the unchecked-merge risk recorded after `AC-HE-04`. They do not make secrets safe to commit and do not extend the default no-key Harness into desktop, live-key or full Evidence execution.
 - This slice changes GitHub repository settings and the current-fact record only. It does not change product code, locked `harness/`, locked Rust Harness or an acceptance contract.
+
+## What changed in the 2026-07-28 hosted Runtime Settings desktop bootstrap slice
+
+The user confirmed `AC-HE-05` after an independent review found that the existing no-key desktop command was a high-value product Judge but depended on one developer machine's WebDriver/tool cache:
+
+- RED was established through the public seam: `gh workflow view 'Runtime Settings Desktop E2E' --repo llbz510/rain` reported that no such workflow existed.
+- `.github/workflows/runtime-settings-desktop-e2e.yml` defines a workflow_dispatch-only `windows-2025` environment with read-only repository permission, non-persistent checkout credentials, fixed Node 22.23.1, Rust 1.96.1, LLVM 22.1.7, CMake 4.1.2 and `tauri-driver` 2.0.6. It mechanically requires the runner's Edge and `msedgedriver` versions to match exactly.
+- The environment delegates all behavior to the existing `npm run e2e:runtime-settings` command without `-SkipBuild`; it does not copy schema/DOM/restart assertions, receive Rain secrets, call a model, download Whisper, import video or generate Evidence.
+- A failed run may upload only the runner's fixed `rain-runtime-settings-e2e-latest-failure` directory for 7 days. The existing script redacts that directory and removes isolated SQLite before upload; the workflow does not upload a broader temp path.
+- Owner is the hosted workflow environment plus the existing public package command. Judge is a real workflow_dispatch run on the target commit. The existing script remains Owner/Judge for product behavior under `AC-LV-14/15/16`.
+- GitHub requires a workflow_dispatch file to exist on the default branch before dispatch. Therefore this bootstrap change deliberately records `AC-HE-05` as Gap; the first protected PR/default-Harness merge enables, but does not itself sign, the remote Judge. A later real run must supply RED/GREEN and update this state before the AC becomes Strong.
+- No product code, locked `harness/` file, locked Rust Harness or existing Runtime Settings Judge changed.
+
+Bootstrap verification before commit: `npm run e2e:runtime-settings` passed the real local Tauri/schema/add/restart/delete/restart flow without a Key, then `npm run harness:check` passed the control plane, all frontend tests, complementary E2E/ordinary builds and all Rust tests. The final build output is the ordinary production artifact. These local results validate the existing behavior Judge and repository gate, but intentionally do not promote `AC-HE-05` before its first real hosted run.
 
 ## Maintenance checklist for every future session
 

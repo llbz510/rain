@@ -39,6 +39,12 @@ npm run e2e:runtime-settings
 
 该 Judge 不进入默认 `harness:check`，因为它依赖 Windows WebView2、`tauri-driver` 和匹配的 `msedgedriver`。相关代码改动交付时仍必须显式运行它，并在 `PROJECT_STATE.md` 记录结果。带 `RAIN_E2E_BUILD=1` 的产物只用于自动化，不得作为普通发布包；默认 `npm run build` 会反向验证普通产物不包含自动化标记。
 
+## Hosted Windows 手动重放
+
+GitHub Actions workflow `Runtime Settings Desktop E2E` 提供 `AC-HE-05` 的独立环境 Owner。它只允许 workflow_dispatch，在目标提交的干净 `windows-2025` checkout 中安装固定 Node/Rust/LLVM/CMake/`tauri-driver`，使用 runner 成对提供且版本完全匹配的 Edge 与 `msedgedriver`，然后执行未带 `-SkipBuild` 的同一公开命令。workflow 不持有写入凭据，不接收 Rain secrets，也不复制本页前述产品断言。
+
+远端失败时只上传脚本已生成的 `rain-runtime-settings-e2e-latest-failure` 脱敏目录，保留 7 天；隔离 SQLite 和整个临时目录都不上传。该 workflow 不自动响应 pull request/push，不成为默认合并门禁，不生成 Evidence。纯 workflow_dispatch 文件必须先存在于默认分支才可首次触发，因此首次合并前只能记录为 Gap，不能以 YAML 存在冒充远端 GREEN。
+
 ## 失败诊断
 
 失败时脚本保留单份诊断：
