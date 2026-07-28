@@ -58,4 +58,6 @@ GitHub Actions workflow `Runtime Settings Desktop E2E` 提供 `AC-HE-05` 的独�
 
 `summary.json` 包含失败阶段、主错误、时间和公开命令。脚本在任何构建/启动动作前捕获并清空当前进程中的已知 LLM Key，写文件时再次替换这些值、`sk-*` 凭据和 Bearer token。日志文件只在 driver 已产生对应输出时存在，不保留隔离 SQLite。
 
+WebDriver HTTP 请求使用 `max(30, MaxSeconds)` 作为上限，默认 90 秒，使冷启动的 native driver 有机会返回 session 或具体错误；它不改变页面状态和产品行为的等待条件。`-MaxSeconds 0` 的确定性负向 Judge 仍保留至少 30 秒的请求上限，不会把 0 解释成无限等待。
+
 新失败替换旧诊断，避免无限积累；完整成功会删除 stale `latest-failure`。诊断写入或清理异常不得掩盖原始失败。开发者可对已构建的 E2E 二进制使用 `-SkipBuild -MaxSeconds 0` 制造非零退出，机械复核失败诊断；该命令是负向 Judge，不应被报告为正常 E2E 通过。

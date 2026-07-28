@@ -16,6 +16,7 @@ $runRoot = (New-Item -ItemType Directory -Path $runRoot).FullName
 $databasePath = Join-Path $runRoot 'rain-runtime-settings.db'
 $driverLog = Join-Path $runRoot 'tauri-driver.log'
 $driverErrorLog = Join-Path $runRoot 'tauri-driver.err.log'
+$webDriverRequestSeconds = [Math]::Max(30, $MaxSeconds)
 $secretVariableNames = @('RAIN_E2E_LLM_API_KEY', 'RAIN_QWEN_API_KEY', 'RAIN_LIVE_LLM_API_KEY')
 $diagnosticSecrets = @($secretVariableNames | ForEach-Object {
   [Environment]::GetEnvironmentVariable($_, 'Process')
@@ -125,9 +126,9 @@ function Wait-WebDriver([int]$Port) {
 function Invoke-WebDriver([string]$Method, [string]$Path, $Body = $null) {
   $uri = "http://127.0.0.1:$DriverPort$Path"
   if ($null -eq $Body) {
-    return Invoke-RestMethod -Method $Method -Uri $uri -TimeoutSec 30
+    return Invoke-RestMethod -Method $Method -Uri $uri -TimeoutSec $webDriverRequestSeconds
   }
-  return Invoke-RestMethod -Method $Method -Uri $uri -ContentType 'application/json' -Body ($Body | ConvertTo-Json -Depth 20) -TimeoutSec 30
+  return Invoke-RestMethod -Method $Method -Uri $uri -ContentType 'application/json' -Body ($Body | ConvertTo-Json -Depth 20) -TimeoutSec $webDriverRequestSeconds
 }
 
 function New-WebDriverSession([string]$ApplicationPath) {

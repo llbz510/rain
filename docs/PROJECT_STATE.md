@@ -1527,6 +1527,10 @@ Workflow_dispatch run `30336230198` then proved WebView2 Runtime 150.0.4078.65 a
 
 The WebView2 150 hosted-argument fix passed `git diff --check` and the full local `npm run harness:check`. It must still pass the protected PR and a new real workflow_dispatch before AC-HE-05 can become Strong.
 
+Workflow_dispatch run `30337531064` still ended at `initial-startup`: the Tauri build succeeded, then PowerShell aborted the WebDriver session request almost exactly 30 seconds later. Across runs `30334252773`, its attempt 2, `30336230198` and `30337531064`, the fixed client timeout consistently prevented the native driver from either completing a cold session or returning a useful native error. `scripts/run-runtime-settings-e2e.ps1` now bounds WebDriver HTTP calls by `max(30, MaxSeconds)` (90 seconds by default) while leaving every schema/UI/restart assertion and the `MaxSeconds=0` negative-Judge semantics intact. This is an AC-HE-03 diagnostic/portability correction, not a product timeout relaxation.
+
+Local complementary verification passed: `-SkipBuild -MaxSeconds 0` returned nonzero with an `initial-startup` summary and both driver logs, and the injected fake `sk-rain-hosted-timeout-probe` did not appear in any diagnostic file. A following normal `npm run e2e:runtime-settings` passed schema/add/restart/delete/restart and removed the stale failure directory. Final `npm run harness:check` passed the control plane, all frontend tests, both complementary builds and all Rust tests. The remote Hosted run remains the required AC-HE-05 Judge.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
