@@ -47,6 +47,8 @@ Tauri/wry 不会仅凭进程中的 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 自�
 
 远端失败时只上传脚本已生成的 `rain-runtime-settings-e2e-latest-failure` 脱敏目录，保留 7 天；隔离 SQLite 和整个临时目录都不上传。该 workflow 不自动响应 pull request/push，不成为默认合并门禁，不生成 Evidence。纯 workflow_dispatch 文件必须先存在于默认分支才可首次触发，因此首次合并前只能记录为 Gap，不能以 YAML 存在冒充远端 GREEN。
 
+首次完整 GREEN 为 workflow_dispatch run `30341065896`，目标是 merge commit `9251962`。该 run 在精确匹配的 WebView2 Runtime/driver 150.0.4078.65 上完成真实 schema、添加、第一次重启保留、删除和第二次重启消失，且没有失败 artifact；它签发 `AC-HE-05` 对该目标提交的 Strong 覆盖，不自动签发后续提交。
+
 ## 失败诊断
 
 失败时脚本保留单份诊断：
