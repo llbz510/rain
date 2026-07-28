@@ -1,7 +1,7 @@
 # Rain Harness 覆盖矩阵
 
 > 状态：Active
-> 更新日期：2026-07-27
+> 更新日期：2026-07-28
 > 作用：说明每条 AC 由谁检查，以及现有检查能证明到什么程度。
 
 ## 1. 覆盖等级
@@ -60,7 +60,13 @@
 
 学习页整体审计结论：现有 M05-M10、M16 Harness 并非无效，但多数只裁判单个组件、函数或占位组合。它们可以保留为局部裁判，不能独自签发跨 Store、媒体元素、SQLite 和多个区域的学习工作流完成状态；`AC-ST-01` 至 `AC-ST-08` 的 Strong 结论以对应生产路径测试为准。
 
-## 5. 架构 Harness 审计
+## 5. Engineering Harness
+
+| AC | 当前裁判 | 等级 | 当前结论与缺口 |
+| --- | --- | --- | --- |
+| AC-HE-01 | `control-plane-validator.test.ts`、`control-plane-validator.mjs`、`package.json` | Strong（纯规则 fixture + 真实仓库命令） | fixture 锁定缺覆盖、缺 Owner/Judge、裁判文件不存在、验收状态冲突和当前事实降级；`harness:control` 检查真实文档，`harness:check` 继续执行前端、构建和 Rust，不替代昂贵 Evidence 决策 |
+
+## 6. 架构 Harness 审计
 
 | 规则 | 当前裁判 | 等级 | 问题 |
 | --- | --- | --- | --- |
@@ -84,10 +90,11 @@
 | 视觉令牌 | `harness/m13-visual.test.ts` | Strong | 读取并装载应用实际使用的 `src/index.css`，通过 CSSOM 检查变量；不再维护 TS 复制品 |
 | 学习页视频语言 | M07 Harness、`study-playback.test.tsx` | Strong | `loadVideo` 将数据库语言写入生产 store，英文译文显示不依赖测试 Context |
 | 测试状态注入 | `harness/support/test-store-provider.tsx` | Test support | 只供测试使用；生产源码禁止导入 `harness/support` |
+| Control Plane 一致性 | `control-plane-validator.test.ts`、`control-plane-validator.mjs` | Strong（纯规则 + 真实仓库） | fixture 证明缺覆盖、缺 Owner/Judge、裁判文件不存在、验收状态冲突和当前事实降级都会失败；`npm run harness:control` 对真实仓库执行同一 validator |
 
 2026-07-26 经用户批准完成两轮 Harness Migration。旧的影子注册表、假导入队列、未接入树编辑、视觉令牌复制品、旧 ASR 标准化和恒真 Rust 测试已被真实接口行为测试替代或明确退役；详见 `harness-migration-2026-07-26.md`。
 
-## 6. 当前不设“已完成”门禁的能力
+## 7. 当前不设“已完成”门禁的能力
 
 | 能力 | 状态 | 处理规则 |
 | --- | --- | --- |
@@ -95,7 +102,7 @@
 | 在线 URL 完整导入 | Gap | 进入验收范围前，不得用空 `start_import` command 或字幕/API 标准化函数表示已实现 |
 | Vision 解释当前画面 | Gap | 必须有截图、图像请求和模型能力验证后才能加入完成门禁 |
 
-## 7. 变更时如何查表
+## 8. 变更时如何查表
 
 例如修改取消逻辑：
 

@@ -72,6 +72,8 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 | `npm test` | 跑全部前端测试（Vitest） |
 | `npm run test:watch` | 测试监听模式 |
 | `npm run test:rust` | 跑 Rust 测试（cargo test） |
+| `npm run harness:control` | 快速检查 Confirmed AC、Owner、Judge、覆盖行、裁判文件和当前事实冲突 |
+| `npm run harness:check` | 一键运行控制面校验、全部前端测试、生产构建和 Rust 测试 |
 | `npm run tauri dev` | 开发模式启动 Tauri 应用 |
 | `npm run tauri build` | 打包发布版 |
 | `cargo check --manifest-path src-tauri/Cargo.toml` | 仅检查 Rust 编译 |
@@ -94,6 +96,7 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 - 只有用户明确批准 **Harness Migration** 后才能修改锁定文件；迁移必须记录旧合同、替代裁判、对应 AC、退役影子模块和验证结果
 - 修改 Harness 时优先让测试调用真实公开接口并断言结果、状态或副作用；函数/常量存在、对象自我赋值和恒真表达式不算验收
 - AI 开发者在 feature 分支实现代码，必须让 harness 全绿才能合并
+- 开始修改前先运行 `npm run harness:control`；交付代码改动前运行 `npm run harness:check`。昂贵的 live-key 和真实 E2E 仍按对应 AC/Evidence 规则单独决定并明确报告
 - 当前迁移记录见 `docs/development/harness-migration-*.md`；按任务对应的 AC 选择迁移记录
 - 详细设计见 `docs/superpowers/specs/2026-07-07-harness-gated-development-design.md`
 

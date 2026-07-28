@@ -1,0 +1,156 @@
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { basename, join, relative, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const GENERATED_DIRECTORIES = new Set([
+  '.git',
+  '.worktrees',
+  'dist',
+  'node_modules',
+  'target',
+])
+
+function parseAcceptanceCriteria(source) {
+  const headings = [...source.matchAll(/^###\s+(AC-[A-Z]+-\d+)\b.*$/gm)]
+  return headings.map((match, index) => {
+    const start = match.index + match[0].length
+    const end = headings[index + 1]?.index ?? source.length
+    const block = source.slice(start, end)
+    const status = block.match(/^状态：[ \t]*`?([^`\s]+)`?[ \t]*$/m)?.[1] ?? ''
+    const owner = block.match(/^实现归属：[ \t]*(.*?)[ \t]*$/m)?.[1] ?? ''
+    const judge = block.match(/^裁判：[ \t]*(.*?)[ \t]*$/m)?.[1] ?? ''
+    return { id: match[1], status, owner, judge }
+  })
+}
+
+function parseCoverageRows(source) {
+  return source.split(/\r?\n/).flatMap((line) => {
+    if (!/^\|\s*AC-[A-Z]+-\d+\s*\|/.test(line)) return []
+    const columns = line.split('|').slice(1, -1).map((column) => column.trim())
+    return [{ id: columns[0], judges: columns[1] ?? '' }]
+  })
+}
+
+function referencedJudgeFiles(judges) {
+  return [...judges.matchAll(/`([^`]+\.(?:test\.(?:ts|tsx)|ps1|rs))`/g)]
+    .map((match) => match[1].replaceAll('\\', '/'))
+    .filter((path) => !path.includes('*'))
+}
+
+function hasFile(reference, availableFiles) {
+  const normalized = reference.replace(/^\.\//, '')
+  if (normalized.includes('/')) return availableFiles.has(normalized)
+  return [...availableFiles].some((path) => basename(path) === normalized)
+}
+
+export function validateControlPlaneDocuments({
+  acceptance,
+  coverage,
+  projectState,
+  availableFiles,
+}) {
+  const errors = []
+  const criteria = parseAcceptanceCriteria(acceptance)
+  const coverageRows = parseCoverageRows(coverage)
+  const files = new Set(availableFiles.map((path) => path.replaceAll('\\', '/')))
+  const criteriaById = new Map(criteria.map((criterion) => [criterion.id, criterion]))
+  const confirmed = criteria.filter((criterion) => criterion.status === 'Confirmed')
+
+  const criteriaGroups = new Map()
+  for (const criterion of criteria) {
+    criteriaGroups.set(criterion.id, [...(criteriaGroups.get(criterion.id) ?? []), criterion])
+  }
+  for (const [id, definitions] of criteriaGroups) {
+    const statuses = [...new Set(definitions.map((definition) => definition.status))].sort()
+    if (statuses.length > 1) {
+      errors.push(`${id} has conflicting acceptance statuses: ${statuses.join(', ')}.`)
+    } else if (definitions.length > 1) {
+      errors.push(`${id} is defined ${definitions.length} times in the acceptance standard.`)
+    }
+  }
+
+  for (const criterion of confirmed) {
+    const rows = coverageRows.filter((row) => row.id === criterion.id)
+    if (rows.length !== 1) {
+      errors.push(`${criterion.id} is Confirmed but has ${rows.length} coverage rows (expected exactly 1).`)
+    }
+    if (!criterion.owner.replace(/[。.]$/, '').trim()) {
+      errors.push(`${criterion.id} is Confirmed but has no implementation owner.`)
+    }
+    if (!criterion.judge.replace(/[。.]$/, '').trim()) {
+      errors.push(`${criterion.id} is Confirmed but has no judge.`)
+    }
+  }
+
+  for (const row of coverageRows) {
+    if (!criteriaById.has(row.id)) {
+      errors.push(`${row.id} has a coverage row but no acceptance criterion.`)
+    }
+    for (const reference of referencedJudgeFiles(row.judges)) {
+      if (!hasFile(reference, files)) {
+        errors.push(`${row.id} references missing judge file: ${reference}.`)
+      }
+    }
+  }
+
+  const currentFacts = projectState.split(/^## What changed\b/m)[0]
+  for (const criterion of confirmed) {
+    const contradictoryLine = currentFacts.split(/\r?\n/).find((line) => (
+      line.includes(criterion.id) && /\bProposed\b/i.test(line)
+    ))
+    if (contradictoryLine) {
+      errors.push(`PROJECT_STATE current facts call Confirmed ${criterion.id} Proposed.`)
+    }
+  }
+
+  return [...new Set(errors)].sort()
+}
+
+function repositoryFiles(root) {
+  const files = []
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory)) {
+      if (GENERATED_DIRECTORIES.has(entry)) continue
+      const path = join(directory, entry)
+      const stats = statSync(path)
+      if (stats.isDirectory()) visit(path)
+      else files.push(relative(root, path).replaceAll('\\', '/'))
+    }
+  }
+  visit(root)
+  return files
+}
+
+export function validateControlPlane(root) {
+  const paths = {
+    acceptance: join(root, 'docs', 'development', 'acceptance-standard.md'),
+    coverage: join(root, 'docs', 'development', 'harness-coverage.md'),
+    projectState: join(root, 'docs', 'PROJECT_STATE.md'),
+  }
+  const missingDocuments = Object.entries(paths)
+    .filter(([, path]) => !existsSync(path))
+    .map(([name, path]) => `Missing ${name} control document: ${relative(root, path)}.`)
+  if (missingDocuments.length > 0) return missingDocuments
+
+  return validateControlPlaneDocuments({
+    acceptance: readFileSync(paths.acceptance, 'utf8'),
+    coverage: readFileSync(paths.coverage, 'utf8'),
+    projectState: readFileSync(paths.projectState, 'utf8'),
+    availableFiles: repositoryFiles(root),
+  })
+}
+
+const isCli = process.argv[1]
+  && pathToFileURL(resolve(process.argv[1])).href === pathToFileURL(fileURLToPath(import.meta.url)).href
+
+if (isCli) {
+  const root = resolve(process.argv[2] ?? process.cwd())
+  const errors = validateControlPlane(root)
+  if (errors.length > 0) {
+    console.error(`Control plane validation failed with ${errors.length} error(s):`)
+    for (const error of errors) console.error(`- ${error}`)
+    process.exitCode = 1
+  } else {
+    console.log('Control plane validation passed.')
+  }
+}

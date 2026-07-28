@@ -2,10 +2,10 @@
 
 > This file is the living project-state document for Rain. Every AI/developer session that changes the project must update it before handing off. Read this file before trusting old PRDs, plans, screenshots, or progress claims.
 
-Last updated: 2026-07-27 +08:00
-Current primary checkout after merge: `master` at `D:\gongju\shengcan\rain`
-Current working base before the Whisper model-download AC proposal: `43263bd refactor: isolate asr execution lifecycle`
-Remote status: no git remote is configured; `git push -u origin codex/rain-real-local-video` fails because `origin` does not exist. Check current HEAD with `git log -1 --oneline` instead of trusting a self-referential commit hash in this document.
+Control status: `Active`
+Primary checkout: `D:\gongju\shengcan\rain`
+Volatile checkout facts are intentionally not stored here. Run `git status --short`, `git branch --show-current` and `git log -1 --oneline` for the current worktree state.
+Remote status: no git remote is configured; `git push` remains unavailable until the user configures one.
 
 ## Current verified status
 
@@ -67,9 +67,10 @@ Read in this order:
 4. `docs/development/acceptance-standard.md` — active acceptance criteria.
 5. `docs/development/harness-coverage.md` — AC-to-test/evidence coverage and gaps.
 6. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
-7. `package.json` — runnable frontend/test/E2E commands.
-8. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-9. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+7. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
+8. `package.json` — runnable frontend/test/E2E commands.
+9. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+10. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -124,7 +125,6 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
-17. Whisper model download/listing is not covered by a Confirmed AC or a direct behavior Harness. `download_whisper_model` currently buffers the complete HTTP response in memory, then writes directly to the final path without cancellation, progress, hash validation or an atomic temporary-file rename. `AC-MM-01` through `AC-MM-03` now record the proposed product contract and judges, but remain `Proposed`; they do not authorize implementation until the user confirms them.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1335,6 +1335,21 @@ The user confirmed the two product boundaries left open by the preceding Store c
 TDD evidence: the new Store judge first showed that an uninstalled Whisper returned `{ ok: true }` and persisted; the deletion judge showed both assigned roles survived in the saved snapshot; the real form judge showed Save enabled before installation. After the shared installed-list gate and role-cleaned snapshot were implemented, all three turned green.
 
 Verification on branch `master` before commit: full frontend passed 74 files / 433 tests with 1 live-key test skipped by its existing environment guard; Rust passed 95 tests with 1 real Whisper model test explicitly ignored; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; `git diff --check` passed apart from expected Windows line-ending notices. The multi-hour real E2E and GB-scale download were not rerun because the new behavior is directly judged through the production Store/list adapter seam, real settings form, existing Rust command/download tests and Runtime Settings transaction tests; inference behavior is unchanged.
+
+## What changed in the 2026-07-28 Control Plane Harness slice
+
+Implemented the first Harness that checks Rain's Harness control documents themselves under user-confirmed `AC-HE-01`:
+
+- Added `scripts/control-plane-validator.mjs` as a directly executable Node interface. It parses the acceptance and coverage structures, walks real repository files while excluding generated/cache directories, and reports deterministic AC-specific errors.
+- Added six independent fixture judges in `control-plane-validator.test.ts`: valid control data, missing coverage, missing Owner/Judge, missing judge file, stale current-state demotion and conflicting acceptance statuses. The tests do not derive expected values from Rain's current documents.
+- Added `npm run harness:control` for the fast control-plane check and `npm run harness:check` as the single full entry for control validation, frontend tests, production build and Rust tests.
+- The first real validator run failed on stale current facts in this file: risk 17 still called `AC-MM-01`/`AC-MM-03` Proposed after their implementation. That obsolete risk was removed, proving the validator found an existing defect rather than merely passing by construction.
+- Removed volatile static checkout date/base claims from the top of `PROJECT_STATE.md`; current HEAD, branch and dirty state must be queried from Git. Updated the active control maps, documented the validator boundary and made the commands discoverable from `AGENTS.md`.
+- The validator checks control consistency only. It cannot sign off product behavior, real SQLite/Tauri execution, paid model calls or Evidence; those remain owned by each product AC.
+
+TDD evidence: the test suite first failed because the production module did not exist; then five rules passed while the empty-Owner fixture exposed a multiline parser bug; finally the conflicting-status fixture failed until duplicate AC definitions were grouped and rejected. The real repository then failed on its stale Proposed claims before the current facts were repaired.
+
+Verification on branch `master` before commit: `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 75 files / 439 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; Rust passed 95 tests with 1 real Whisper model test explicitly ignored. The real E2E was not rerun because this slice changes repository tooling and documentation rather than runtime behavior.
 
 ## Maintenance checklist for every future session
 

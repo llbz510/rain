@@ -1,7 +1,7 @@
 # Rain 项目控制地图
 
 > 状态：Active
-> 更新日期：2026-07-26
+> 更新日期：2026-07-28
 > 作用：告诉人和 AI 在不同问题上应该相信哪份资料，以及资料冲突时如何处理。
 
 ## 1. 事实源不是一个文件
@@ -17,6 +17,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 本地视频主链路当前按什么设计 | `docs/superpowers/specs/2026-07-17-rain-real-local-video-repair-design.md` | 已实施修复的设计依据；与更晚的事实冲突时需要重新确认 |
 | 什么结果才算完成 | `docs/development/acceptance-standard.md` | 当前生效的验收条件 |
 | 每条验收条件由什么证明 | `docs/development/harness-coverage.md` | AC、测试、真实证据和缺口的映射 |
+| 控制文档是否自洽 | `npm run harness:control` | Confirmed AC、Owner、Judge、覆盖行、裁判文件和当前事实冲突的机械裁判 |
 | 哪个模块负责什么 | `docs/development/module-map.md` | 模块接口、依赖方向和迁移中的违规点 |
 | 某一次真实运行发生了什么 | 对应 `evidence/rain-real-e2e-*/manifest.json` 及其证据包 | 只证明该次运行，不自动证明当前代码 |
 

@@ -1,7 +1,7 @@
 # Rain 验收标准
 
 > 状态：Active
-> 更新日期：2026-07-27
+> 更新日期：2026-07-28
 > 当前范围：本地视频导入主链路。其他产品模块会在后续受控梳理中逐步加入。
 
 ## 1. AC 怎么使用
@@ -359,7 +359,21 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：M16 状态与真实组件测试。
 
-## 5. 当前明确不在已验收范围
+## 5. Engineering Harness
+
+### AC-HE-01 控制面必须能够机械发现事实与裁判漂移
+
+状态：`Confirmed`
+
+仓库必须提供一个快速、确定性的公开命令，检查所有 Confirmed AC 是否具有唯一 coverage 行、非空实现归属和裁判，并检查 coverage 引用的具体裁判文件是否存在。验收标准内部的重复/冲突状态，以及 `PROJECT_STATE.md` 当前事实区把 Confirmed AC 降回 Proposed 的陈述，必须使命令失败并指出具体 AC；历史时间线可以保留当时状态。
+
+该检查只证明控制文档自洽，不得代替产品行为测试、真实 SQLite/Tauri 运行或 Evidence。完整交付入口必须在控制面通过后继续运行前端测试、生产构建和 Rust 测试；昂贵 live-key 与真实 E2E 是否必跑仍由对应产品 AC 决定。
+
+实现归属：`scripts/control-plane-validator.mjs` 负责纯规则和真实仓库入口；`package.json` 提供快速 `harness:control` 与完整 `harness:check` 命令。
+
+裁判：`control-plane-validator.test.ts` 使用独立小文档覆盖正常、缺 coverage、缺 Owner/Judge、裁判文件缺失、当前事实冲突和验收状态冲突；`npm run harness:control` 对真实 Rain 文档执行同一实现。
+
+## 6. 当前明确不在已验收范围
 
 - 在线 URL 下载和完整处理链路尚未通过真实验收。
 - “解释当前画面”的视觉助手尚未实现完整验收。
@@ -367,7 +381,7 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 UI 中未完成的能力应隐藏、禁用并明确标记，不能用无响应按钮表示“已实现”。
 
-## 6. 完成定义
+## 7. 完成定义
 
 一个改动只有同时满足以下条件才算完成：
 
