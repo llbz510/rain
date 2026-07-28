@@ -35,9 +35,9 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Stage2 | 分块、调用已通过能力检查的 OpenAI-compatible LLM、校验、检查点和确定性合并 | ASR、UI、任意改写原始句子 | `src/pipeline/stage2-*.ts` |
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
-| Runtime Settings | 模型池、角色选择、预检 | 导入流程本身 | `src/settings/` |
+| Runtime Settings | 构造和原子保存模型池、角色选择、能力记录快照 | 发布 UI 状态、直接实现模型请求 | `src/settings/model-pool.ts`；Store 是提交门禁 |
 | Whisper Download Workflow | 建立一次下载会话、过滤生产进度事件、调用下载/取消并复核安装列表、释放 listener | 下载字节、文件完整性、持有后台任务 | `src/settings/whisper-model-download.ts` |
-| Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择 | 定义能力裁决、直接实现模型请求、承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
+| Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择；展示 Store 提交结果 | 定义能力裁决、直接实现模型请求、读取数据库或承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
 | Study Session | 原子加载一个 ready 视频、统一播放位置、协调跳转、进度保存和学习页错误 | SQLite 细节、具体面板渲染、模型 HTTP 请求 | `src/store/rain-store.ts` 负责原子加载和成功打开时间；`src/study/session.ts` 负责把媒体进度持久化为单调递增的跨会话事实 |
 | Study Navigation | 把句子、节点和可信引用解析为同一时间线跳转，保持播放状态并通知相关区域定位 | 保存笔记、调用 LLM、直接读写 SQL | `src/study/navigation.ts` 负责节点到最早叶子句子的解析；`StudyInterface` 协调 Store/media，文本区负责滚动和真实预览 |
 | Notes Workflow | 创建摘注/自由笔记、编辑持久化、解析引用跳转 | 维护 React 局部草稿作为最终事实、修改目录结构 | `src/study/notes.ts` 负责数据库成功后同步 Store；`src/ui/components/notes.tsx` 只收集操作；引用复用 `src/study/navigation.ts` |
@@ -131,6 +131,8 @@ cancelImport(videoId)
 当前默认 OpenAI-compatible endpoint/model 只在 `src/settings/default-runtime.ts` 定义。设置页连接测试使用用户实际选择的 LLM 配置；`live-qwen.test.ts` 通过 `RAIN_LIVE_LLM_*` 注入同一运行时配置，没有 Key 时跳过。历史 Evidence validator 可以固定历史指纹，但不得反向充当当前运行默认值。
 
 新的角色分配必须经过 `decideModelRoleAssignment`，UI 禁用只是提示层，Store 是当前不可绕过的写入门禁。迁移期间已有旧分配会保留；本地视频启动时，`VideoImportController` 必须再次用启动快照中的能力记录裁决 ASR 和结构化角色，不能只相信已保存的角色 ID。`VideoListPage` 是当前唯一生产适配器，必须传入能力记录副本；`capabilities` 缺省只用于兼容尚未迁移的锁定 M03/M21 Harness，不是生产回退规则。
+
+模型添加、删除和角色分配都必须先由 Store 生成完整候选 Runtime Settings 快照，等待 `saveRuntimeSettings` 成功后再同时发布 Zustand 与模块内模型池副本。失败时两个内存副本都保持原状并把错误返回 UI。`SettingsPage` 不得另行调用数据库做第二次 hydration；唯一启动加载入口是 Store 的 `createRuntimeSettingsInitializer`。该边界由 `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx` 和 `settings-boundary.test.ts` 裁判。
 
 学习页每次启动助手请求前必须从 Store 创建模型与能力记录快照，并通过同一个 `decideModelRoleAssignment` 裁决助手角色。通过后的请求使用快照中的 OpenAI-compatible endpoint、Key 和模型名，不得再硬编码供应商；此门禁只授权文本问答，不授权 vision。
 

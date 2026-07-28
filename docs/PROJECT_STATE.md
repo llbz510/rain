@@ -1305,6 +1305,22 @@ Full verification passed 71 frontend test files / 423 tests with 1 live-key test
 
 Strict Clippy remains globally blocked by two pre-existing warnings in `whisper.rs` (`should_implement_trait` and `manual_is_multiple_of`). Rerunning with only those two lints allowed and all other warnings denied passed, so the new download module introduces no additional Clippy warning.
 
+## What changed in the 2026-07-28 Runtime Settings Store commit slice
+
+Continued the model-download-to-role-selection audit and closed the UI/Store publication gap under the already Confirmed `AC-LV-14`:
+
+- Verified that production ASR capability checks resolve a saved Whisper size such as `medium` through `list_whisper_models` to the real installed `ggml-medium.bin` path before calling `start_asr`. The download, installed-file and capability facts are separate and connected through production interfaces.
+- Removed `SettingsPage`'s direct database hydration. Runtime Settings now have one startup loader through the Store's `createRuntimeSettingsInitializer`; `settings-boundary.test.ts` prevents settings UI from importing database interfaces again.
+- Added pure candidate construction through `createModelPoolEntry` and `runtimeSettingsFromEntries`. Adding or removing a model no longer mutates the module-global pool before persistence.
+- Changed Store model add/remove and role assignment into awaited result-returning actions. They save the complete candidate snapshot first and publish Zustand/global-pool state only after success; failure preserves the old memory facts and returns an actionable error.
+- Updated the add form, model list and role selector to wait for the Store result, disable the in-flight control and visibly report persistence failure. Failed add does not close the form, failed removal leaves the row visible, and failed role assignment leaves the previous selection.
+- Added `runtime-settings-store.test.ts` for commit ordering and failure preservation, `runtime-settings-ui.test.tsx` for visible failure behavior, and `settings-boundary.test.ts` for module ownership. Updated the existing role gate judge to await the now-transactional public action.
+- Recorded the ownership and judge alignment in `docs/development/harness-alignment-2026-07-28-runtime-settings-store.md`; no locked `harness/` file changed.
+
+The historical facts do not state whether explicitly deleting a model must also clear roles that reference it. This slice preserves the existing behavior and records that question for a future Proposed AC instead of silently deciding it. A second remaining product question is whether a local Whisper pool entry may be saved before its download reaches `done`; M19 says "下完入池", but the current Confirmed download AC only governs when UI may claim the file is installed. Resolve both semantics before changing them.
+
+Verification on branch `master` before commit: full frontend passed 74 files / 431 tests with 1 live-key test skipped by its existing environment guard; Rust passed 95 tests with 1 real Whisper model test explicitly ignored; TypeScript and Vite production build passed with the existing dynamic/static import chunking warnings; `git diff --check` passed apart from expected Windows line-ending notices. The multi-hour real E2E was not rerun because this slice changes Runtime Settings publication and is directly judged from UI through Store, mutation batch and existing Rust transaction tests; model inference behavior and production command protocols are unchanged.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

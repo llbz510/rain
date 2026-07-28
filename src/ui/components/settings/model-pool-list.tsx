@@ -30,6 +30,18 @@ export function ModelPoolList({
     message: string
   } | null>(null)
   const [testingModelId, setTestingModelId] = useState<string | null>(null)
+  const [deletingModelId, setDeletingModelId] = useState<string | null>(null)
+
+  const handleRemove = async (model: ModelEntry) => {
+    if (deletingModelId) return
+    setDeletingModelId(model.id)
+    setConnectionStatus(null)
+    const result = await removeModel(model.id)
+    if (!result.ok) {
+      setConnectionStatus({ modelId: model.id, ok: false, message: result.error })
+    }
+    setDeletingModelId(null)
+  }
 
   const handleTestConnection = async (model: ModelEntry) => {
     if (!onTestConnection || testingModelId) return
@@ -170,7 +182,13 @@ export function ModelPoolList({
                   {testingModelId === model.id ? '检查中…' : '检查助手'}
                 </button>
               )}
-              <button style={s.dangerBtn} onClick={() => removeModel(model.id)}>删除</button>
+              <button
+                style={s.dangerBtn}
+                disabled={deletingModelId !== null}
+                onClick={() => void handleRemove(model)}
+              >
+                {deletingModelId === model.id ? '删除中…' : '删除'}
+              </button>
             </div>
             {connectionStatus?.modelId === model.id && (
               <div

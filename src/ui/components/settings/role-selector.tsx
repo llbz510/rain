@@ -19,6 +19,7 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
   const modelPool = useRainStore((state) => state.modelPool)
   const capabilityRecords = useRainStore((state) => state.capabilityRecords)
   const [assignmentError, setAssignmentError] = useState('')
+  const [assignmentPending, setAssignmentPending] = useState(false)
 
   const asrModels = models.filter((model) =>
     ['asr-api', 'whisper-local', 'subtitle'].includes(model.type))
@@ -48,9 +49,11 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
     return `${decision.capability.status} · ${decision.capability.message}`
   }
 
-  function assign(role: ModelRole, modelId: string | null) {
-    const result = setRoleModel(role, modelId)
+  async function assign(role: ModelRole, modelId: string | null) {
+    setAssignmentPending(true)
+    const result = await setRoleModel(role, modelId)
     setAssignmentError(result.ok ? '' : result.error)
+    setAssignmentPending(false)
   }
 
   const roleRowStyle: CSSProperties = {
@@ -92,8 +95,9 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
         <select
           aria-label="ASR 语音识别"
           style={s.select}
+          disabled={assignmentPending}
           value={roleAssignment.asr ?? ''}
-          onChange={(event) => assign('asr', event.target.value || null)}
+          onChange={(event) => void assign('asr', event.target.value || null)}
         >
           <option value="">用视频字幕（无需模型）</option>
           {asrModels.map((model) => (
@@ -113,8 +117,9 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
         <select
           aria-label="结构化 LLM"
           style={s.select}
+          disabled={assignmentPending}
           value={roleAssignment.structuring ?? ''}
-          onChange={(event) => assign('structuring', event.target.value || null)}
+          onChange={(event) => void assign('structuring', event.target.value || null)}
         >
           <option value="">未选择</option>
           {structuringModels.map((model) => (
@@ -138,8 +143,9 @@ export function RoleSelector({ models = [] }: RoleSelectorProps) {
         <select
           aria-label="助手 assistant"
           style={s.select}
+          disabled={assignmentPending}
           value={roleAssignment.assistant ?? ''}
-          onChange={(event) => assign('assistant', event.target.value || null)}
+          onChange={(event) => void assign('assistant', event.target.value || null)}
         >
           <option value="">未选择</option>
           {assistantModels.map((model) => (

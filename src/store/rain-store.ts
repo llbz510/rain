@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
-import { addModelToPool, applyRuntimeSettings, createRuntimeSettingsInitializer, listModels, loadRuntimeSettings as loadPersistedRuntimeSettings, removeModelFromPool, runtimeModelFromPoolEntry, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
+import { applyRuntimeSettings, createModelPoolEntry, createRuntimeSettingsInitializer, loadRuntimeSettings as loadPersistedRuntimeSettings, replaceModelPool, runtimeModelFromPoolEntry, runtimeSettingsFromEntries, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
 import { decideModelRoleAssignment, mergeCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
 
 export type LayoutMode = 'follow' | 'textExpand' | 'mapExpand'
@@ -63,15 +63,17 @@ interface RainState {
   setPage: (page: 'list' | 'study' | 'settings') => void
   loadRuntimeSettings: () => Promise<void>
   retryRuntimeSettings: () => Promise<void>
-  addModel: (input: AddModelInput) => void
-  removeModel: (id: string) => void
-  setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => RoleAssignmentResult
+  addModel: (input: AddModelInput) => Promise<SettingsMutationResult>
+  removeModel: (id: string) => Promise<SettingsMutationResult>
+  setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => Promise<RoleAssignmentResult>
   setCapabilityRecords: (records: ModelCapabilityRecord[]) => Promise<void>
 }
 
 export type RoleAssignmentResult =
   | { ok: true }
   | { ok: false; error: string }
+
+export type SettingsMutationResult = RoleAssignmentResult
 
 export type LoadVideoResult =
   | { ok: true }
@@ -227,22 +229,42 @@ export const useRainStore = create<RainState>((set, get) => ({
     }
   },
 
-  addModel: (input) => {
-    addModelToPool(input)
-    const modelPool = listModels()
-    set({ modelPool })
-    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, get().capabilityRecords)).catch(() => {})
+  addModel: async (input) => {
+    try {
+      const modelPool = [...get().modelPool, createModelPoolEntry(input)]
+      await saveRuntimeSettings(runtimeSettingsFromEntries(
+        modelPool,
+        get().roleAssignment,
+        get().capabilityRecords,
+      ))
+      replaceModelPool(modelPool)
+      set({ modelPool })
+      return { ok: true }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: `保存模型设置失败：${reason}` }
+    }
   },
 
-  removeModel: (id) => {
-    removeModelFromPool(id)
-    const modelPool = listModels()
+  removeModel: async (id) => {
+    const modelPool = get().modelPool.filter((model) => model.id !== id)
     const capabilityRecords = get().capabilityRecords.filter((record) => record.modelId !== id)
-    set({ modelPool, capabilityRecords })
-    void saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, capabilityRecords)).catch(() => {})
+    try {
+      await saveRuntimeSettings(runtimeSettingsFromEntries(
+        modelPool,
+        get().roleAssignment,
+        capabilityRecords,
+      ))
+      replaceModelPool(modelPool)
+      set({ modelPool, capabilityRecords })
+      return { ok: true }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: `删除模型失败：${reason}` }
+    }
   },
 
-  setRoleModel: (role, modelId) => {
+  setRoleModel: async (role, modelId) => {
     if (modelId) {
       const model = get().modelPool.find((entry) => entry.id === modelId)
       if (!model) {
@@ -258,9 +280,18 @@ export const useRainStore = create<RainState>((set, get) => ({
       }
     }
     const roleAssignment = { ...get().roleAssignment, [role]: modelId }
-    set({ roleAssignment })
-    void saveRuntimeSettings(runtimeSettingsFromPool(roleAssignment, get().capabilityRecords)).catch(() => {})
-    return { ok: true }
+    try {
+      await saveRuntimeSettings(runtimeSettingsFromEntries(
+        get().modelPool,
+        roleAssignment,
+        get().capabilityRecords,
+      ))
+      set({ roleAssignment })
+      return { ok: true }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: `保存角色选择失败：${reason}` }
+    }
   },
 
   setCapabilityRecords: async (records) => {

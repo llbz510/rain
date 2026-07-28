@@ -137,12 +137,16 @@ export function replaceModelPool(entries: ModelPoolEntry[]): void {
   }
 }
 
-export function addModelToPool(input: AddModelInput): ModelPoolEntry {
+export function createModelPoolEntry(input: AddModelInput): ModelPoolEntry {
   if (input.provider === 'custom' && !input.baseUrl) {
     throw new Error('Custom provider requires baseUrl')
   }
 
-  const entry: ModelPoolEntry = { id: generateId(), ...input }
+  return { id: generateId(), ...input }
+}
+
+export function addModelToPool(input: AddModelInput): ModelPoolEntry {
+  const entry = createModelPoolEntry(input)
   pool.set(entry.id, entry)
   return entry
 }
@@ -325,8 +329,16 @@ export function runtimeSettingsFromPool(
   roles: RuntimeSettings['roles'],
   capabilities: ModelCapabilityRecord[] = [],
 ): RuntimeSettings {
+  return runtimeSettingsFromEntries(listModels(), roles, capabilities)
+}
+
+export function runtimeSettingsFromEntries(
+  entries: ModelPoolEntry[],
+  roles: RuntimeSettings['roles'],
+  capabilities: ModelCapabilityRecord[] = [],
+): RuntimeSettings {
   return {
-    models: listModels().map(runtimeModelFromPoolEntry),
+    models: entries.map(runtimeModelFromPoolEntry),
     roles: { ...roles },
     capabilities: capabilities.map((record) => ({ ...record })),
   }

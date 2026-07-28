@@ -209,11 +209,11 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 状态：`Confirmed`
 
-保存 Runtime Settings 时，模型列表、按模型 ID 分离的 API Key、三个角色和能力记录必须作为一个快照提交；被删除模型的旧 Key 必须在同一提交中清理。旧格式配置迁移也必须遵守同一规则。任一写入或删除失败时，保存前的所有 setting 必须保持不变，且不得影响无关 setting。模型列表和能力记录中不得保存 API Key 明文。
+保存 Runtime Settings 时，模型列表、按模型 ID 分离的 API Key、三个角色和能力记录必须作为一个快照提交；被删除模型的旧 Key 必须在同一提交中清理。旧格式配置迁移也必须遵守同一规则。任一写入或删除失败时，保存前的所有 setting 必须保持不变，且不得影响无关 setting。Store 和设置 UI 也只有在该快照提交成功后才能发布添加、删除或角色变更；失败时必须保留提交前的内存状态并显示错误。模型列表和能力记录中不得保存 API Key 明文。
 
-实现归属：Runtime Settings 持久化规划、数据库批量 Settings interface、Rust SQLite 单事务。
+实现归属：Store Runtime Settings 提交门禁、Runtime Settings 持久化规划、数据库批量 Settings interface、Rust SQLite 单事务。Settings UI 只能调用 Store 的公开动作，不得自行读取或拼装持久化快照。
 
-裁判：`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
+裁判：`runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
 
 ## 3. Whisper 模型下载
 

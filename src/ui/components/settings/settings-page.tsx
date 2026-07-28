@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
 import { checkAssistantModelCapability } from '@/settings/assistant-capability'
 import { checkAsrModelCapability } from '@/settings/asr-capability'
@@ -22,47 +22,6 @@ export function SettingsPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [activeNav, setActiveNav] = useState<string>('模型管理')
   const [chunkThreshold, setChunkThresholdState] = useState<number>(getChunkThreshold)
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const { isTauri } = await import('@/lib/tauri-env')
-        if (!isTauri()) return
-        const { createDatabase, getSetting } = await import('@/models/database')
-        const { addModelToPool, listModels } = await import('@/settings/model-pool')
-        const db = await createDatabase('rain.db')
-
-        const poolJson = await getSetting(db, 'model_pool')
-        if (poolJson) {
-          const entries = JSON.parse(poolJson)
-          const currentPool = listModels()
-          for (const entry of entries) {
-            if (!currentPool.find((model) => model.id === entry.id)) {
-              try {
-                addModelToPool(entry)
-              } catch {
-                // Skip duplicate persisted models.
-              }
-            }
-          }
-          useRainStore.setState({ modelPool: listModels() })
-        }
-
-        const asr = await getSetting(db, 'role_asr')
-        const structuring = await getSetting(db, 'role_structuring')
-        const assistant = await getSetting(db, 'role_assistant')
-        useRainStore.setState({
-          roleAssignment: {
-            asr: asr || null,
-            structuring: structuring || null,
-            assistant: assistant || null,
-          },
-        })
-      } catch {
-        // Browser mode does not hydrate the desktop database.
-      }
-    })()
-  }, [])
 
   const models: ModelEntry[] = modelPool.map((model) => ({
     id: model.id,

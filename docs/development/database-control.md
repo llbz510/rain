@@ -29,7 +29,7 @@
 | 视频级联删除 | 原子删除 Video 及其 Node/Sentence/Note/reference/checkpoint | AC-LV-13 | 公共接口测试、M15/M20、Rust SQLite 成功/晚失败回滚/幂等测试（Strong） |
 | 学习内容读写 | Node/Sentence 普通写入和按 Node/Video 查询 | AC-LV-04/05/09、AC-ST-01 | `database-content.test.ts`、M15、Pipeline/Stage2、学习加载测试 |
 | 设置持久化 | 模型池、角色和能力记录使用的参数化 key-value CRUD | AC-LV-01/12、AC-ST-07 | `database-settings.test.ts`、M15 settings/recovery、模型池/能力/预检测试（Strong） |
-| Runtime Settings 快照保存 | 原子保存模型列表、独立 Key、角色、能力记录和旧格式迁移 | AC-LV-14 | `database-settings.test.ts`、`model-pool.test.ts`、M20、Rust 成功/晚失败回滚测试（Strong） |
+| Runtime Settings 快照保存 | Store 提交成功后发布；原子保存模型列表、独立 Key、角色、能力记录和旧格式迁移 | AC-LV-14 | Runtime Settings Store/UI/boundary 测试、`database-settings.test.ts`、`model-pool.test.ts`、M20、Rust 成功/晚失败回滚测试（Strong） |
 | 导入状态与恢复 | 批准状态转换、检查点、恢复判断 | AC-LV-03/06/07/08 | Pipeline 恢复测试、M03/M21、真实 Evidence |
 | 原子导入写入 | ASR 保存、句子归属、最终节点/句子合并 | AC-LV-04/05/09 | Pipeline/Stage2 测试、Rust Harness、真实 Evidence |
 | 笔记持久化 | Note 读取/编辑，Note 与 sentence 引用原子创建 | AC-ST-06 | M08/M15、学习页测试、前端 command 协议测试、Rust 事务测试 |
@@ -53,6 +53,7 @@
 13. `database-video-deletion.ts` 统一负责 `AC-LV-13` 的公共删除行为。SQLite 路径只发送一次 `delete_video_atomically` command，由 `video_deletion.rs` 在单连接事务中清理六类归属数据；内存路径同时清理普通 Sentence 与 `node_id = videoId` 的 ASR 占位句，并保留其他 Video。
 14. `database-settings.ts` 统一负责参数化 key-value CRUD。SQLite characterization 锁定 upsert/read/delete SQL、空字符串与缺失值语义及错误传播；M15 继续锁定内存 adapter。模型 JSON 与 Key 分离、迁移和能力失效属于更高层 `src/settings/` module，由其行为测试负责。
 15. `saveRuntimeSettings` 和旧格式迁移把模型列表、Key、角色和能力记录组装为一个有序 `SettingMutation[]`，再调用 `applySettingMutationsAtomically`。SQLite 只发送一次 `apply_settings_atomically` command，由 `settings_persistence.rs` 在单连接事务中提交；内存 adapter 先计算完整结果再替换表。
+16. Store 是 Runtime Settings 的发布门禁：添加模型、删除模型和角色分配先从当前 Store 状态构造候选快照，保存成功后才替换 Zustand 和模块内模型池副本。Settings UI 只消费这些公开动作，不得直接访问数据库进行影子 hydration。
 
 ## 4. 受控拆分顺序
 

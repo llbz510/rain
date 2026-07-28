@@ -42,16 +42,16 @@ afterEach(() => {
 })
 
 describe('AC-LV-12 role assignment gate', () => {
-  it('rejects a direct store assignment when the role capability is unavailable', () => {
+  it('rejects a direct store assignment when the role capability is unavailable', async () => {
     configureStore([])
 
-    const result = useRainStore.getState().setRoleModel('structuring', poolModel.id)
+    const result = await useRainStore.getState().setRoleModel('structuring', poolModel.id)
 
     expect(result).toMatchObject({ ok: false })
     expect(useRainStore.getState().roleAssignment.structuring).toBeNull()
   })
 
-  it('accepts a direct store assignment after the matching role check passes', () => {
+  it('accepts a direct store assignment after the matching role check passes', async () => {
     const capability = recordCapabilityCheck({
       model: runtimeModel,
       role: 'structuring',
@@ -61,7 +61,7 @@ describe('AC-LV-12 role assignment gate', () => {
     })
     configureStore([capability])
 
-    const result = useRainStore.getState().setRoleModel('structuring', poolModel.id)
+    const result = await useRainStore.getState().setRoleModel('structuring', poolModel.id)
 
     expect(result).toMatchObject({ ok: true })
     expect(useRainStore.getState().roleAssignment.structuring).toBe(poolModel.id)

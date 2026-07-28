@@ -30,6 +30,8 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
   const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading' | 'done' | 'cancelled' | 'error'>('idle')
   const [downloadError, setDownloadError] = useState('')
   const [downloadProgress, setDownloadProgress] = useState<WhisperModelDownloadProgress | null>(null)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [saveError, setSaveError] = useState('')
   const downloadSession = useRef<WhisperModelDownloadSession | null>(null)
   const mounted = useRef(true)
 
@@ -88,7 +90,7 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const type = modelType as ModelType
     const finalModelName = isWhisper ? whisperSize : modelName
     const finalProvider = isWhisper ? 'local' : provider
@@ -98,7 +100,9 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
           : PROVIDER_PRESETS.find((candidate) => candidate.value === provider)?.baseUrl)
       : undefined
 
-    addModel({
+    setSaveStatus('saving')
+    setSaveError('')
+    const result = await addModel({
       type,
       provider: finalProvider,
       baseUrl: finalBaseUrl,
@@ -108,6 +112,12 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
       supportsVision: modelType === 'llm' ? supportsVision : false,
     })
 
+    if (!result.ok) {
+      setSaveStatus('error')
+      setSaveError(result.error)
+      return
+    }
+    setSaveStatus('idle')
     onSave?.()
     onClose?.()
   }
@@ -329,8 +339,13 @@ export function AddModelForm({ onClose, onSave }: AddModelFormProps) {
             取消
           </button>
         )}
-        <button style={s.primaryBtn} onClick={handleSave}>
-          保存
+        {saveStatus === 'error' && (
+          <div role="alert" style={{ color: COLORS.fail, fontSize: 12 }}>
+            {saveError}
+          </div>
+        )}
+        <button style={s.primaryBtn} disabled={saveStatus === 'saving'} onClick={() => void handleSave()}>
+          {saveStatus === 'saving' ? '保存中…' : '保存'}
         </button>
       </div>
     </div>
