@@ -1523,6 +1523,10 @@ Workflow_dispatch run `30334252773` and its independent attempt 2 both passed to
 
 The WebView2 driver-owner fix passed `git diff --check` and the full local `npm run harness:check`. It must still pass the protected PR and a new real workflow_dispatch before AC-HE-05 can become Strong.
 
+Workflow_dispatch run `30336230198` then proved WebView2 Runtime 150.0.4078.65 and the downloaded `msedgedriver` 150.0.4078.65 matched exactly, but the first session still timed out at the same 30-second request boundary. A separate public GitHub Hosted Windows Tauri E2E run `30319727173` completed successfully on 2026-07-28 with Edge/WebView2 150 by setting `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to an explicit remote-debugging port/feature plus headless-runner GPU and sandbox flags. Rain's Hosted job now owns the same bounded child-process environment. The script timeout and all product assertions remain unchanged so the next real run, not a longer wait, judges this environment fix.
+
+The WebView2 150 hosted-argument fix passed `git diff --check` and the full local `npm run harness:check`. It must still pass the protected PR and a new real workflow_dispatch before AC-HE-05 can become Strong.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
