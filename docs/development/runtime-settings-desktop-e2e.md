@@ -41,7 +41,7 @@ npm run e2e:runtime-settings
 
 ## Hosted Windows 手动重放
 
-GitHub Actions workflow `Runtime Settings Desktop E2E` 提供 `AC-HE-05` 的独立环境 Owner。它只允许 workflow_dispatch，在目标提交的干净 `windows-2025` checkout 中安装固定 Node/Rust/LLVM/`tauri-driver`、机械要求 CMake 4+，读取 runner 的 Edge WebView2 Runtime 精确版本并从微软下载同版 `msedgedriver`，然后执行未带 `-SkipBuild` 的同一公开命令。workflow 不持有写入凭据，不接收 Rain secrets，也不复制本页前述产品断言。
+GitHub Actions workflow `Runtime Settings Desktop E2E` 提供 `AC-HE-05` 的独立环境 Owner。它只允许 workflow_dispatch，在目标提交的干净 `windows-2025` checkout 中安装固定 Node/Rust/LLVM/`tauri-driver`、机械要求 CMake 4+，读取 runner 的 Edge WebView2 Runtime 精确版本并从微软下载同版 `msedgedriver`。Hosted job 还在自己的子进程范围内为 Edge WebView2 150+ 显式启用远程调试并禁用不可用的 GPU/sandbox 依赖，然后执行未带 `-SkipBuild` 的同一公开命令。workflow 不持有写入凭据，不接收 Rain secrets，也不复制本页前述产品断言。
 
 远端失败时只上传脚本已生成的 `rain-runtime-settings-e2e-latest-failure` 脱敏目录，保留 7 天；隔离 SQLite 和整个临时目录都不上传。该 workflow 不自动响应 pull request/push，不成为默认合并门禁，不生成 Evidence。纯 workflow_dispatch 文件必须先存在于默认分支才可首次触发，因此首次合并前只能记录为 Gap，不能以 YAML 存在冒充远端 GREEN。
 
