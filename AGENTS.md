@@ -105,6 +105,7 @@ GitHub 的 `Harness` workflow 会在 pull request 和 `master` push 上从干净
 - 修改 Harness 时优先让测试调用真实公开接口并断言结果、状态或副作用；函数/常量存在、对象自我赋值和恒真表达式不算验收
 - AI 开发者在 feature 分支实现代码，必须让 harness 全绿才能合并
 - 开始修改前先运行 `npm run harness:control`；交付代码改动前运行 `npm run harness:check`。昂贵的 live-key 和真实 E2E 仍按对应 AC/Evidence 规则单独决定并明确报告
+- `Runtime Settings Desktop E2E` workflow 只供人工 Hosted Windows 重放 `npm run e2e:runtime-settings`，不属于默认 `harness:check` 或分支必需检查；只有目标提交上的真实 workflow_dispatch run 能签发 `AC-HE-05`
 - 当前迁移记录见 `docs/development/harness-migration-*.md`；按任务对应的 AC 选择迁移记录
 - 详细设计见 `docs/superpowers/specs/2026-07-07-harness-gated-development-design.md`
 

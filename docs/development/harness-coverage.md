@@ -69,6 +69,7 @@
 | AC-HE-02 | `verify-e2e-build-isolation.test.ts`、`verify-e2e-build-isolation.mjs`、`build-e2e-frontend.mjs`、`package.json`、`run-runtime-settings-e2e.ps1` | Strong（独立污染 fixture + 每轮真实双构建产物 + 真实 Tauri 启动） | 普通构建扫描全部 JS 与 JS source map 并拒绝 E2E result/schema/status 标记；独立 fixture 证明仅存在于 source map 的标记不能漏过；`harness:check` 每轮先执行无 Tauri E2E 前端构建并反向要求三项标记存在，再以普通构建恢复 `dist`，防止禁用过度造成假绿；短桌面 Judge 证明启用 adapter 可被真实应用加载。完整收费 E2E 未因本次入口隔离重跑 |
 | AC-HE-03 | `run-runtime-settings-e2e.ps1` | Strong（真实失败 + 真实成功） | `MaxSeconds=0` 的真实 Tauri 启动先证明失败退出仍保留 summary/driver logs、阶段和主错误，注入的探针 Key 不在任何文件中；随后完整无 Key 桌面闭环证明成功会清理单份 latest-failure。诊断捕获不替代产品 AC 或完整 Evidence |
 | AC-HE-04 | `.github/workflows/harness.yml`、`package.json`、GitHub workflow `Harness` / check `Clean Windows Harness` | Strong（真实 hosted runner） | PR run `30327093540` 在干净 `windows-2025` checkout 以只读权限完成 `npm ci` 和唯一 `harness:check`：445 个前端测试、E2E/生产双构建和 96 个 Rust 测试通过；一项 live-key 测试跳过、一项真实 Whisper 模型测试 ignored，均符合既有显式合同 |
+| AC-HE-05 | `.github/workflows/runtime-settings-desktop-e2e.yml`、`package.json`、`run-runtime-settings-e2e.ps1`、GitHub workflow `Runtime Settings Desktop E2E` | Gap（等待首次真实 hosted run） | 已定义仅手动、只读、无 secrets 的干净 Windows Owner，并只委托公开桌面命令；workflow_dispatch 文件必须先进入默认分支才能首次触发，因此静态文件和本机通过尚不能把本 AC 提升为 Strong |
 
 ## 6. 架构 Harness 审计
 

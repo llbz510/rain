@@ -20,6 +20,8 @@ npm run harness:check
 
 GitHub Actions workflow `Harness` 中的 `Clean Windows Harness` check 是 `AC-HE-04` 的独立环境 Judge：pull request 和 `master` push 都从干净的 `windows-2025` checkout 安装锁定的 npm 依赖，并运行同一个 `harness:check`。workflow 只有 `contents: read` 权限，不持久化 checkout 凭据，不接收项目 secrets；远端通过不能替代本机 Tauri、live-key 或真实 Evidence，远端失败也不得通过降低本地 AC/Harness 来修复。
 
+GitHub Actions workflow `Runtime Settings Desktop E2E` 是 `AC-HE-05` 的手动 Hosted Windows Owner。它只在 workflow_dispatch 时准备桌面工具链，并调用现有 `npm run e2e:runtime-settings`；产品断言、SQLite 隔离、两次重启和脱敏仍由仓库脚本拥有。该 workflow 不响应 pull request/push，不是默认必需检查。只有目标提交上的真实远端 run 能签发 AC；workflow 文件存在和默认 Harness 通过都不能替代它。
+
 ## 当前机械规则
 
 1. `acceptance-standard.md` 中每条 `Confirmed` AC 必须恰有一条 coverage 行。
