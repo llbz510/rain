@@ -1511,6 +1511,10 @@ The user confirmed `AC-HE-05` after an independent review found that the existin
 
 Bootstrap verification before commit: `npm run e2e:runtime-settings` passed the real local Tauri/schema/add/restart/delete/restart flow without a Key, then `npm run harness:check` passed the control plane, all frontend tests, complementary E2E/ordinary builds and all Rust tests. The final build output is the ordinary production artifact. These local results validate the existing behavior Judge and repository gate, but intentionally do not promote `AC-HE-05` before its first real hosted run.
 
+After the bootstrap merged as `d8fe1b1`, the first dispatch request supplied the next RED before a runner was allocated: GitHub returned HTTP 422 because the `runner` context is unavailable in job-level `env`. The environment contract was kept intact and the two uses of `${{ runner.temp }}` were moved to the actual desktop command step, where GitHub supports that context; the failure-artifact step continues to reference the same exact directory and no broader path.
+
+The runner-context fix passed `git diff --check` and the full local `npm run harness:check`. AC-HE-05 remains Gap until this minimal fix passes the protected PR and a real workflow_dispatch allocates a Hosted Windows runner and completes the desktop command.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
