@@ -1431,6 +1431,19 @@ TDD evidence: the pre-change real Tauri run with `-SkipBuild -MaxSeconds 0` fail
 
 Final verification on `master` before commit: PowerShell parsed the changed runner successfully; the real forced-failure and normal-success desktop runs passed their complementary diagnostic assertions; `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; the normal TypeScript/Vite build and production E2E-isolation Judge passed; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. Existing Vite dynamic/static import warnings remain.
 
+## What changed in the 2026-07-28 E2E build-isolation Judge self-test slice
+
+`AC-HE-02` 的构建隔离 Judge 原来只读取 `dist` 下的 `.js` 文件。若调试或其他构建产生 `.js.map`，完整自动化源码或窗口标记可能只存在于 source map，而普通产物裁判仍会假绿。本边界不改变产品行为或既有 AC，只加强既有 Judge：
+
+- `verify-e2e-build-isolation.test.ts` 通过可执行 CLI 这一公开 seam 创建独立临时 `dist`：JavaScript 本身干净，但相邻 source map 含 `__RAIN_E2E_RESULT__`。
+- 旧 Judge 对该污染产物返回退出码 0，聚焦测试按预期 RED；`verify-e2e-build-isolation.mjs` 纳入 `.js.map` 后返回退出码 1 并报告污染标记，测试转绿。
+- 扫描器仍要求至少存在一个真实 `.js`，因此只有孤立 source map 的空产物不能冒充有效构建。
+- Owner 仍是 E2E 双 adapter、Vite 构建选择和构建脚本；Judge 是带独立污染 fixture 的 `verify-e2e-build-isolation.test.ts`、真实产物扫描器、`npm run build` 与短桌面 Tauri E2E。
+- 边界内是 JavaScript/source-map 自动化标记泄漏；边界外是 CSS map、任意敏感信息扫描、收费模型调用、完整视频 Evidence，以及锁定产品 Harness 的迁移。
+- 未修改产品代码、Tauri 命令、数据库合同、`harness/` 或 `src-tauri/tests/`。
+
+聚焦验证 `npm test -- --run scripts/verify-e2e-build-isolation.test.ts` 通过 1 个测试，`npm run build` 通过真实 TypeScript/Vite 生产构建并验证 5 个 JavaScript/source-map 文件无自动化标记。最终 `npm run harness:check` 全绿：Control Plane validation 通过；前端通过 78 个文件 / 445 个测试，1 个 live-key 测试按环境门禁跳过；TypeScript/Vite 普通生产构建和加强后的产物 Judge 通过；Rust 通过 96 个测试，1 个真实 Whisper 模型测试明确 ignored。保留的只有既有 Vite dynamic/static import warnings。本边界不需要收费模型调用、完整视频 Evidence 或再次运行短桌面流程，因为变更只涉及独立测试过的产物文本扫描器，真实构建已是直接 Judge。
+
 ## Maintenance checklist for every future session
 
 Before making changes:

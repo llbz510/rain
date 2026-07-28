@@ -393,7 +393,7 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 实现归属：`src/e2e/entry.tsx` 与 `enabled-entry.tsx` 提供同一构建 seam 的两个 adapter；`vite.config.ts` 只在 `RAIN_E2E_BUILD=1` 时选择真实 adapter；E2E 脚本拥有该显式构建标志。
 
-裁判：`verify-e2e-build-isolation.mjs` 扫描真实 `dist`，要求普通产物不存在三项自动化标记、E2E 产物全部存在；`npm run build` 默认执行普通产物裁判；`run-runtime-settings-e2e.ps1` 证明显式 E2E adapter 能在真实 Tauri 中运行。
+裁判：`verify-e2e-build-isolation.mjs` 扫描真实 `dist` 的 JavaScript 和 JavaScript source map，要求普通产物不存在三项自动化标记、E2E 产物全部存在；`verify-e2e-build-isolation.test.ts` 用独立临时产物证明仅藏在 source map 中的标记也会使普通产物裁判失败；`npm run build` 默认执行普通产物裁判；`run-runtime-settings-e2e.ps1` 证明显式 E2E adapter 能在真实 Tauri 中运行。
 
 ### AC-HE-03 Runtime Settings 桌面 Judge 失败必须留下脱敏诊断
 

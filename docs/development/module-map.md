@@ -55,7 +55,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Whisper Model Download | 固定 manifest、流式下载、增量校验、临时文件、原子替换、每型号 lease/取消和进度上报 | React 状态、模型能力签发、视频导入调度 | `src-tauri/src/whisper_model_download.rs`；相邻直接裁判 `whisper_model_download_tests.rs`；生产入口 `download_model` / `cancel_model_download` / `list_models` |
 | Rust Runtime | 文件、ffmpeg、yt-dlp、Whisper、调度、取消 | React 状态和 LLM 调用 | `src-tauri/src/*.rs` |
 | Evidence | 运行真实流程并证明结果；用短桌面 E2E 检查无需外部服务的关键重启边界 | 代替普通回归测试、把短验证冒充完整模型/视频 Evidence | `src/e2e/`、`scripts/`、`evidence/` |
-| E2E Build Entry | 向 `App` 提供单一 `E2eAutomation` interface，并在构建期选择禁用或真实 adapter | 用运行时条件把 Runner 留在普通 bundle、把自动化构建当作发布产物 | `src/e2e/entry.tsx`、`enabled-entry.tsx`、`vite.config.ts`、`verify-e2e-build-isolation.mjs` |
+| E2E Build Entry | 向 `App` 提供单一 `E2eAutomation` interface，并在构建期选择禁用或真实 adapter；裁判扫描 JavaScript 与 JavaScript source map | 用运行时条件把 Runner 留在普通 bundle 或 source map、把自动化构建当作发布产物 | `src/e2e/entry.tsx`、`enabled-entry.tsx`、`vite.config.ts`、`verify-e2e-build-isolation.mjs`、`verify-e2e-build-isolation.test.ts` |
 | Test Support | 为组件测试注入 Zustand 状态 | 参与生产运行、向生产组件提供 Context | `harness/support/` |
 
 ## 3. 关键接口
@@ -142,7 +142,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 同一脚本拥有短桌面 Judge 的失败可诊断性：每个关键阶段先更新阶段名；失败时在停止 driver 后把阶段、主错误和脱敏 stdout/stderr 写入系统临时目录的单份 `rain-runtime-settings-e2e-latest-failure`，再删除隔离 SQLite 与运行目录。新失败替换旧失败，成功清除 stale 诊断；诊断写入错误只能告警，不能替代主错误。
 
-普通 `App` 只调用 `E2eAutomation` interface。Vite 默认把它解析到空 adapter，使 `real-e2e-runner.tsx` 及其 window interface 不进入普通生产产物；只有 E2E 脚本设置 `RAIN_E2E_BUILD=1` 时才解析到真实 adapter。`verify-e2e-build-isolation.mjs` 对两种真实 `dist` 执行互补裁判，避免普通 bundle 泄漏或 E2E bundle 被错误禁用。
+普通 `App` 只调用 `E2eAutomation` interface。Vite 默认把它解析到空 adapter，使 `real-e2e-runner.tsx` 及其 window interface 不进入普通生产产物；只有 E2E 脚本设置 `RAIN_E2E_BUILD=1` 时才解析到真实 adapter。`verify-e2e-build-isolation.mjs` 对两种真实 `dist` 的 JavaScript 与 JavaScript source map 执行互补裁判，避免普通产物泄漏或 E2E bundle 被错误禁用；独立临时产物 fixture 锁定 source-map 污染会被拒绝。
 
 本地 Whisper 入池前，Store 必须调用 `requireInstalledWhisperModel`，通过生产 `list_whisper_models` 复核所选 size 的最终文件；表单 `done` 只控制交互，不能替代门禁。删除模型时，Store 在同一候选快照中移除模型、能力记录和所有引用它的角色，再交给 Runtime Settings 原子保存。两条规则分别由 `AC-MM-04` 和 `AC-LV-15` 管理。
 

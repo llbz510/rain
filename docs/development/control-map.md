@@ -128,7 +128,7 @@ Rain 正式支持模型池中的多种配置。模型是否可用于某个角色
 
 状态：`Confirmed`（用户于 2026-07-28 确认）
 
-应用根模块只依赖 `E2eAutomation` interface。普通构建选择返回空的 adapter，显式 E2E 构建选择真实 Runner adapter；不得用普通运行时条件把完整自动化实现保留在发布 bundle 中。`RAIN_E2E_BUILD=1` 产物是自动化构建，不是普通发布产物。
+应用根模块只依赖 `E2eAutomation` interface。普通构建选择返回空的 adapter，显式 E2E 构建选择真实 Runner adapter；不得用普通运行时条件把完整自动化实现保留在发布 bundle 或其 JavaScript source map 中。`RAIN_E2E_BUILD=1` 产物是自动化构建，不是普通发布产物。
 
 ### DEC-006 Runtime Settings 桌面失败只保留单份脱敏诊断
 

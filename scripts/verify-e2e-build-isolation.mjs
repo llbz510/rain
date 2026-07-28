@@ -8,13 +8,16 @@ if (mode !== 'production' && mode !== 'e2e') {
 
 const distDirectory = resolve(process.cwd(), 'dist')
 
-async function listJavaScriptFiles(directory) {
+async function listBuildTextFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true })
   const files = []
   for (const entry of entries) {
     const path = resolve(directory, entry.name)
-    if (entry.isDirectory()) files.push(...await listJavaScriptFiles(path))
-    else if (entry.isFile() && entry.name.endsWith('.js')) files.push(path)
+    if (entry.isDirectory()) files.push(...await listBuildTextFiles(path))
+    else if (
+      entry.isFile()
+      && (entry.name.endsWith('.js') || entry.name.endsWith('.js.map'))
+    ) files.push(path)
   }
   return files
 }
@@ -24,8 +27,9 @@ const markers = [
   '__RAIN_RUNTIME_SETTINGS_SCHEMA__',
   'rain-real-e2e-status',
 ]
-const files = await listJavaScriptFiles(distDirectory)
-if (files.length === 0) throw new Error(`No JavaScript build output found under ${distDirectory}`)
+const files = await listBuildTextFiles(distDirectory)
+const javaScriptFiles = files.filter((file) => file.endsWith('.js'))
+if (javaScriptFiles.length === 0) throw new Error(`No JavaScript build output found under ${distDirectory}`)
 
 const contents = await Promise.all(files.map((file) => readFile(file, 'utf8')))
 const presentMarkers = markers.filter((marker) => contents.some((content) => content.includes(marker)))
@@ -38,4 +42,4 @@ if (mode === 'e2e' && presentMarkers.length !== markers.length) {
   throw new Error(`E2E bundle is missing automation markers: ${missingMarkers.join(', ')}`)
 }
 
-console.log(`${mode} bundle E2E isolation check passed across ${files.length} JavaScript files.`)
+console.log(`${mode} bundle E2E isolation check passed across ${files.length} JavaScript/source-map files.`)
