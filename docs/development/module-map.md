@@ -55,6 +55,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Whisper Model Download | 固定 manifest、流式下载、增量校验、临时文件、原子替换、每型号 lease/取消和进度上报 | React 状态、模型能力签发、视频导入调度 | `src-tauri/src/whisper_model_download.rs`；相邻直接裁判 `whisper_model_download_tests.rs`；生产入口 `download_model` / `cancel_model_download` / `list_models` |
 | Rust Runtime | 文件、ffmpeg、yt-dlp、Whisper、调度、取消 | React 状态和 LLM 调用 | `src-tauri/src/*.rs` |
 | Evidence | 运行真实流程并证明结果；用短桌面 E2E 检查无需外部服务的关键重启边界 | 代替普通回归测试、把短验证冒充完整模型/视频 Evidence | `src/e2e/`、`scripts/`、`evidence/` |
+| E2E Build Entry | 向 `App` 提供单一 `E2eAutomation` interface，并在构建期选择禁用或真实 adapter | 用运行时条件把 Runner 留在普通 bundle、把自动化构建当作发布产物 | `src/e2e/entry.tsx`、`enabled-entry.tsx`、`vite.config.ts`、`verify-e2e-build-isolation.mjs` |
 | Test Support | 为组件测试注入 Zustand 状态 | 参与生产运行、向生产组件提供 Context | `harness/support/` |
 
 ## 3. 关键接口
@@ -138,6 +139,8 @@ cancelImport(videoId)
 Runtime Settings 首次加载完成前不得写入。加载后，模型、角色和能力记录的全部公开写动作共享 Store 内的一条提交队列，且候选快照只能在动作获得队列执行权后从最新状态构造；成功提交递增版本，较早启动的 initialize/retry 结果因此失效。该前端顺序边界由 `AC-LV-16` 管理，SQLite 的职责仍是保证队列中每个完整快照的原子性。
 
 `scripts/run-runtime-settings-e2e.ps1` 是该边界的短桌面 Judge。它使用 `runtime-settings` E2E 配置把生产数据库 singleton 路由到系统临时目录中的隔离 SQLite，等待设置页公开 `loading/ready/error` hydration 状态，通过真实 UI 添加无 Key 测试 LLM，关闭并重启应用验证存在，再删除并第二次重启验证消失。该模式由 WebDriver 驱动；`RealE2eRunner` 只通过数据库公共 metadata interface 报告真实表/列供脚本按独立合同裁判，不启动视频 E2E 工作流，不调用模型、不下载 Whisper，也不产生 `Verified` Evidence。
+
+普通 `App` 只调用 `E2eAutomation` interface。Vite 默认把它解析到空 adapter，使 `real-e2e-runner.tsx` 及其 window interface 不进入普通生产产物；只有 E2E 脚本设置 `RAIN_E2E_BUILD=1` 时才解析到真实 adapter。`verify-e2e-build-isolation.mjs` 对两种真实 `dist` 执行互补裁判，避免普通 bundle 泄漏或 E2E bundle 被错误禁用。
 
 本地 Whisper 入池前，Store 必须调用 `requireInstalledWhisperModel`，通过生产 `list_whisper_models` 复核所选 size 的最终文件；表单 `done` 只控制交互，不能替代门禁。删除模型时，Store 在同一候选快照中移除模型、能力记录和所有引用它的角色，再交给 Runtime Settings 原子保存。两条规则分别由 `AC-MM-04` 和 `AC-LV-15` 管理。
 

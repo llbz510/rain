@@ -242,6 +242,7 @@ $logs = New-Item -ItemType Directory -Force -Path (Join-Path $root.FullName 'log
 
 $env:RAIN_TEMP_DIR = $tmp.FullName
 $env:RAIN_E2E_MODE = '1'
+$env:RAIN_E2E_BUILD = '1'
 $env:RAIN_E2E_RUN_MODE = $RunMode
 $env:RAIN_E2E_VIDEO_PATH = $video
 $env:RAIN_E2E_WHISPER_MODEL_PATH = $modelPath

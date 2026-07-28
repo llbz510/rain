@@ -251,6 +251,7 @@ try {
   $tauriDriver = Require-Command 'tauri-driver' 'Install with: cargo install tauri-driver --locked'
   $edgeDriver = Require-Command 'msedgedriver' 'Install a Microsoft Edge driver matching the local browser.'
   $npmCmd = Require-Command 'npm.cmd' 'Install Node.js 18 or newer.'
+  $env:RAIN_E2E_BUILD = '1'
 
   if (-not $SkipBuild) {
     & $npmCmd run build

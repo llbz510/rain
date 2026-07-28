@@ -18,7 +18,7 @@ Runtime Settings Owner 保持为生产 Store、Runtime Settings 规划、数据�
 npm run e2e:runtime-settings
 ```
 
-脚本构建当前前端与 Tauri debug 应用，然后：
+脚本先设置 `RAIN_E2E_BUILD=1`，构建包含真实 `E2eAutomation` adapter 的当前前端与 Tauri debug 应用，然后：
 
 1. 在系统临时目录创建唯一隔离 SQLite；
 2. 启动真实 Tauri，进入生产设置页并等待 Runtime Settings `ready`；
@@ -37,4 +37,4 @@ npm run e2e:runtime-settings
 
 边界外：schema 版本迁移和新增列兼容政策、其他业务 CRUD 语义、模型连接、能力探针、收费调用、API Key 持久化、Whisper 下载、角色分配、事务故障注入、完整视频导入和 `Verified` Evidence。脚本在启动 driver 前清空当前进程中的已知 LLM Key 环境变量，并确认表单 Key 为空；成功不代表任何模型 `Compatible` 或 `Verified`。
 
-该 Judge 不进入默认 `harness:check`，因为它依赖 Windows WebView2、`tauri-driver` 和匹配的 `msedgedriver`。相关代码改动交付时仍必须显式运行它，并在 `PROJECT_STATE.md` 记录结果。
+该 Judge 不进入默认 `harness:check`，因为它依赖 Windows WebView2、`tauri-driver` 和匹配的 `msedgedriver`。相关代码改动交付时仍必须显式运行它，并在 `PROJECT_STATE.md` 记录结果。带 `RAIN_E2E_BUILD=1` 的产物只用于自动化，不得作为普通发布包；默认 `npm run build` 会反向验证普通产物不包含自动化标记。

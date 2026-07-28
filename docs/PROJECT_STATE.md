@@ -114,7 +114,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 2. The main workspace has a lot of local build/cache data: `.worktrees/` was about 86.62GB during the 2026-07-22 check; `src-tauri/target` in the main workspace was about 15.33GB.
 3. Historical failed evidence runs exist locally. `.gitignore` now hides new/old untracked run directories from normal status, but no destructive cleanup has been performed.
 4. `sql:allow-execute` is currently enabled because the frontend database layer executes SQL through the Tauri SQL plugin. This is acceptable for a local-only trusted WebView, but it is broader than ideal if remote/untrusted content is ever loaded.
-5. Real E2E code is imported from `src/App.tsx` behind an environment guard. This works, but a cleaner long-term boundary would isolate automation from the production bundle more strongly.
+5. E2E automation is now build-isolated under `AC-HE-02`. `RAIN_E2E_BUILD=1` intentionally creates a non-distributable automation build; only the default `npm run build`, which rejects E2E markers in `dist`, qualifies as the normal production frontend artifact.
 6. ASR output is readable Chinese and no longer mojibake, but recognition accuracy is not perfect. For example, lecture terms can still be misrecognized by Whisper.
 7. The final Stage2 merge is deterministic local merging rather than a final global Qwen merge. This avoids DashScope token/rate failures and keeps every sentence covered, but it may produce less globally polished chapter naming than a successful global model merge.
 8. Many root-level historical docs (`M*.md`, `PRD.md`, `HANDOFF.md`) make the root directory crowded and can mislead new agents if read as current truth without this state file.
@@ -1400,6 +1400,22 @@ After the Runtime Settings desktop E2E commit, the control plane had one remaini
 TDD evidence: `real-e2e-runner-mode.test.tsx` first failed because the runtime-settings schema result remained `undefined`; after the minimal public-interface reporter was added, the focused test passed. The real desktop command then passed the seven-table metadata check plus initialization, add, first restart persistence, delete and second restart absence against a unique temporary SQLite without any API Key or model call.
 
 Final verification on `master` before commit: `npm run e2e:runtime-settings` passed the real Tauri/SQL plugin/schema/UI/restart flow; `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and Vite production build passed; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. Tauri/Vite retained only the existing bundle-identifier and dynamic/static import warnings.
+
+## What changed in the 2026-07-28 E2E build-isolation slice
+
+The user confirmed `DEC-005` and `AC-HE-02` to close the former risk that `App.tsx` statically imported the complete real E2E Runner into every normal production bundle:
+
+- `App` now knows only the small `E2eAutomation` interface. The default `entry.tsx` adapter returns no automation; `enabled-entry.tsx` is the only adapter that imports `real-e2e-runner.tsx`.
+- `vite.config.ts` selects the enabled adapter only when an E2E script explicitly sets `RAIN_E2E_BUILD=1`. Both real E2E scripts own that flag; such output is classified as automation-only and must not be distributed as the normal product artifact.
+- `verify-e2e-build-isolation.mjs` scans every JavaScript file in the real `dist`. A normal build rejects the E2E result, schema and status markers; an E2E build requires all three, so deleting or misrouting the Runner cannot make the isolation check pass falsely.
+- `npm run build` now includes the appropriate artifact Judge, and therefore `harness:check` automatically enforces the normal-production half of `AC-HE-02`.
+- No product behavior, Tauri command, database contract, locked `harness/` file or locked Rust Harness changed.
+
+TDD evidence: against the pre-change production `dist`, the new Judge failed with all three forbidden markers present. After the dual-adapter build seam was added, the normal bundle passed with all markers absent and the explicit E2E bundle passed with all markers present. The normal main JavaScript bundle decreased from 284.11 kB to 275.85 kB in the observed build. The no-key Runtime Settings desktop E2E then passed its real Tauri/schema/add/restart/delete/restart flow through the enabled adapter.
+
+The paid multi-hour `full` E2E was not rerun. Its `ui-proof` alternative is also not a read-only smoke test: it updates canonical Evidence artifacts. Because this slice changes only the shared build adapter that the successful Runtime Settings desktop run traversed, neither expensive inference nor Evidence mutation was authorized as an additional Judge.
+
+Final verification on `master` before commit: `npm run e2e:runtime-settings` passed the enabled E2E build Judge and the complete no-key Tauri/schema/UI/restart flow. `npm run harness:check` passed end to end: Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; the default TypeScript/Vite production build passed and verified 5 JavaScript output files contained no E2E markers; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. Existing Vite dynamic/static import warnings remain, but the normal-build warnings no longer name `real-e2e-runner.tsx` as a static importer.
 
 ## Maintenance checklist for every future session
 

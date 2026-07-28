@@ -383,6 +383,18 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：`control-plane-validator.test.ts` 使用独立小文档覆盖正常、缺 coverage、缺 Owner/Judge、裁判文件缺失、当前事实冲突和验收状态冲突；`npm run harness:control` 对真实 Rain 文档执行同一实现。
 
+### AC-HE-02 普通生产构建不得包含 E2E 自动化实现
+
+状态：`Confirmed`
+
+普通 `npm run build` 必须从构建产物中排除真实 E2E Runner、WebDriver window interface 和自动化状态 UI。应用根模块只依赖一个 `E2eAutomation` interface，由构建入口选择禁用 adapter；只有显式 E2E 构建才能选择真实 adapter，且该构建不得被当作普通发布产物。隔离不能破坏 Runtime Settings 短桌面 Judge 或完整 E2E Runner 的显式构建入口。
+
+该规则不要求运行收费模型或重写 canonical Evidence。完整 E2E 的模型、视频和 Evidence 语义继续由 `AC-LV-11/12` 管理。
+
+实现归属：`src/e2e/entry.tsx` 与 `enabled-entry.tsx` 提供同一构建 seam 的两个 adapter；`vite.config.ts` 只在 `RAIN_E2E_BUILD=1` 时选择真实 adapter；E2E 脚本拥有该显式构建标志。
+
+裁判：`verify-e2e-build-isolation.mjs` 扫描真实 `dist`，要求普通产物不存在三项自动化标记、E2E 产物全部存在；`npm run build` 默认执行普通产物裁判；`run-runtime-settings-e2e.ps1` 证明显式 E2E adapter 能在真实 Tauri 中运行。
+
 ## 6. 当前明确不在已验收范围
 
 - 在线 URL 下载和完整处理链路尚未通过真实验收。

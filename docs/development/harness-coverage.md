@@ -66,6 +66,7 @@
 | AC | 当前裁判 | 等级 | 当前结论与缺口 |
 | --- | --- | --- | --- |
 | AC-HE-01 | `control-plane-validator.test.ts`、`control-plane-validator.mjs`、`package.json` | Strong（纯规则 fixture + 真实仓库命令） | fixture 锁定缺覆盖、缺 Owner/Judge、裁判文件不存在、验收状态冲突和当前事实降级；`harness:control` 检查真实文档，`harness:check` 继续执行前端、构建和 Rust，不替代昂贵 Evidence 决策 |
+| AC-HE-02 | `verify-e2e-build-isolation.mjs`、`package.json`、`run-runtime-settings-e2e.ps1` | Strong（真实双构建产物 + 真实 Tauri 启动） | 普通构建扫描全部 JS 并拒绝 E2E result/schema/status 标记；显式 E2E 构建反向要求三项标记存在，防止禁用过度造成假绿；短桌面 Judge 证明启用 adapter 可被真实应用加载。完整收费 E2E 未因本次入口隔离重跑 |
 
 ## 6. 架构 Harness 审计
 

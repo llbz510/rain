@@ -71,6 +71,7 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 | `npm install` | 安装前端依赖 |
 | `npm test` | 跑全部前端测试（Vitest） |
 | `npm run test:watch` | 测试监听模式 |
+| `npm run build` | 跑普通生产构建，并验证产物不包含 E2E 自动化标记 |
 | `npm run test:rust` | 跑 Rust 测试（cargo test） |
 | `npm run harness:control` | 快速检查 Confirmed AC、Owner、Judge、覆盖行、裁判文件和当前事实冲突 |
 | `npm run harness:check` | 一键运行控制面校验、全部前端测试、生产构建和 Rust 测试 |

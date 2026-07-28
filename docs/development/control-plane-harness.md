@@ -16,7 +16,7 @@ npm run harness:control
 npm run harness:check
 ```
 
-完整命令依次运行控制面 validator、全部前端测试、生产构建和 Rust 测试。live-key 和多小时真实 E2E 仍按对应 AC 与 Evidence 规则单独决定，不能伪装成默认已运行。
+完整命令依次运行控制面 validator、全部前端测试、普通生产构建和 Rust 测试。生产构建还会按 `AC-HE-02` 扫描真实 `dist`，拒绝 E2E 自动化标记。live-key 和多小时真实 E2E 仍按对应 AC 与 Evidence 规则单独决定，不能伪装成默认已运行。
 
 ## 当前机械规则
 
