@@ -74,7 +74,7 @@
 | LLM 只在前端调用 | `harness/m20-boundaries.test.ts` | Strong | 扫描真实 `src/llm/` 源码，禁止 `invoke` / `tauriInvoke` |
 | Tauri command “包含且仅包含”规定命令 | `harness/m20-boundaries.test.ts` | Strong | 解析真实 `src-tauri/src/lib.rs` 的 `generate_handler!`，检查精确集合和重复项 |
 | 数据库由前端边界模块访问 | `harness/m20-boundaries.test.ts` | Strong | 扫描真实前端源码，确保只有 `src/models/database.ts` 导入 Tauri SQL 插件 |
-| 数据库 schema 形状 | M15 schema Harness、`database-schema.ts` | Strong（内存形状）/ Partial（真实 SQLite） | 内存字段和 Tauri 建表 SQL 现在来自同一事实源，消除双份定义漂移；M15 仍只执行内存 adapter，真实 SQLite 初始化需要 Tauri 运行或 Evidence 补充 |
+| 数据库 schema 形状 | M15 schema Harness、`database-schema.ts`、`real-e2e-runner-mode.test.tsx`、`run-runtime-settings-e2e.ps1` | Strong（内存 + 真实 SQLite 必需形状） | 内存字段和 Tauri 建表 SQL 来自同一生产事实源；M15 锁定公共 metadata interface 的内存合同。短桌面 Judge 再让生产 `getDb()` 通过真实 Tauri SQL plugin 初始化隔离 SQLite，由应用只报告 `listTables/getTableColumns` 实际值，脚本用独立字面合同检查 7 张表及必需列，避免生产 schema 常量自证；新增列的兼容/迁移政策仍不在本行范围内 |
 | 数据库 adapter seam | `database-boundary.test.ts`、M15/M20 Harness | Strong（前端边界） | 公共 `Database` 不再声明内存版空实现的 `exec/query`；内部模块不能被生产调用者绕过公共 `database.ts` 入口。真实 SQL 事务仍由 Rust Harness/Evidence 裁判 |
 | 导入状态与恢复 seam | `database-import-state.test.ts`、Pipeline recovery tests、M03/M15、Rust persistence tests | Strong（前端路径 + Rust 状态转换） | 公共入口保持不变；SQLite command 参数、内存比较并交换、持久句子恢复判断均有裁判。完整崩溃恢复体验仍由真实 Evidence 补充 |
 | 原子导入持久化 seam | `database-import-atomic.test.ts`、`database-recovery.test.ts`、Pipeline/Stage2 tests、M04/M15/M18、Rust persistence tests | Strong（前端路径 + Rust 事务） | 锁定 SQLite command 参数和直接事务顺序；内存与 Rust 共同覆盖失败回滚、过期写保护、树关系和句子精确归属。真实应用完成状态仍由 Evidence 裁判 |

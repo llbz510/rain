@@ -1387,6 +1387,20 @@ TDD evidence:
 
 Focused verification passed the two new frontend tests and all six Rust E2E config tests. The final real desktop run passed all three launches: isolated initialization, add, first restart persistence, delete and second restart absence. Final `npm run harness:check` also passed end to end: Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and the Vite production build passed; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. File-scoped `rustfmt --check` passed for `e2e_config.rs`; the separate whole-repository formatting debt is recorded as risk 17. Tauri/Vite retained only the existing bundle-identifier and dynamic/static import warnings.
 
+## What changed in the 2026-07-28 real SQLite schema Judge slice
+
+After the Runtime Settings desktop E2E commit, the control plane had one remaining explicit architecture Partial that did not require a new product decision: M15 proved schema metadata only through the memory adapter, while no Judge inspected the tables and columns created by the real Tauri SQL plugin. This slice closes that required-shape gap without changing the schema or locked Harness:
+
+- The existing pre-agreed seam remains the public `Database.listTables/getTableColumns` interface used by M15. `createDatabase`/`TauriSqlDatabase` remain the schema Owner; no new Tauri command or database side channel was added.
+- In `runtime-settings` mode only, `RealE2eRunner` now asks the production `getDb()` singleton for actual table metadata and publishes the unjudged result to WebDriver. It does not import expected schema constants, start the video workflow, expose row data or render an automation overlay.
+- `scripts/run-runtime-settings-e2e.ps1` is the Judge Owner for the independent literal contract. Before mutating Runtime Settings, it checks that the isolated real SQLite contains all seven required tables and their required columns, then continues the existing add/restart/delete/restart flow.
+- This strengthens the database schema architecture row and the real initialization portion of `AC-LV-14`; it adds no product behavior or new AC. The boundary excludes schema upgrade compatibility, policies for additive columns, other business CRUD semantics, fault injection, model calls and Evidence.
+- No file under locked `harness/` or `src-tauri/tests/` changed.
+
+TDD evidence: `real-e2e-runner-mode.test.tsx` first failed because the runtime-settings schema result remained `undefined`; after the minimal public-interface reporter was added, the focused test passed. The real desktop command then passed the seven-table metadata check plus initialization, add, first restart persistence, delete and second restart absence against a unique temporary SQLite without any API Key or model call.
+
+Final verification on `master` before commit: `npm run e2e:runtime-settings` passed the real Tauri/SQL plugin/schema/UI/restart flow; `npm run harness:check` passed end to end. Control Plane validation passed; frontend passed 77 files / 444 tests with 1 live-key test skipped by its explicit environment guard; TypeScript and Vite production build passed; Rust passed 96 tests with 1 real Whisper model test explicitly ignored. Tauri/Vite retained only the existing bundle-identifier and dynamic/static import warnings.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

@@ -137,7 +137,7 @@ cancelImport(videoId)
 
 Runtime Settings 首次加载完成前不得写入。加载后，模型、角色和能力记录的全部公开写动作共享 Store 内的一条提交队列，且候选快照只能在动作获得队列执行权后从最新状态构造；成功提交递增版本，较早启动的 initialize/retry 结果因此失效。该前端顺序边界由 `AC-LV-16` 管理，SQLite 的职责仍是保证队列中每个完整快照的原子性。
 
-`scripts/run-runtime-settings-e2e.ps1` 是该边界的短桌面 Judge。它使用 `runtime-settings` E2E 配置把生产数据库 singleton 路由到系统临时目录中的隔离 SQLite，等待设置页公开 `loading/ready/error` hydration 状态，通过真实 UI 添加无 Key 测试 LLM，关闭并重启应用验证存在，再删除并第二次重启验证消失。该模式由 WebDriver 驱动，不执行完整 `RealE2eRunner`，不调用模型、不下载 Whisper，也不产生 `Verified` Evidence。
+`scripts/run-runtime-settings-e2e.ps1` 是该边界的短桌面 Judge。它使用 `runtime-settings` E2E 配置把生产数据库 singleton 路由到系统临时目录中的隔离 SQLite，等待设置页公开 `loading/ready/error` hydration 状态，通过真实 UI 添加无 Key 测试 LLM，关闭并重启应用验证存在，再删除并第二次重启验证消失。该模式由 WebDriver 驱动；`RealE2eRunner` 只通过数据库公共 metadata interface 报告真实表/列供脚本按独立合同裁判，不启动视频 E2E 工作流，不调用模型、不下载 Whisper，也不产生 `Verified` Evidence。
 
 本地 Whisper 入池前，Store 必须调用 `requireInstalledWhisperModel`，通过生产 `list_whisper_models` 复核所选 size 的最终文件；表单 `done` 只控制交互，不能替代门禁。删除模型时，Store 在同一候选快照中移除模型、能力记录和所有引用它的角色，再交给 Runtime Settings 原子保存。两条规则分别由 `AC-MM-04` 和 `AC-LV-15` 管理。
 

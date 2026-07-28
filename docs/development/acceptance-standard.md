@@ -213,7 +213,7 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 实现归属：Store Runtime Settings 提交门禁、Runtime Settings 持久化规划、数据库批量 Settings interface、Rust SQLite 单事务。Settings UI 只能调用 Store 的公开动作，不得自行读取或拼装持久化快照。
 
-裁判：`runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册，以及 `scripts/run-runtime-settings-e2e.ps1` 对真实 Tauri/SQL plugin/隔离 SQLite 的添加与重启持久化闭环。
+裁判：`runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`model-pool.test.ts`、公共数据库 Settings 测试、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册，以及 `scripts/run-runtime-settings-e2e.ps1` 对真实 Tauri/SQL plugin/隔离 SQLite 必需 schema 形状、添加与重启持久化的闭环。
 
 ### AC-LV-15 删除模型必须清理所有运行时引用
 

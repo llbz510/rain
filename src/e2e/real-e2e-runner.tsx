@@ -12,6 +12,7 @@ import type { ImportCheckpoint, Sentence, Video, VideoStatus } from '@/models/ty
 import { createVideoImportController } from '@/pipeline/video-import-controller'
 import { redactSecret } from '@/llm/client'
 import { isTauri, tauriInvoke } from '@/lib/tauri-env'
+import { getDb } from '@/models/db-singleton'
 import { checkAsrModelCapability } from '@/settings/asr-capability'
 import {
   ASSISTANT_CAPABILITY_TOKEN,
@@ -83,10 +84,17 @@ interface RealE2eResult {
   }
 }
 
+interface RuntimeSettingsSchemaResult {
+  status: 'running' | 'passed' | 'failed'
+  tables?: Record<string, string[]>
+  error?: string
+}
+
 declare global {
   interface Window {
     __RAIN_E2E_RESULT__?: RealE2eResult
     __RAIN_E2E_START__?: boolean
+    __RAIN_RUNTIME_SETTINGS_SCHEMA__?: RuntimeSettingsSchemaResult
   }
 }
 
@@ -195,6 +203,22 @@ function publish(result: RealE2eResult, setStatus: (status: RealE2eStatus) => vo
 function pushEvent(result: RealE2eResult, event: string, detail?: string): void {
   result.events.push({ at: nowIso(), event, detail })
   window.__RAIN_E2E_RESULT__ = { ...result, events: [...result.events] }
+}
+
+async function publishRuntimeSettingsSchema(): Promise<void> {
+  window.__RAIN_RUNTIME_SETTINGS_SCHEMA__ = { status: 'running' }
+  try {
+    const db = await getDb()
+    const tableNames = await db.listTables()
+    const tables: Record<string, string[]> = {}
+    for (const tableName of tableNames) {
+      tables[tableName] = await db.getTableColumns(tableName)
+    }
+    window.__RAIN_RUNTIME_SETTINGS_SCHEMA__ = { status: 'passed', tables }
+  } catch (cause) {
+    const error = cause instanceof Error ? cause.message : String(cause)
+    window.__RAIN_RUNTIME_SETTINGS_SCHEMA__ = { status: 'failed', error }
+  }
 }
 
 function requireCompatible(record: ModelCapabilityRecord): ModelCapabilityRecord {
@@ -485,7 +509,11 @@ export function RealE2eRunner() {
     let cancelled = false
     void tauriInvoke<RealE2eConfig | null>('get_real_e2e_config')
       .then(async (config) => {
-        if (cancelled || !config?.enabled || config.runMode === 'runtime-settings') return
+        if (cancelled || !config?.enabled) return
+        if (config.runMode === 'runtime-settings') {
+          await publishRuntimeSettingsSchema()
+          return
+        }
         setStatus('running')
         window.__RAIN_E2E_RESULT__ = {
           status: 'running',

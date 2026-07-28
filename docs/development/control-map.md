@@ -19,6 +19,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 每条验收条件由什么证明 | `docs/development/harness-coverage.md` | AC、测试、真实证据和缺口的映射 |
 | 控制文档是否自洽 | `npm run harness:control` | Confirmed AC、Owner、Judge、覆盖行、裁判文件和当前事实冲突的机械裁判 |
 | Runtime Settings 是否真实跨桌面重启持久化 | `npm run e2e:runtime-settings` | 真实 Tauri、生产设置 UI、SQL plugin 和隔离 SQLite 的短 Judge；不证明模型能力或完整视频流程 |
+| 真实 SQLite 是否具备当前必需表/列 | `npm run e2e:runtime-settings` | 应用经公共数据库 metadata interface 报告实际形状，脚本按独立字面合同裁判；不证明 schema 升级兼容或其他业务 CRUD |
 | 哪个模块负责什么 | `docs/development/module-map.md` | 模块接口、依赖方向和迁移中的违规点 |
 | 某一次真实运行发生了什么 | 对应 `evidence/rain-real-e2e-*/manifest.json` 及其证据包 | 只证明该次运行，不自动证明当前代码 |
 

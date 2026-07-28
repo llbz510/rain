@@ -105,6 +105,55 @@ return page?.getAttribute('data-runtime-settings-status') === 'ready';
 '@
 }
 
+function Assert-RealDatabaseSchema([string]$SessionId) {
+  Wait-WebDriverCondition $SessionId 'the real SQLite schema probe' @'
+const status = window.__RAIN_RUNTIME_SETTINGS_SCHEMA__?.status;
+return status === 'passed' || status === 'failed';
+'@
+  $result = Invoke-WebDriverScript $SessionId @'
+const probe = window.__RAIN_RUNTIME_SETTINGS_SCHEMA__;
+if (probe?.status === 'failed') {
+  return { ok: false, error: `Schema probe failed: ${probe.error || 'unknown error'}` };
+}
+const expected = {
+  video: [
+    'id', 'title', 'source', 'source_url', 'file_path', 'thumbnail', 'duration',
+    'language', 'status', 'stage', 'error_message', 'created_at', 'position',
+    'last_studied_at',
+  ],
+  node: [
+    'id', 'video_id', 'parent_id', 'kind', 'title', 'type', 'start_time',
+    'end_time', 'text', 'translation', 'sort_order',
+  ],
+  sentence: ['id', 'node_id', 'text', 'start_time', 'end_time', 'sort_order'],
+  note: [
+    'id', 'video_id', 'content', 'source', 'created_at', 'derivation_id', 'sort_order',
+  ],
+  note_sentence: ['note_id', 'sentence_id'],
+  setting: ['key', 'value'],
+  import_checkpoint: [
+    'video_id', 'stage', 'completed_blocks_json', 'error_message', 'updated_at',
+  ],
+};
+const actual = probe?.tables || {};
+const errors = [];
+for (const [table, columns] of Object.entries(expected)) {
+  if (!Object.prototype.hasOwnProperty.call(actual, table)) {
+    errors.push(`missing table ${table}`);
+    continue;
+  }
+  const missingColumns = columns.filter((column) => !actual[table].includes(column));
+  if (missingColumns.length > 0) {
+    errors.push(`${table} missing columns ${missingColumns.join(',')}`);
+  }
+}
+return { ok: errors.length === 0, error: errors.join('; ') };
+'@
+  if ($result.ok -ne $true) {
+    throw "Real SQLite schema did not satisfy the independent contract: $($result.error)"
+  }
+}
+
 function Test-ModelVisible([string]$SessionId) {
   return Invoke-WebDriverScript $SessionId @"
 return [...document.querySelectorAll('[data-testid^="model-entry-"]')]
@@ -234,6 +283,8 @@ try {
 
   $sessionId = New-WebDriverSession $appBinary
   Open-ReadySettingsPage $sessionId
+  Write-Output 'Runtime Settings E2E phase: verify real SQLite schema'
+  Assert-RealDatabaseSchema $sessionId
   Write-Output 'Runtime Settings E2E phase: initial isolated state'
   if (Test-ModelVisible $sessionId) { throw 'The isolated database unexpectedly contained the test model.' }
   Write-Output 'Runtime Settings E2E phase: add model'
