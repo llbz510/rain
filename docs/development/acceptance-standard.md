@@ -427,7 +427,7 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 该入口必须保持最小只读仓库权限、不持久化 checkout 凭据、不接收 Rain secrets，并且不得进行模型连接、收费调用、Whisper 下载、完整视频导入或 Evidence 生成。它不属于默认 `harness:check`，不在 pull request 或 push 时自动执行，也不是必需合并检查；手动成功只证明该目标提交在该次 Hosted Windows 环境中通过 `AC-LV-14/15/16` 的短桌面闭环。
 
-实现归属：`.github/workflows/runtime-settings-desktop-e2e.yml` 负责干净 Hosted Windows 环境、桌面工具链、安全权限和对现有 package 命令的单次委托；`package.json` 与 `scripts/run-runtime-settings-e2e.ps1` 继续分别拥有公开命令和全部产品行为裁判。
+实现归属：`.github/workflows/runtime-settings-desktop-e2e.yml` 负责干净 Hosted Windows 环境、桌面工具链、安全权限和对现有 package 命令的单次委托；`src-tauri/src/e2e_config.rs` 与 `src-tauri/src/lib.rs` 只在 Runtime Settings E2E 模式把 Owner 提供的 WebView2 参数注入 Tauri window context；`package.json` 与 `scripts/run-runtime-settings-e2e.ps1` 继续分别拥有公开命令和全部产品行为裁判。
 
 裁判：目标提交上的 GitHub Actions `Runtime Settings Desktop E2E` workflow_dispatch 真实 run 必须执行未带 `-SkipBuild` 的 `npm run e2e:runtime-settings` 并成功；YAML 存在、静态解析、本机运行或默认 `Harness` workflow 通过都不能单独签发本 AC。
 

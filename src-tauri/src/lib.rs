@@ -20,6 +20,13 @@ use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    if let Some(browser_args) = e2e_config::runtime_settings_webview_args() {
+        for window in &mut context.config_mut().app.windows {
+            window.additional_browser_args = Some(browser_args.clone());
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
@@ -44,6 +51,6 @@ pub fn run() {
             commands::list_whisper_models,
             e2e_config::get_real_e2e_config,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
