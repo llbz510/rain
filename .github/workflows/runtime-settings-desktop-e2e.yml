@@ -20,8 +20,6 @@ jobs:
       LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
       CMAKE_CXX_FLAGS: /utf-8
       CMAKE_C_FLAGS: /utf-8
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
 
     steps:
       - name: Check out repository
@@ -83,6 +81,9 @@ jobs:
         run: npm ci
 
       - name: Run Runtime Settings desktop Judge
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: npm run e2e:runtime-settings
 
       - name: Upload redacted failure diagnostics
