@@ -16,7 +16,7 @@ npm run harness:control
 npm run harness:check
 ```
 
-完整命令依次运行控制面 validator、全部前端测试、普通生产构建和 Rust 测试。生产构建还会按 `AC-HE-02` 扫描真实 `dist` 中的 JavaScript 与 JavaScript source map，拒绝 E2E 自动化标记；独立 fixture 证明该裁判不能漏过只存在于 source map 的标记。live-key 和多小时真实 E2E 仍按对应 AC 与 Evidence 规则单独决定，不能伪装成默认已运行。
+完整命令依次运行控制面 validator、全部前端测试、显式 E2E 前端构建、普通生产构建和 Rust 测试。两种构建都按 `AC-HE-02` 扫描真实 `dist` 中的 JavaScript 与 JavaScript source map：E2E 构建必须包含全部自动化标记，普通构建必须全部排除；独立 fixture 还证明裁判不能漏过只存在于 source map 的标记。普通构建排在 E2E 构建之后，因此成功结束时 `dist` 是普通可发布产物。该 E2E 前端构建不启动 Tauri、不读取 live-key、不生成 Evidence；live-key、短桌面 E2E 和多小时真实 E2E 仍按对应 AC 与 Evidence 规则单独决定，不能伪装成默认已运行。
 
 ## 当前机械规则
 

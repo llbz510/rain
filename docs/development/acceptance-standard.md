@@ -377,7 +377,7 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 仓库必须提供一个快速、确定性的公开命令，检查所有 Confirmed AC 是否具有唯一 coverage 行、非空实现归属和裁判，并检查 coverage 引用的具体裁判文件是否存在。验收标准内部的重复/冲突状态，以及 `PROJECT_STATE.md` 当前事实区把 Confirmed AC 降回 Proposed 的陈述，必须使命令失败并指出具体 AC；历史时间线可以保留当时状态。
 
-该检查只证明控制文档自洽，不得代替产品行为测试、真实 SQLite/Tauri 运行或 Evidence。完整交付入口必须在控制面通过后继续运行前端测试、生产构建和 Rust 测试；昂贵 live-key 与真实 E2E 是否必跑仍由对应产品 AC 决定。
+该检查只证明控制文档自洽，不得代替产品行为测试、真实 SQLite/Tauri 运行或 Evidence。完整交付入口必须在控制面通过后继续运行前端测试、E2E/普通互补前端构建和 Rust 测试；昂贵 live-key 与真实 E2E 是否必跑仍由对应产品 AC 决定。
 
 实现归属：`scripts/control-plane-validator.mjs` 负责纯规则和真实仓库入口；`package.json` 提供快速 `harness:control` 与完整 `harness:check` 命令。
 
@@ -391,9 +391,9 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 该规则不要求运行收费模型或重写 canonical Evidence。完整 E2E 的模型、视频和 Evidence 语义继续由 `AC-LV-11/12` 管理。
 
-实现归属：`src/e2e/entry.tsx` 与 `enabled-entry.tsx` 提供同一构建 seam 的两个 adapter；`vite.config.ts` 只在 `RAIN_E2E_BUILD=1` 时选择真实 adapter；E2E 脚本拥有该显式构建标志。
+实现归属：`src/e2e/entry.tsx` 与 `enabled-entry.tsx` 提供同一构建 seam 的两个 adapter；`vite.config.ts` 只在 `RAIN_E2E_BUILD=1` 时选择真实 adapter；`build-e2e-frontend.mjs` 和桌面 E2E 脚本拥有该显式构建标志。
 
-裁判：`verify-e2e-build-isolation.mjs` 扫描真实 `dist` 的 JavaScript 和 JavaScript source map，要求普通产物不存在三项自动化标记、E2E 产物全部存在；`verify-e2e-build-isolation.test.ts` 用独立临时产物证明仅藏在 source map 中的标记也会使普通产物裁判失败；`npm run build` 默认执行普通产物裁判；`run-runtime-settings-e2e.ps1` 证明显式 E2E adapter 能在真实 Tauri 中运行。
+裁判：`verify-e2e-build-isolation.mjs` 扫描真实 `dist` 的 JavaScript 和 JavaScript source map，要求普通产物不存在三项自动化标记、E2E 产物全部存在；`verify-e2e-build-isolation.test.ts` 用独立临时产物证明仅藏在 source map 中的标记也会使普通产物裁判失败；`npm run build:e2e` 执行无 Tauri 的真实 E2E 前端构建及反向裁判，`npm run build` 执行普通产物裁判，`harness:check` 每次按此顺序运行两者并以普通产物结束；`run-runtime-settings-e2e.ps1` 进一步证明显式 E2E adapter 能在真实 Tauri 中运行。
 
 ### AC-HE-03 Runtime Settings 桌面 Judge 失败必须留下脱敏诊断
 

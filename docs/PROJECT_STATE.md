@@ -114,7 +114,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 2. The main workspace has a lot of local build/cache data: `.worktrees/` was about 86.62GB during the 2026-07-22 check; `src-tauri/target` in the main workspace was about 15.33GB.
 3. Historical failed evidence runs exist locally. `.gitignore` now hides new/old untracked run directories from normal status, but no destructive cleanup has been performed.
 4. `sql:allow-execute` is currently enabled because the frontend database layer executes SQL through the Tauri SQL plugin. This is acceptable for a local-only trusted WebView, but it is broader than ideal if remote/untrusted content is ever loaded.
-5. E2E automation is now build-isolated under `AC-HE-02`. `RAIN_E2E_BUILD=1` intentionally creates a non-distributable automation build; only the default `npm run build`, which rejects E2E markers in `dist`, qualifies as the normal production frontend artifact.
+5. E2E automation is now build-isolated under `AC-HE-02`. `RAIN_E2E_BUILD=1` intentionally creates a non-distributable automation build; `npm run harness:check` constructs and judges that side first, then restores and judges the ordinary artifact. Only the default `npm run build`, which rejects E2E markers in `dist`, qualifies as the normal production frontend artifact.
 6. ASR output is readable Chinese and no longer mojibake, but recognition accuracy is not perfect. For example, lecture terms can still be misrecognized by Whisper.
 7. The final Stage2 merge is deterministic local merging rather than a final global Qwen merge. This avoids DashScope token/rate failures and keeps every sentence covered, but it may produce less globally polished chapter naming than a successful global model merge.
 8. Many root-level historical docs (`M*.md`, `PRD.md`, `HANDOFF.md`) make the root directory crowded and can mislead new agents if read as current truth without this state file.
@@ -1443,6 +1443,19 @@ Final verification on `master` before commit: PowerShell parsed the changed runn
 - 未修改产品代码、Tauri 命令、数据库合同、`harness/` 或 `src-tauri/tests/`。
 
 聚焦验证 `npm test -- --run scripts/verify-e2e-build-isolation.test.ts` 通过 1 个测试，`npm run build` 通过真实 TypeScript/Vite 生产构建并验证 5 个 JavaScript/source-map 文件无自动化标记。最终 `npm run harness:check` 全绿：Control Plane validation 通过；前端通过 78 个文件 / 445 个测试，1 个 live-key 测试按环境门禁跳过；TypeScript/Vite 普通生产构建和加强后的产物 Judge 通过；Rust 通过 96 个测试，1 个真实 Whisper 模型测试明确 ignored。保留的只有既有 Vite dynamic/static import warnings。本边界不需要收费模型调用、完整视频 Evidence 或再次运行短桌面流程，因为变更只涉及独立测试过的产物文本扫描器，真实构建已是直接 Judge。
+
+## What changed in the 2026-07-28 dual-build full-gate slice
+
+`AC-HE-02` 已能分别裁判普通和显式 E2E 产物，但默认 `harness:check` 原来只运行普通构建。若真实 adapter 被误接为空，日常完整门禁仍会通过，直到短桌面 E2E 才能发现。该边界把既有反向 Judge 前移到每次完整交付门禁，不改变产品行为或 AC：
+
+- 预先约定的公开 seam 是 `npm run build:e2e`。TDD RED 直接证明该命令不存在；不是通过读取 `package.json` 自证编排。
+- `scripts/build-e2e-frontend.mjs` 使用当前 Node 进程直接运行仓库内固定的 TypeScript、Vite 和产物裁判入口，显式注入 `RAIN_E2E_BUILD=1`；不依赖 Windows `set`、新增包、Tauri、SQLite、Key 或模型。
+- `harness:check` 现在先运行 E2E 前端构建，要求三项自动化标记全部存在，再运行普通构建，要求三项全部不存在。因此成功结束时 `dist` 仍是普通可发布前端产物。
+- Owner 是双 adapter、Vite 构建选择和 `build-e2e-frontend.mjs`；Judge 是 `npm run build:e2e`、`npm run build`、互补产物扫描器及更高层短桌面 E2E。
+- 边界内是日常总门禁对构建选择两侧的真实检查；边界外是启动 Tauri、Runtime Settings/SQLite 行为、live-key、收费模型、完整视频 Evidence 和锁定 Harness Migration。
+- 未修改 `harness/`、`src-tauri/tests/` 或产品代码。
+
+聚焦 GREEN 依次通过 `npm run build:e2e` 和 `npm run build`：E2E 主 bundle 为 284.11 kB 并包含全部标记，随后普通主 bundle 为 275.85 kB 并排除全部标记。最终 `npm run harness:check` 全绿并实际按新顺序运行：Control Plane validation 通过；前端通过 78 个文件 / 445 个测试，1 个 live-key 测试按环境门禁跳过；E2E 与普通 TypeScript/Vite 构建及各自互补 Judge 均通过，结束后的 `dist` 为普通产物；Rust 通过 96 个测试，1 个真实 Whisper 模型测试明确 ignored。只有既有 Vite dynamic/static import warnings 保留。本边界不需要启动桌面、调用收费模型或改写 Evidence。
 
 ## Maintenance checklist for every future session
 
