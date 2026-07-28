@@ -38,6 +38,7 @@
 | Windows SDK | Windows API | VS 2022 BuildTools 自带 | — |
 | LLVM/libclang 22+ | whisper-rs bindgen | `winget install LLVM.LLVM` | `clang --version` |
 | cmake 4+ | whisper.cpp 构建 | `winget install Kitware.CMake` | `cmake --version` |
+| FFmpeg / ffprobe | 媒体探测、音频提取、缩略图和真实媒体 Harness | https://ffmpeg.org/download.html | `ffmpeg -version`; `ffprobe -version` |
 | yt-dlp | 在线视频导入（运行时依赖，非编译依赖） | 用户自装加 PATH | `yt-dlp --version` |
 
 ## 必须设置的环境变量（用户级，永久）
@@ -81,6 +82,8 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 | `npm run tauri build` | 打包发布版 |
 | `cargo check --manifest-path src-tauri/Cargo.toml` | 仅检查 Rust 编译 |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | 跑 Rust 测试 |
+
+GitHub 的 `Harness` workflow 会在 pull request 和 `master` push 上从干净的 `windows-2025` checkout 执行 `npm ci` 与同一个 `npm run harness:check`。它不读取 live-key，不运行真实桌面 E2E，也不生成或改写 Evidence。
 
 `e2e:runtime-settings` 失败时会在系统临时目录的 `rain-runtime-settings-e2e-latest-failure/` 保留单份脱敏 `summary.json` 和 driver logs；正常成功会清除该 stale 诊断。
 

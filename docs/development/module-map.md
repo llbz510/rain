@@ -56,6 +56,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Rust Runtime | 文件、ffmpeg、yt-dlp、Whisper、调度、取消 | React 状态和 LLM 调用 | `src-tauri/src/*.rs` |
 | Evidence | 运行真实流程并证明结果；用短桌面 E2E 检查无需外部服务的关键重启边界 | 代替普通回归测试、把短验证冒充完整模型/视频 Evidence | `src/e2e/`、`scripts/`、`evidence/` |
 | E2E Build Entry | 向 `App` 提供单一 `E2eAutomation` interface，并在构建期选择禁用或真实 adapter；完整门禁构建并裁判两种产物 | 用运行时条件把 Runner 留在普通 bundle/source map、让 E2E adapter 缺失时假绿、把自动化构建当作发布产物 | `src/e2e/entry.tsx`、`enabled-entry.tsx`、`vite.config.ts`、`build-e2e-frontend.mjs`、`verify-e2e-build-isolation.mjs`、`verify-e2e-build-isolation.test.ts` |
+| Independent CI Judge | 在无开发者缓存和本机状态的 Windows checkout 中安装锁定依赖并调用唯一完整 Harness | 复制本地门禁步骤、读取 secrets、运行收费/桌面 Evidence、用 CI 特例降低 AC | `.github/workflows/harness.yml`、`package.json` |
 | Test Support | 为组件测试注入 Zustand 状态 | 参与生产运行、向生产组件提供 Context | `harness/support/` |
 
 ## 3. 关键接口

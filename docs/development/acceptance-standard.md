@@ -407,6 +407,18 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：用 `-SkipBuild -MaxSeconds 0` 对已经构建的 E2E 二进制制造确定性启动超时，检查 `summary.json` 的 `failed`/阶段/主错误、两份 driver 日志和注入 Key 缺失；随后正常运行 `npm run e2e:runtime-settings`，证明业务闭环通过且 `latest-failure` 被清理。
 
+### AC-HE-04 合并候选必须由独立干净环境执行默认 Harness
+
+状态：`Confirmed`
+
+每个 pull request 和每次推送到默认分支，都必须在与开发者工作区隔离的 Windows hosted runner 中重新 checkout 当前提交、通过 lockfile 安装 JavaScript 依赖，并执行仓库唯一完整入口 `npm run harness:check`。远端不得另建一套更宽松的测试清单，也不得因 CI 环境失败而跳过控制面、前端测试、E2E/普通互补构建或 Rust 测试。
+
+默认 CI 不得读取 live LLM Key、启动真实桌面 E2E、下载 Whisper 模型或生成/改写 Evidence；这些昂贵或含外部状态的 Judge 继续由对应 AC 显式决定。workflow 应采用最小只读仓库权限，并且 checkout 后不得留下可被项目脚本使用的写入凭据。
+
+实现归属：`.github/workflows/harness.yml` 负责独立 runner、工具链、锁定依赖安装与唯一 Harness 入口；`package.json` 继续拥有 `harness:check` 的实际步骤，workflow 不复制其内部命令。
+
+裁判：GitHub Actions 真实 pull request/push run 必须在 `Harness` workflow 中产生 `Clean Windows Harness` check，并在干净 `windows-2025` runner 上完成 `npm ci` 和 `npm run harness:check`；本地 YAML 读取或只断言 workflow 文件存在不能签发通过。
+
 ## 6. 当前明确不在已验收范围
 
 - 在线 URL 下载和完整处理链路尚未通过真实验收。

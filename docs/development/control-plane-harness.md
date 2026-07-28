@@ -18,6 +18,8 @@ npm run harness:check
 
 完整命令依次运行控制面 validator、全部前端测试、显式 E2E 前端构建、普通生产构建和 Rust 测试。两种构建都按 `AC-HE-02` 扫描真实 `dist` 中的 JavaScript 与 JavaScript source map：E2E 构建必须包含全部自动化标记，普通构建必须全部排除；独立 fixture 还证明裁判不能漏过只存在于 source map 的标记。普通构建排在 E2E 构建之后，因此成功结束时 `dist` 是普通可发布产物。该 E2E 前端构建不启动 Tauri、不读取 live-key、不生成 Evidence；live-key、短桌面 E2E 和多小时真实 E2E 仍按对应 AC 与 Evidence 规则单独决定，不能伪装成默认已运行。
 
+GitHub Actions workflow `Harness` 中的 `Clean Windows Harness` check 是 `AC-HE-04` 的独立环境 Judge：pull request 和 `master` push 都从干净的 `windows-2025` checkout 安装锁定的 npm 依赖，并运行同一个 `harness:check`。workflow 只有 `contents: read` 权限，不持久化 checkout 凭据，不接收项目 secrets；远端通过不能替代本机 Tauri、live-key 或真实 Evidence，远端失败也不得通过降低本地 AC/Harness 来修复。
+
 ## 当前机械规则
 
 1. `acceptance-standard.md` 中每条 `Confirmed` AC 必须恰有一条 coverage 行。
