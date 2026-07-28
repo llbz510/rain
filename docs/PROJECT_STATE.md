@@ -5,7 +5,7 @@
 Control status: `Active`
 Primary checkout: `D:\gongju\shengcan\rain`
 Volatile checkout facts are intentionally not stored here. Run `git status --short`, `git branch --show-current` and `git log -1 --oneline` for the current worktree state.
-Remote status: private GitHub remote `origin` is configured at `https://github.com/llbz510/rain.git`; local `master` tracks `origin/master`. CI and branch protection are not configured yet.
+Remote status: private GitHub remote `origin` is configured at `https://github.com/llbz510/rain.git`; local `master` tracks `origin/master`. The independent Windows CI Judge is configured and proven green on pull request #1; branch protection is not configured yet.
 
 ## Current verified status
 
@@ -110,7 +110,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 
 ## Known defects and risks
 
-1. The private GitHub remote is now configured and `master` is published, but no independent CI or branch protection is configured yet; merge safety still depends on developers running the local Harness.
+1. The private GitHub remote and `AC-HE-04` Windows Harness workflow are configured and a clean pull-request run is green. Branch protection is not configured yet, so GitHub does not currently prevent a direct or unchecked merge to `master`.
 2. The main workspace has a lot of local build/cache data: `.worktrees/` was about 86.62GB during the 2026-07-22 check; `src-tauri/target` in the main workspace was about 15.33GB.
 3. Historical failed evidence runs exist locally. `.gitignore` now hides new/old untracked run directories from normal status, but no destructive cleanup has been performed.
 4. `sql:allow-execute` is currently enabled because the frontend database layer executes SQL through the Tauri SQL plugin. This is acceptable for a local-only trusted WebView, but it is broader than ideal if remote/untrusted content is ever loaded.
@@ -1468,6 +1468,21 @@ The user authorized creation and first publication of the repository after the l
 - This establishes durable off-machine history but does not yet establish an independent evaluator: CI and branch protection remain the next infrastructure boundary.
 
 No product source, locked `harness/`, locked Rust Harness, Evidence contract or acceptance behavior changed in this bootstrap. The state-document update is committed separately after the full local gate and pushed to the new remote.
+
+## What changed in the 2026-07-28 independent Windows CI slice
+
+After the private remote bootstrap, the user confirmed `AC-HE-04` to move the default repository Judge outside the implementation worktree:
+
+- The public Judge seam is the GitHub Actions workflow `Harness` and its observed check context `Clean Windows Harness`. Before implementation, `gh workflow view Harness` returned that no workflow existed, providing the RED fact.
+- `.github/workflows/harness.yml` runs on pull requests, `master` pushes and manual dispatch in a clean `windows-2025` hosted runner. It checks out without persistent credentials, installs Node 22, LLVM 22 and FFmpeg 8, verifies the native toolchain, runs `npm ci`, then delegates the complete decision to the existing `npm run harness:check`.
+- The workflow has only `contents: read`; it receives no Rain secrets and does not start Tauri, use a live model, download Whisper or mutate Evidence.
+- Owner is the workflow environment and the existing package-level Harness composition. Judge is the real GitHub Actions execution, not YAML existence or a local parser.
+- Boundary scope is reproducibility of the default no-key gate in a clean Windows checkout. Branch protection follows only after the real check name and green behavior are observed; live-key, desktop Runtime Settings E2E, full video Evidence and release packaging remain outside.
+- No product code, locked `harness/` file or locked Rust Harness changed.
+
+The first real pull-request run, [30325680481](https://github.com/llbz510/rain/actions/runs/30325680481), supplied the required remote RED: checkout, Node 22, LLVM 22, native-toolchain verification and `npm ci` passed, then the Harness found that Windows PowerShell 5.1 on the hosted English image parsed the UTF-8-without-BOM mojibake literals in `validate-evidence.ps1` through the ANSI code page and failed before its assertions. The validator now expresses the same code points as ASCII `\uNNNN` regex escapes; its 18 focused tests remain green and the script is ASCII-safe. The second run, [30326004483](https://github.com/llbz510/rain/actions/runs/30326004483), passed parsing and exposed a second clean-host dependency: its `powershell.exe` environment did not provide `Get-FileHash`. SHA-256 calculation now uses the validator-owned .NET cryptography API with identical comparisons instead of relying on a host cmdlet. The third run, [30326307313](https://github.com/llbz510/rain/actions/runs/30326307313), passed all 445 frontend tests, both builds, a clean 9-minute Rust/whisper compilation and the first 78 Rust tests, then proved the final undeclared dependency: the real media fixture tests could not find `ffmpeg` or `ffprobe`. The workflow now pins and verifies FFmpeg 8.1.2 alongside LLVM, and `AGENTS.md` names the dependency.
+
+The fourth run, [30327093540](https://github.com/llbz510/rain/actions/runs/30327093540), is the remote GREEN and promotes `AC-HE-04` to Strong: the observed `Clean Windows Harness` check completed in 15m34s on a fresh hosted runner; control-plane validation, 445 frontend tests (one explicit live-key skip), the E2E and production builds, and 96 Rust tests passed, with the one real-model Whisper case remaining explicitly ignored by its existing contract. No live key, desktop E2E, Whisper download or Evidence mutation was used.
 
 ## Maintenance checklist for every future session
 

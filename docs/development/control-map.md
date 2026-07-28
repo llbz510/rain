@@ -23,6 +23,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 普通生产构建是否排除了 E2E 自动化 | `npm run build` | 构建完成后扫描真实 `dist`，拒绝自动化标记 |
 | 显式 E2E 前端构建是否装载了自动化 | `npm run build:e2e` | 不启动 Tauri、不使用 Key；扫描真实 `dist` 并反向要求全部自动化标记存在 |
 | 完整门禁是否同时裁判两种构建 | `npm run harness:check` | 先构建 E2E 产物，再构建普通产物；成功后 `dist` 恢复为普通可发布前端产物 |
+| 合并候选是否在独立干净环境通过默认门禁 | GitHub Actions workflow `Harness` / check `Clean Windows Harness` | `windows-2025` 干净 checkout 执行 `npm ci` 和 `npm run harness:check`；不替代 live-key、桌面 E2E 或 Evidence 决策 |
 | Runtime Settings 桌面 Judge 失败在哪里诊断 | 系统临时目录 `rain-runtime-settings-e2e-latest-failure/summary.json` | 单份脱敏失败阶段、主错误和 driver logs；正常成功会清除 stale 诊断 |
 | 哪个模块负责什么 | `docs/development/module-map.md` | 模块接口、依赖方向和迁移中的违规点 |
 | 某一次真实运行发生了什么 | 对应 `evidence/rain-real-e2e-*/manifest.json` 及其证据包 | 只证明该次运行，不自动证明当前代码 |

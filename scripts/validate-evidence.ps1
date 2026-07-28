@@ -18,6 +18,21 @@ function Read-JsonArtifact([string]$Path) {
   Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+function Get-Sha256([string]$Path) {
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $bytes = $algorithm.ComputeHash($stream)
+      return [System.BitConverter]::ToString($bytes).Replace('-', '')
+    } finally {
+      $algorithm.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
 function Resolve-ArtifactPath([string]$Artifact, [string]$Message) {
   Require-Value $Artifact $Message
   if ([System.IO.Path]::IsPathRooted($Artifact)) { throw "artifact path must be relative: $Artifact" }
@@ -38,7 +53,7 @@ function Assert-PositiveNumber($Value, [string]$Message) {
 }
 
 function Assert-NoMojibake([string]$Text, [string]$Message) {
-  if ($Text -match '(\uFFFD|\u951f\u65a4\u62f7|\p{Co}|銆愬|涓|鎶€|淇″|鍙婂|鏀惧|杩欎|绔犲|疄闄|笂鏄|妯″|绠＄)') { throw $Message }
+  if ($Text -match '(\uFFFD|\u951f\u65a4\u62f7|\p{Co}|\u9286\u612C|\u6D93\uE160|\u93B6\u20AC|\u6DC7\u2033|\u9359\u5A42|\u93C0\u60E7|\u6769\u6B0E|\u7ED4\u72B2|\u7584\u95C4|\u7B02\u93C4|\u59AF\u2033|\u7EE0\uFF04)') { throw $Message }
 }
 
 function Assert-VideoProof($Video) {
@@ -46,7 +61,7 @@ function Assert-VideoProof($Video) {
   Require-Value $Video.sha256 'missing video.sha256'
   Assert-NoMojibake ([string]$Video.path) 'mojibake video path detected'
   if (-not (Test-Path -LiteralPath ([string]$Video.path))) { throw "video path not found: $($Video.path)" }
-  $actual = (Get-FileHash -LiteralPath ([string]$Video.path) -Algorithm SHA256).Hash.ToUpperInvariant()
+  $actual = Get-Sha256 ([string]$Video.path)
   if ([string]$Video.sha256 -ne $actual) { throw "manifest video hash does not match file: manifest=$($Video.sha256) actual=$actual" }
   if ($actual -ne $ExpectedVideoSha256.ToUpperInvariant()) { throw 'unexpected input video hash' }
 }
