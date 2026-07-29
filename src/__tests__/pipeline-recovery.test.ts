@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getDb, resetDb } from '@/models/db-singleton'
-import { atomicInsertSentences, insertVideo } from '@/models/database'
+import { insertSentences, insertVideo } from '@/models/database'
 import { runPipeline } from '@/pipeline/pipeline-orchestrator'
 import type { Video } from '@/models/types'
 
@@ -23,7 +23,7 @@ describe('pipeline recovery', () => {
       errorMessage: 'Qwen unavailable', createdAt: 1, position: 0, lastStudiedAt: 1,
     }
     await insertVideo(db, failed)
-    await atomicInsertSentences(db, [{ id: 's1', nodeId: failed.id, text: 'Signal.', startTime: 0, endTime: 1, sortOrder: 0 }])
+    await insertSentences(db, [{ id: 's1', nodeId: failed.id, text: 'Signal.', startTime: 0, endTime: 1, sortOrder: 0 }])
     const invoke = vi.fn()
     const callStage2 = vi.fn().mockRejectedValue(new Error('Qwen still unavailable'))
 
@@ -43,7 +43,7 @@ describe('pipeline recovery', () => {
       errorMessage: 'merge interrupted', createdAt: 1, position: 0, lastStudiedAt: 1,
     }
     await insertVideo(db, terminal)
-    await atomicInsertSentences(db, [{ id: `s-${status}`, nodeId: terminal.id, text: 'Signal.', startTime: 0, endTime: 1, sortOrder: 0 }])
+    await insertSentences(db, [{ id: `s-${status}`, nodeId: terminal.id, text: 'Signal.', startTime: 0, endTime: 1, sortOrder: 0 }])
     const invoke = vi.fn()
 
     await expect(runPipeline(terminal, llmSettings, callbacks(), db, { type: 'whisper-local', modelName: 'large-v3' }, {

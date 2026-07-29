@@ -24,7 +24,7 @@
 | 本地 Whisper 推理 | whisper-rs Rust binding（决策94），模型文件存 `whisper-models/`（决策84） |
 | yt-dlp 子进程 | 解析在线 URL + 下载视频/字幕（决策95，用户自装加 PATH） |
 | 文件 I/O | 缩略图生成、视频时长探测、在线视频下载到 `videos/<videoId>/` |
-| SQLite 访问 | 经 tauri-plugin-sql 暴露给前端（决策93） |
+| SQLite 原子事务 | 只为跨记录/跨表不变量提供专用 SQLx transaction command，不建设通用 DAL（决策93） |
 | 视频路径桥接 | convertFileSrc 转 asset://（决策96） |
 | 长任务调度 | tokio async task 跑 ASR，Tauri event 推进度（决策97/98） |
 
@@ -34,7 +34,7 @@
 |------|------|
 | UI 渲染 | 三模式四区、所有交互 |
 | 状态管理 | Zustand 存 UI 会话态 + 当前视频缓存（决策99） |
-| SQLite 读写 | tauri-plugin-sql 直接写 SQL（决策93） |
+| SQLite 读写 | 业务只调用公共 Database interface；普通读写由内部 module 经 tauri-plugin-sql 执行（决策93） |
 | LLM 调用 | Stage2/合并/AI 助手全部前端直连 OpenAI 兼容接口（决策92） |
 
 ## 已确认决策（第十一次会话）
@@ -46,11 +46,12 @@
 - Rust 后端不代理 LLM，专注 ASR/yt-dlp/文件 I/O
 - 理由：流式体验最好、Key 本就明文无额外泄露、职责干净
 
-### 决策93 SQLite 访问 = 前端直连 SQL（tauri-plugin-sql）
-- 用 `tauri-plugin-sql`，前端 Zustand action 里直接 exec SQL
-- 复杂事务（结构编辑级联、中断恢复原子写）用 `BEGIN/COMMIT` 包一层保原子
-- 不在 Rust 侧封装 DAL/IPC，省一层 binding（个人工具单人开发，DAL 抽象收益不抵成本）
-- M15 已定 6 张表 schema，前端照写
+### 决策93 SQLite 访问 = 前端公共边界 + 专用 Rust 原子事务
+- 2026-07-29 经用户确认收窄为 `AC-AR-01`：页面、Store、Pipeline 和设置流程只能调用 `@/models/database` 的业务 interface，不得直接访问 SQL plugin 或数据库内部 module
+- 只有 `src/models/database.ts` 装载 `tauri-plugin-sql`；普通单记录读写由公共入口背后的数据库内部 module 执行参数化 SQL
+- 跨记录或跨表原子不变量不能由前端发送 `BEGIN/COMMIT`；必须通过一次深 Tauri command 进入专用 Rust persistence module，在一个 SQLx 连接事务中完成
+- Rust 只拥有这些明确的原子事务，不建设通用 DAL；`commands.rs` 保持路径、参数和错误适配职责
+- 内存 adapter 只提供快速行为反馈，真实 SQLite 原子性由 Rust transaction tests 或真实桌面 Evidence 裁判
 
 ### 决策94 本地 Whisper = whisper-rs Rust binding
 - 用 `whisper-rs` crate（whisper.cpp 的 Rust binding），纯 Rust 编译、无外部运行时
@@ -101,18 +102,18 @@
       ├─ 字幕档：yt-dlp 抓字幕轨
       ├─ API 档：调云端 ASR
       └─ 本地档：whisper-rs 推理
-    → ASR 完成，原子写 sentence 表（决策84）
+    → ASR 完成，通过专用 Rust transaction command 原子写 sentence 与 Video 阶段（决策84/93）
     → 前端直连 LLM 跑 Stage2（短）/ M18 分块多次（长）
     → 前端直连 LLM 跑合并（长视频）
-    → 写 node 表 + video.status=ready
+    → 通过专用 Rust transaction command 写 node、句子归属与 video.status=ready
   全程 event 推进度，前端 live 更新卡片+导入框
 
 学习界面
-  打开视频 → 前端 SQL 查 video + node 树 + sentences + notes → 缓存进 Zustand
+  打开视频 → 前端公共 Database interface 查 video + node 树 + sentences + notes → 缓存进 Zustand
   播放 → <video src=convertFileSrc(path)>，播放位置写 Zustand（定期同步 position 到 video 表）
-  结构编辑 → 改 Zustand 缓存 + 事务写 node 表 + 推撤销栈
+  结构编辑 → 未来 AC 必须通过公共 Database interface；跨记录原子写进入专用 Rust transaction
   AI 助手 → 前端直连 LLM，SSE 流式，AbortController 取消
-  摘注/随记 → 写 note + note_sentence 表
+  摘注/随记 → 公共 Database interface 通过单个 Rust transaction 写 note + note_sentence 表
 ```
 
 ## 实现细节（已隐含，非决策）
@@ -120,5 +121,5 @@
 - **缩略图生成**：Rust 侧用 ffmpeg 抽首帧/指定帧 → 写 `thumbnails/<videoId>.jpg`（ffmpeg 随 Tauri 或系统调用，实现时定）
 - **视频时长**：Rust 侧 ffprobe 探测，写 `video.duration`
 - **在线视频下载**：yt-dlp 下载到 `videos/<videoId>/`（决策84）
-- **ASR 标准化**：Rust 侧把三档输出统一为 `Sentence[]`（决策32），写 sentence 表
+- **ASR 标准化**：Rust 侧把三档输出统一为 `Sentence[]`（决策32），再由 `save_asr_atomically` 事务写入
 - **撤销栈实现**：Zustand 存逆操作队列，~20 步上限（决策83/88）

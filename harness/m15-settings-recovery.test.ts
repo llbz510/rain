@@ -16,7 +16,7 @@ import {
   getVideoById,
   getSentencesByNodeId,
   determineRecoveryAction,
-  atomicInsertSentences,
+  saveAsrAtomically,
 } from '@/models/database'
 
 let db: Awaited<ReturnType<typeof createDatabase>>
@@ -89,27 +89,42 @@ async function setupVideoForRecovery(status: string, stage: string | null, hasSe
 }
 
 describe('M15-T18: ASR 原子持久化 — 事务（决策84）', () => {
-  it('atomicInsertSentences 全部成功或全部失败', async () => {
+  it('通过生产 ASR interface 一起提交全部句子和下一阶段', async () => {
     await insertVideo(db, {
       id: 'v1', title: '视频', source: 'local', thumbnail: '/t.jpg',
-      duration: 100, language: 'zh', status: 'processing',
+      duration: 100, language: '', status: 'processing', stage: 'asr',
       createdAt: 1000, position: 0, lastStudiedAt: 1000,
     })
-    await insertNodes(db, [
-      { id: 'ch1', videoId: 'v1', parentId: null, kind: 'chapter', title: '章', type: null, startTime: 0, endTime: 100, text: null, sortOrder: 0 },
-      { id: 'sec1', videoId: 'v1', parentId: 'ch1', kind: 'section', title: '节', type: null, startTime: 0, endTime: 100, text: null, sortOrder: 0 },
-      { id: 'p1', videoId: 'v1', parentId: 'sec1', kind: 'paragraph', title: '段', type: 'concept', startTime: 0, endTime: 100, text: '文本', sortOrder: 0 },
-    ])
-
     const sentences = [
-      { id: 's1', nodeId: 'p1', text: '句一。', startTime: 0, endTime: 50, sortOrder: 0 },
-      { id: 's2', nodeId: 'p1', text: '句二。', startTime: 50, endTime: 100, sortOrder: 1 },
+      { id: 's1', nodeId: '', text: '句一。', startTime: 0, endTime: 50, sortOrder: 0 },
+      { id: 's2', nodeId: '', text: '句二。', startTime: 50, endTime: 100, sortOrder: 1 },
     ]
 
-    // 正常插入应全部成功
-    await atomicInsertSentences(db, sentences)
-    const result = await getSentencesByNodeId(db, 'p1')
-    expect(result).toHaveLength(2)
+    await saveAsrAtomically('v1', 'zh', sentences, db)
+
+    expect(await getSentencesByNodeId(db, 'v1')).toHaveLength(2)
+    expect(await getVideoById(db, 'v1')).toMatchObject({
+      language: 'zh', status: 'processing', stage: 'stage2',
+    })
+  })
+
+  it('生产 ASR interface 的迟失败回滚全部句子并保留原阶段', async () => {
+    await insertVideo(db, {
+      id: 'v1', title: '视频', source: 'local', thumbnail: '/t.jpg',
+      duration: 100, language: '', status: 'processing', stage: 'asr',
+      createdAt: 1000, position: 0, lastStudiedAt: 1000,
+    })
+    const duplicateSentences = [
+      { id: 'duplicate', nodeId: '', text: '句一。', startTime: 0, endTime: 50, sortOrder: 0 },
+      { id: 'duplicate', nodeId: '', text: '句二。', startTime: 50, endTime: 100, sortOrder: 1 },
+    ]
+
+    await expect(saveAsrAtomically('v1', 'zh', duplicateSentences, db)).rejects.toThrow()
+
+    expect(await getSentencesByNodeId(db, 'v1')).toEqual([])
+    expect(await getVideoById(db, 'v1')).toMatchObject({
+      language: '', status: 'processing', stage: 'asr',
+    })
   })
 })
 

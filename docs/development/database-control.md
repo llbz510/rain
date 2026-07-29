@@ -20,11 +20,13 @@
 
 外部生产调用者目前没有直接调用 `Database.exec` 或 `Database.query`。锁定 M15 Harness 只使用 `listTables` 和 `getTableColumns` 验证 schema 形状。新增业务代码不得绕过公共函数直接拼 SQL。
 
+`AC-AR-01` 进一步锁定事务所有权：只有 `database.ts` 可以装载 SQL plugin，业务调用者不能导入数据库内部 module；普通单记录 SQL 留在前端数据库内部 module，跨记录或跨表原子写必须通过一次专用 Tauri command 进入 Rust 单连接事务。前端生产源码不得自行发送事务控制 SQL。
+
 ## 2. 职责与裁判
 
 | 职责 | 主要行为 | 关联 AC / 规则 | 当前裁判 |
 | --- | --- | --- | --- |
-| Schema 与 adapter 选择 | 创建内存数据库或 Tauri SQLite，保持表/字段一致 | 数据库边界规则 | M15 schema Harness、M20 SQL importer Harness |
+| Schema、adapter 与访问边界 | 创建内存数据库或 Tauri SQLite，保持表/字段一致；阻止 plugin、内部 module 和事务控制逃逸 | AC-AR-01 | `database-architecture-policy.test.ts`、`database-boundary.test.ts`、M15/M20 |
 | Video 记录与进度 | Video 创建、查询、列表、搜索、状态和学习进度 | AC-LV-02/09、AC-ST-01/05 | `database-videos.test.ts`、M15、视频列表、学习加载/进度测试 |
 | 视频级联删除 | 原子删除 Video 及其 Node/Sentence/Note/reference/checkpoint | AC-LV-13 | 公共接口测试、M15/M20、Rust SQLite 成功/晚失败回滚/幂等测试（Strong） |
 | 学习内容读写 | Node/Sentence 普通写入和按 Node/Video 查询 | AC-LV-04/05/09、AC-ST-01 | `database-content.test.ts`、M15、Pipeline/Stage2、学习加载测试 |
@@ -42,7 +44,7 @@
 2. 24 个生产调用位置依赖稳定公共入口，但没有生产调用者直接执行 SQL，因此可以内部渐进拆分。
 3. 旧实现分别手写内存字段列表和 SQLite 建表 SQL，存在 schema 漂移风险。
 4. `database-schema.ts` 现在是表、字段、约束和建表 SQL的唯一事实源；内存 adapter 和 Tauri adapter 从同一定义初始化。
-5. M20 当前锁定“只有 `database.ts` 导入 Tauri SQL 插件”。未来内部拆分必须保留这个入口，或先经过明确的 Harness Migration，不能为了移动文件偷偷改裁判。
+5. M20 与 `AC-AR-01` 当前共同锁定“只有 `database.ts` 导入 Tauri SQL 插件”。独立 policy fixture 还拒绝业务层导入内部数据库 module 和前端 `BEGIN/COMMIT/ROLLBACK/SAVEPOINT/RELEASE`；未来内部拆分必须保留这个入口，或先经过明确的 Harness Migration，不能为了移动文件偷偷改裁判。
 6. `Database` 现在只暴露两种 adapter 都真实支持的元数据 interface。内部通过 `adapterKind` 区分 `MemoryDatabaseAdapter` 与 `SqlDatabaseAdapter`；只有 SQLite adapter 拥有 `exec/query`，内存 adapter 不再提供空实现。
 7. `database-boundary.test.ts` 禁止生产模块直接导入 `database-adapter`、`database-checkpoints`、`database-content`、`database-content-rows`、`database-import-atomic`、`database-import-state`、`database-notes`、`database-settings`、`database-video-deletion` 或 `database-schema`，并证明内存 adapter 不伪装支持 SQL。内部实现可以继续拆分，调用者仍只能看到稳定公共入口。
 8. `database-import-state.ts` 统一负责受保护的导入状态转换和基于持久句子的恢复决策；SQLite command/查询和内存表细节不再留在公共入口。
@@ -56,6 +58,7 @@
 16. Store 是 Runtime Settings 的发布门禁：添加模型、删除模型和角色分配先从当前 Store 状态构造候选快照，保存成功后才替换 Zustand 和模块内模型池副本。Settings UI 只消费这些公开动作，不得直接访问数据库进行影子 hydration。
 17. 删除模型的候选快照必须同时清理该模型的能力记录和全部角色引用；`saveRuntimeSettings` 根据同一模型集合删除独立 API Key。该组合由 `AC-LV-15` 管理，不能退回 UI 删除后再分步修补角色。
 18. Store 通过 `AC-LV-16` 的单提交队列排序所有 Runtime Settings 写动作，并用提交版本拒绝 stale hydration。数据库不承担前端动作排队，但队列中的每个候选快照仍必须通过同一个原子 Settings interface 提交。
+19. 旧 `atomicInsertSentences` 只有测试调用者，SQLite 分支在前端模拟事务，无法代表生产 ASR 原子提交。经用户批准的 2026-07-29 Harness Migration 已让锁定 M15 改用 `saveAsrAtomically`，并退役该影子导出及其 SQL 顺序测试；生产 command 与 Rust `asr_persistence` 现在是唯一 ASR SQLite 原子路径。
 
 ## 4. 受控拆分顺序
 

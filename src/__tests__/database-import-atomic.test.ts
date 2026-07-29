@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SqlDatabaseAdapter } from '@/models/database-adapter'
 import {
   assignAsrSentencesToNodes,
-  atomicInsertSentences,
   mergeImportAtomically,
   saveAsrAtomically,
 } from '@/models/database'
@@ -99,32 +98,4 @@ describe('database atomic import SQLite adapter', () => {
     })
   })
 
-  it('commits direct SQLite sentence inserts in one transaction', async () => {
-    const exec = vi.fn()
-    const db = sqliteAdapter({ exec })
-
-    await atomicInsertSentences(db, [{ ...sentence, nodeId: node.id }])
-
-    expect(exec.mock.calls.map(([sql]) => sql)).toEqual([
-      'BEGIN',
-      expect.stringContaining('INSERT INTO sentence'),
-      'COMMIT',
-    ])
-  })
-
-  it('rolls back a direct SQLite sentence transaction after an insert failure', async () => {
-    const exec = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('duplicate sentence'))
-      .mockResolvedValueOnce(undefined)
-    const db = sqliteAdapter({ exec })
-
-    await expect(atomicInsertSentences(db, [{ ...sentence, nodeId: node.id }]))
-      .rejects.toThrow('duplicate sentence')
-    expect(exec.mock.calls.map(([sql]) => sql)).toEqual([
-      'BEGIN',
-      expect.stringContaining('INSERT INTO sentence'),
-      'ROLLBACK',
-    ])
-  })
 })

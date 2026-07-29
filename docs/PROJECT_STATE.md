@@ -14,7 +14,7 @@ Rain is a Tauri + React + TypeScript desktop study app with a Rust backend. The 
 The no-key Runtime Settings desktop behavior Judge and its independent Hosted Windows replay are proven. `AC-HE-05` is Strong for merge commit `9251962`: workflow_dispatch run `30341065896` performed a clean build with the exact WebView2/driver pair and completed schema initialization, model add, first restart persistence, deletion and second restart absence without a Key. The workflow remains manual and outside the default merge gate; future target commits need their own explicit replay when this desktop boundary changes.
 
 Historical product-intent coverage is now mechanically controlled by `AC-HE-06`.
-`docs/development/product-decision-coverage.md` contains exactly `DEC-PRD-001` through `DEC-PRD-099`, each with a current PRD/M source and one disposition: 41 map to existing Confirmed ACs, 54 remain Proposed, and 4 are currently Out-of-scope. These counts expose governance gaps and are not a project-completion percentage; a Proposed row may already have partial code or component Harness, while a Confirmed row inherits only the explicit scope of its referenced AC.
+`docs/development/product-decision-coverage.md` contains exactly `DEC-PRD-001` through `DEC-PRD-099`, each with a current PRD/M source and one disposition: 42 map to existing Confirmed ACs, 53 remain Proposed, and 4 are currently Out-of-scope. These counts expose governance gaps and are not a project-completion percentage; a Proposed row may already have partial code or component Harness, while a Confirmed row inherits only the explicit scope of its referenced AC.
 
 The verified real input video is:
 
@@ -135,7 +135,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 17. Whole-repository `cargo fmt --check` is not currently a usable clean gate: it reports pre-existing formatting differences in `src-tauri/src/whisper.rs`, `src-tauri/src/ytdlp.rs` and locked files under `src-tauri/tests/`. Do not format or modify the locked Rust Harness without an approved Harness Migration. New Rust changes must still pass file-scoped `rustfmt --check` until this debt is separately authorized and resolved.
 18. `AC-HE-05` is Strong on merge commit `9251962` via workflow_dispatch run `30341065896`. Its manual Hosted result is target-commit evidence, not a permanent guarantee for later desktop-environment changes; do not add automatic PR/push triggers or substitute local/default-Harness GREEN when a new replay is required.
 19. `AC-HE-06` prevents the 99 historical product decisions from silently disappearing.
-    The map intentionally leaves 54 decision rows Proposed. Major clusters include advanced tree editing, exact visual/shortcut/list behavior, translation and vision, plus architecture choices whose existing local Harness is not yet expressed as a complete Active AC. Do not infer that every Proposed behavior is absent, or promote it from an implementation file or old PRD alone.
+    The map intentionally leaves 53 decision rows Proposed. Major clusters include advanced tree editing, exact visual/shortcut/list behavior, translation and vision, plus architecture choices whose existing local Harness is not yet expressed as a complete Active AC. Do not infer that every Proposed behavior is absent, or promote it from an implementation file or old PRD alone.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1601,7 +1601,21 @@ Result: control plane passed; Vitest passed 79 files / 463 tests with one explic
 Protected [PR #15](https://github.com/llbz510/rain/pull/15) passed its first-attempt `Clean Windows Harness` [run 30425086468](https://github.com/llbz510/rain/actions/runs/30425086468) and merged as `9ee238c`. The merge commit's independent `master` push [run 30425562385](https://github.com/llbz510/rain/actions/runs/30425562385) also passed on its first attempt. Both runs used clean Hosted Windows checkouts and the repository's single `npm run harness:check` entry; neither used live keys, desktop E2E, real sites, model calls or Evidence mutation. This remote result signs the AC-HE-06 control-plane implementation and 99-row mapping completeness.
 It does not sign implementation of the 54 Proposed decision rows.
 
-Recommended next control boundary: review `DEC-PRD-092`, `DEC-PRD-093`, and `DEC-PRD-099`. Parts of these M20 architecture decisions are already enforced by locked Harness and module boundaries, but their complete acceptance semantics are still Proposed. Converting only the actually judged slices into explicit architecture ACs would remove a shadow-contract gap before choosing the next product feature; it should not silently expand those ACs to untested architecture prose.
+`DEC-PRD-093` has since been refined and confirmed by `AC-AR-01`; the next architecture-control candidates are `DEC-PRD-092` and `DEC-PRD-099`. They must still be reviewed separately because their old M20 prose is broader than the currently judged slices.
+
+## What changed in the 2026-07-29 database architecture boundary
+
+The user confirmed `AC-AR-01` as the first architecture-control boundary and then explicitly approved the required Harness Migration after TDD exposed a locked shadow contract:
+
+- The current contract is hybrid and narrow: production callers use only `@/models/database`; only `database.ts` loads `@tauri-apps/plugin-sql`; ordinary single-record SQL remains inside frontend database modules; multi-record or multi-table atomic invariants use one dedicated Tauri command and one Rust SQLx transaction. This does not authorize a general Rust DAL.
+- `scripts/database-architecture-policy.mjs` and its adjacent test own a reusable negative policy. Independent fixtures prove plugin-import, internal-module and frontend transaction-control violations are rejected; the same policy scans the real production `src/` tree.
+- The real-tree RED found `atomicInsertSentences`, an exported function with no production caller whose SQLite path issued frontend `BEGIN/COMMIT/ROLLBACK`. The locked M15 test called only its memory path, while adjacent tests asserted fake SQL ordering.
+- Approved migration `docs/development/harness-migration-2026-07-29-database-architecture.md` replaces M15-T18 with the production `saveAsrAtomically` interface. It now proves successful sentence/Video-stage commit and duplicate-ID late-failure rollback. The shadow export, implementation and fake frontend transaction assertions are retired; no Tauri command or M20 allowlist changed.
+- `DEC-PRD-093` now maps to `AC-AR-01`, moving current decision counts to 42 Confirmed AC mappings, 53 Proposed and 4 Out-of-scope. `DEC-PRD-092` and `DEC-PRD-099` remain Proposed and outside this boundary.
+
+Focused verification passed before the full gate: policy 6/6; M15 plus frontend import/recovery 19/19; M20/database boundary/policy 17/17; Rust `asr_persistence` 2/2.
+
+Final `npm run harness:check` passed: control plane passed; Vitest passed 80 files / 468 tests with one explicit live-key file/test skipped; both E2E and ordinary builds passed their complementary isolation checks; Rust passed 83 library tests plus every executable Harness group, with the existing real-model Whisper test ignored. The final `dist` is the ordinary production frontend artifact. This local result verifies `AC-AR-01` and the approved M15 migration on the current worktree; it does not sign `DEC-PRD-092`, `DEC-PRD-099`, hosted Clean Windows or a desktop E2E run.
 
 ## Maintenance checklist for every future session
 
