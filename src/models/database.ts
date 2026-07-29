@@ -31,7 +31,6 @@ export {
 } from './database-import-state'
 export {
   assignAsrSentencesToNodes,
-  atomicInsertSentences,
   mergeImportAtomically,
   saveAsrAtomically,
 } from './database-import-atomic'

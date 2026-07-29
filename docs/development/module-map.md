@@ -35,6 +35,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Stage2 | 分块、调用已通过能力检查的 OpenAI-compatible LLM、校验、检查点和确定性合并 | ASR、UI、任意改写原始句子 | `src/pipeline/stage2-*.ts` |
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
+| Database Architecture Policy | 拒绝 SQL plugin 装载点扩散、业务层导入内部数据库 module 和前端事务控制 SQL | 证明业务结果、替代 Rust SQLite 事务测试、决定 schema 迁移 | `scripts/database-architecture-policy.mjs`；裁判 `database-architecture-policy.test.ts` |
 | Runtime Settings | 构造和原子保存模型池、角色选择、能力记录快照 | 发布 UI 状态、直接实现模型请求 | `src/settings/model-pool.ts`；Store 是提交门禁 |
 | Whisper Download Workflow | 建立一次下载会话、过滤生产进度事件、调用下载/取消并复核安装列表、释放 listener | 下载字节、文件完整性、持有后台任务 | `src/settings/whisper-model-download.ts` |
 | Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择；展示 Store 提交结果 | 定义能力裁决、直接实现模型请求、读取数据库或承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
@@ -93,6 +94,8 @@ cancelImport(videoId)
 - `mergeImportAtomically`
 
 新代码不得在页面中拼 SQL 或自行管理事务。`database.ts` 现在只保留稳定公共导出和两种 adapter 的构造；schema、行映射和业务操作均已按职责进入内部 module。调用方仍必须保持现有 `@/models/database` interface，不得绕过入口导入内部实现。
+
+普通单记录 SQL 可以留在数据库内部 module。凡是一个业务结果需要多个记录或多张表共同提交，SQLite 路径必须经一次专用 Tauri command 进入 Rust persistence module；前端不得再发送事务控制 SQL。该全局边界由 `AC-AR-01` 和可复用的负向 policy fixture 裁判，内存 adapter 或 SQL 调用顺序不能替代 Rust 事务结果。
 
 ### Rust command 接口
 

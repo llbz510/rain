@@ -106,7 +106,7 @@
 | DEC-PRD-090 | `M18-long-video.md` | Proposed | 合并失败关闭与恢复受 `AC-LV-05`、`AC-LV-08` 部分控制；跳过合并直接学习没有 Active AC | 合并失败可只重试合并，也可显式跳过合并使用分块树 |
 | DEC-PRD-091 | `M16-layout.md` | Proposed | 当前没有同时裁判字幕与译文两个独立开关的生产 AC | 字幕开关只管视频原文字幕，译文开关只管文本翻译块 |
 | DEC-PRD-092 | `M20-architecture.md` | Proposed | M20 局部 Harness 禁止 LLM Tauri command；尚无 Active AC 把全部 Stage2、合并和助手直连职责作为合同 | 所有 LLM 请求由前端直接连接 OpenAI-compatible 接口 |
-| DEC-PRD-093 | `M20-architecture.md` | Proposed | 数据库边界和多项事务 AC 已存在；前端 SQL plugin 直连这一架构选择本身没有 Active AC | 前端通过数据库边界直接使用 tauri-plugin-sql，不建设 Rust DAL |
+| DEC-PRD-093 | `M20-architecture.md` | Confirmed AC | `AC-AR-01` | 业务经前端公共数据库边界使用 SQL plugin；跨记录原子写由专用 Rust 事务 command 完成，不建设通用 Rust DAL |
 | DEC-PRD-094 | `M20-architecture.md` | Confirmed AC | `AC-LV-03`、`AC-MM-01`、`AC-MM-02`、`AC-MM-04` | 本地 ASR 使用 Rust whisper-rs，并以安装与能力门禁约束模型 |
 | DEC-PRD-095 | `M20-architecture.md` | Confirmed AC | `AC-LV-17` | 在线 URL 通过用户 PATH 中的 yt-dlp 形成受控本地媒体 |
 | DEC-PRD-096 | `M20-architecture.md` | Proposed | 真实视频打开与跳转受 `AC-ST-01`、`AC-ST-02` 控制；convertFileSrc 和全 scope 的架构取舍没有 Active AC | 本地媒体和缩略图通过 convertFileSrc 与 asset protocol 播放 |
@@ -116,8 +116,8 @@
 
 ## 读取结论
 
-- 41 条决策已有覆盖其当前概括行为的 Confirmed AC。
-- 54 条决策保留为 Proposed；其中大量行为可能已有局部实现或组件 Harness，但尚不能形成完整完成声明。
+- 42 条决策已有覆盖其当前概括行为的 Confirmed AC。
+- 53 条决策保留为 Proposed；其中大量行为可能已有局部实现或组件 Harness，但尚不能形成完整完成声明。
 - 4 条决策当前为 Out-of-scope：手动分块、导图区编辑、v1 导出和被后续视觉决定替代的早期卡片草案。
 
 这些数量只用于发现控制面缺口，不是项目完成百分比。下一条开发边界应从 Proposed 中按失控风险、用户价值、Judge 成本和 Owner 清晰度排序，而不是按编号顺序补齐。

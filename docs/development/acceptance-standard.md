@@ -453,14 +453,28 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：`control-plane-validator.test.ts` 用独立 fixture 覆盖完整映射、缺失/重复编号、非法处置、未知或未确认 AC、空边界和失效事实源；`npm run harness:control` 对真实 Rain 覆盖图执行同一实现。
 
-## 6. 当前明确不在已验收范围
+## 6. Architecture Boundary
+
+### AC-AR-01 持久化访问与原子事务必须只有一个生产所有权
+
+状态：`Confirmed`
+
+业务页面、Store、Pipeline 和设置流程必须只通过 `@/models/database` 暴露的业务 interface 访问持久化，不得导入数据库内部 module 或自行拼接数据库流程。只有 `src/models/database.ts` 可以装载 `@tauri-apps/plugin-sql`；普通单记录读写可以由该公开入口背后的前端数据库内部 module 执行参数化 SQL。
+
+凡是一个业务结果需要多个记录或多张表全部成功或全部失败，SQLite 路径必须由一次深 Tauri command 进入专用 Rust persistence module，并在一个连接上的真实事务中完成。前端生产源码不得自行发送 `BEGIN`、`COMMIT`、`ROLLBACK`、`SAVEPOINT` 或 `RELEASE`。Rust 只拥有这些明确的原子事务，不扩展为通用 DAL；`commands.rs` 仍只负责路径、参数和错误适配。内存 adapter 是快速行为裁判，不能单独签发真实 SQLite 原子性。
+
+实现归属：`src/models/database.ts` 是稳定公共入口和唯一 SQL plugin owner；`src/models/database-*.ts` 拥有业务持久化接口与两种 adapter 行为；`src-tauri/src/*_persistence.rs` 拥有跨记录原子事务；`src-tauri/src/commands.rs` 是薄 Tauri adapter。
+
+裁判：`database-architecture-policy.test.ts` 用独立违规源码和真实生产树执行同一 policy，拒绝 SQL plugin 扩散、数据库内部 module 逃逸和前端事务控制；`database-boundary.test.ts`、M20/M15 Harness 继续锁定公共入口、command 集合和生产 ASR interface；数据库公共接口测试与 Rust persistence tests 分别裁判参数/错误传播和真实 SQLite 成功、迟失败回滚。静态边界、内存 adapter 或 SQL 调用序列中的任一项都不能独自证明事务正确。
+
+## 7. 当前明确不在已验收范围
 
 - “解释当前画面”的视觉助手尚未实现完整验收。
-- `product-decision-coverage.md` 中 54 条 `Proposed` 决策尚未形成覆盖其完整当前行为的 Confirmed AC；不能把局部实现或组件 Harness 当作完成。
+- `product-decision-coverage.md` 中 53 条 `Proposed` 决策尚未形成覆盖其完整当前行为的 Confirmed AC；不能把局部实现或组件 Harness 当作完成。
 
 UI 中未完成的能力应隐藏、禁用并明确标记，不能用无响应按钮表示“已实现”。
 
-## 7. 完成定义
+## 8. 完成定义
 
 一个改动只有同时满足以下条件才算完成：
 
