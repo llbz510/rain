@@ -13,6 +13,9 @@ Rain is a Tauri + React + TypeScript desktop study app with a Rust backend. The 
 
 The no-key Runtime Settings desktop behavior Judge and its independent Hosted Windows replay are proven. `AC-HE-05` is Strong for merge commit `9251962`: workflow_dispatch run `30341065896` performed a clean build with the exact WebView2/driver pair and completed schema initialization, model add, first restart persistence, deletion and second restart absence without a Key. The workflow remains manual and outside the default merge gate; future target commits need their own explicit replay when this desktop boundary changes.
 
+Historical product-intent coverage is now mechanically controlled by `AC-HE-06`.
+`docs/development/product-decision-coverage.md` contains exactly `DEC-PRD-001` through `DEC-PRD-099`, each with a current PRD/M source and one disposition: 41 map to existing Confirmed ACs, 54 remain Proposed, and 4 are currently Out-of-scope. These counts expose governance gaps and are not a project-completion percentage; a Proposed row may already have partial code or component Harness, while a Confirmed row inherits only the explicit scope of its referenced AC.
+
 The verified real input video is:
 
 `D:\xiazaiwenjian\bilidown\【华中科技大学】电子技术基础 张林（全138讲）电子信息工程专业必修课\1.2.1 信号及其放大.mp4`
@@ -67,13 +70,14 @@ Read in this order:
 2. `docs/development/control-map.md` — authority by question, document status, and conflict handling.
 3. `docs/PROJECT_STATE.md` — current truth, recent changes, known defects, and file responsibilities.
 4. `docs/development/acceptance-standard.md` — active acceptance criteria.
-5. `docs/development/harness-coverage.md` — AC-to-test/evidence coverage and gaps.
-6. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
-7. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
-8. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
-9. `package.json` — runnable frontend/test/E2E commands.
-10. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-11. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+5. `docs/development/product-decision-coverage.md` — current disposition of historical PRD decisions 001–099; not a completion score.
+6. `docs/development/harness-coverage.md` — AC-to-test/evidence coverage and gaps.
+7. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
+8. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
+9. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
+10. `package.json` — runnable frontend/test/E2E commands.
+11. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+12. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -130,6 +134,8 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
 17. Whole-repository `cargo fmt --check` is not currently a usable clean gate: it reports pre-existing formatting differences in `src-tauri/src/whisper.rs`, `src-tauri/src/ytdlp.rs` and locked files under `src-tauri/tests/`. Do not format or modify the locked Rust Harness without an approved Harness Migration. New Rust changes must still pass file-scoped `rustfmt --check` until this debt is separately authorized and resolved.
 18. `AC-HE-05` is Strong on merge commit `9251962` via workflow_dispatch run `30341065896`. Its manual Hosted result is target-commit evidence, not a permanent guarantee for later desktop-environment changes; do not add automatic PR/push triggers or substitute local/default-Harness GREEN when a new replay is required.
+19. `AC-HE-06` prevents the 99 historical product decisions from silently disappearing.
+    The map intentionally leaves 54 decision rows Proposed. Major clusters include advanced tree editing, exact visual/shortcut/list behavior, translation and vision, plus architecture choices whose existing local Harness is not yet expressed as a complete Active AC. Do not infer that every Proposed behavior is absent, or promote it from an implementation file or old PRD alone.
 ## What changed in the 2026-07-26 project-control baseline session
 
 Added the first active control layer for agent-assisted development:
@@ -1571,6 +1577,28 @@ The user confirmed `AC-LV-17` for a controlled online-URL-to-local-media handoff
 The only locked-file change is the explicitly approved `import_online_video` entry in `harness/m20-boundaries.test.ts`; no `src-tauri/tests/` file changed. `AC-LV-17` is Strong for the controlled no-network handoff. Real-site compatibility, authenticated sources, playlists, subtitle-first behavior, multi-hour/GB downloads and complete external Evidence remain outside this boundary and must not inherit that status.
 
 Protected [PR #13](https://github.com/llbz510/rain/pull/13) passed its first-attempt `Clean Windows Harness` [run 30422804280](https://github.com/llbz510/rain/actions/runs/30422804280) and merged as `7b73072`. The merge commit's independent `master` push [run 30423233996](https://github.com/llbz510/rain/actions/runs/30423233996) also passed on its first attempt. Both clean Hosted Windows runs installed the declared toolchain and executed the repository Harness without live keys, desktop E2E, real sites, model calls or Evidence mutation. This promotes only the controlled AC-LV-17 boundary recorded above; it does not close the listed external-site or long-duration gaps.
+
+## What changed in the 2026-07-29 product-decision coverage slice
+
+The user approved a control-only boundary to stop Rain's 99 historical product decisions from drifting outside the active acceptance system. This slice does not add product behavior and does not treat the PRD's historical “confirmed” labels as implementation evidence.
+
+- Added Confirmed `AC-HE-06`. Owner is `docs/development/product-decision-coverage.md` plus the mechanical rules in `scripts/control-plane-validator.mjs`; Judge is the adjacent validator fixture suite and the real `npm run harness:control` repository command.
+- Added exactly 99 current mappings. Each row cites only root `PRD.md`/`M*.md`, summarizes the current intent, and chooses `Confirmed AC`, `Proposed`, or `Out-of-scope`. Conservative classification leaves a mixed decision Proposed whenever a required slice lacks a Confirmed AC.
+- Extended the validator to reject missing, duplicate or out-of-range decision IDs; invalid dispositions; Confirmed mappings to missing or non-Confirmed ACs; empty Proposed/Out-of-scope boundaries; empty intent; and historical or missing product sources.
+- Updated the control map, acceptance standard, coverage matrix and Control Plane Harness guide. The old statement that all 99 decisions were unmapped was removed.
+- No product source, locked `harness/`, locked `src-tauri/tests/`, Evidence, external workflow, live-key setting or desktop E2E behavior changed.
+
+TDD established RED before implementation: the focused validator suite retained its six prior GREEN cases and failed three new groups because the production validator ignored decision coverage. After implementation, the focused suite passed 9/9 and the real repository control command passed.
+
+Final verification on the complete boundary:
+
+```powershell
+npm.cmd run harness:check
+```
+
+Result: control plane passed; Vitest passed 79 files / 463 tests with one explicit live-key skip; both E2E and ordinary builds passed their complementary isolation checks; Rust passed 106 tests with one real-model Whisper test ignored by its existing contract. The final `dist` is the ordinary production frontend artifact.
+
+Recommended next control boundary: review `DEC-PRD-092`, `DEC-PRD-093`, and `DEC-PRD-099`. Parts of these M20 architecture decisions are already enforced by locked Harness and module boundaries, but their complete acceptance semantics are still Proposed. Converting only the actually judged slices into explicit architecture ACs would remove a shadow-contract gap before choosing the next product feature; it should not silently expand those ACs to untested architecture prose.
 
 ## Maintenance checklist for every future session
 
