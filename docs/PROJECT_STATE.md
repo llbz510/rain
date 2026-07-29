@@ -1551,6 +1551,8 @@ The independent Windows Harness exposed an `AC-MM-02` Judge flake on merge commi
 - A mutation check temporarily suppressed the production `Notify` wakeup and made the revised Judge fail at the deadlock guard; restoring the wakeup returned the focused test and all 11 model-download tests to GREEN. The mutation was not retained.
 - Boundary scope is deterministic adjudication of the existing stalled-network cancellation behavior. Model-download behavior, acceptance text, coverage strength, locked `harness/`, locked `src-tauri/tests/`, live-key workflows and desktop E2E remain unchanged.
 
+Protected PR #11 then passed `Clean Windows Harness` run `30417407871` on its first attempt and merged as `86a0dad`. The merge commit's independent `master` push run `30417816157` also passed on its first attempt, including the same clean Hosted Windows repository Harness where the prior 50 ms Judge had flaked. This closes the observed adjudication instability for `86a0dad`; it does not create a cancellation-latency guarantee or replace future first-attempt CI observation.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
