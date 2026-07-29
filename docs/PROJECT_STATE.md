@@ -1598,6 +1598,9 @@ npm.cmd run harness:check
 
 Result: control plane passed; Vitest passed 79 files / 463 tests with one explicit live-key skip; both E2E and ordinary builds passed their complementary isolation checks; Rust passed 106 tests with one real-model Whisper test ignored by its existing contract. The final `dist` is the ordinary production frontend artifact.
 
+Protected [PR #15](https://github.com/llbz510/rain/pull/15) passed its first-attempt `Clean Windows Harness` [run 30425086468](https://github.com/llbz510/rain/actions/runs/30425086468) and merged as `9ee238c`. The merge commit's independent `master` push [run 30425562385](https://github.com/llbz510/rain/actions/runs/30425562385) also passed on its first attempt. Both runs used clean Hosted Windows checkouts and the repository's single `npm run harness:check` entry; neither used live keys, desktop E2E, real sites, model calls or Evidence mutation. This remote result signs the AC-HE-06 control-plane implementation and 99-row mapping completeness.
+It does not sign implementation of the 54 Proposed decision rows.
+
 Recommended next control boundary: review `DEC-PRD-092`, `DEC-PRD-093`, and `DEC-PRD-099`. Parts of these M20 architecture decisions are already enforced by locked Harness and module boundaries, but their complete acceptance semantics are still Proposed. Converting only the actually judged slices into explicit architecture ACs would remove a shadow-contract gap before choosing the next product feature; it should not silently expand those ACs to untested architecture prose.
 
 ## Maintenance checklist for every future session
