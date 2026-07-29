@@ -1,7 +1,7 @@
 # Rain 项目控制地图
 
 > 状态：Active
-> 更新日期：2026-07-28
+> 更新日期：2026-07-29
 > 作用：告诉人和 AI 在不同问题上应该相信哪份资料，以及资料冲突时如何处理。
 
 ## 1. 事实源不是一个文件
@@ -14,10 +14,11 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 项目中的核心词语是什么意思 | `CONTEXT.md` | 统一领域语言；不能单独证明实现已完成 |
 | 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 当前状态、最近验证和已知风险 |
 | 用户希望产品做什么 | 根目录 `PRD.md` 和对应 `M*.md` | 已确认产品意图；不自动代表代码已经实现 |
+| 99 条历史产品决策当前由什么控制 | `docs/development/product-decision-coverage.md` | 每条决策映射到 Confirmed AC、Proposed 或当前范围外；不是完成百分比 |
 | 本地视频主链路当前按什么设计 | `docs/superpowers/specs/2026-07-17-rain-real-local-video-repair-design.md` | 已实施修复的设计依据；与更晚的事实冲突时需要重新确认 |
 | 什么结果才算完成 | `docs/development/acceptance-standard.md` | 当前生效的验收条件 |
 | 每条验收条件由什么证明 | `docs/development/harness-coverage.md` | AC、测试、真实证据和缺口的映射 |
-| 控制文档是否自洽 | `npm run harness:control` | Confirmed AC、Owner、Judge、覆盖行、裁判文件和当前事实冲突的机械裁判 |
+| 控制文档是否自洽 | `npm run harness:control` | Confirmed AC、Owner、Judge、覆盖行、99 条产品决策去向、裁判文件和当前事实冲突的机械裁判 |
 | Runtime Settings 是否真实跨桌面重启持久化 | `npm run e2e:runtime-settings` | 真实 Tauri、生产设置 UI、SQL plugin 和隔离 SQLite 的短 Judge；不证明模型能力或完整视频流程 |
 | 真实 SQLite 是否具备当前必需表/列 | `npm run e2e:runtime-settings` | 应用经公共数据库 metadata interface 报告实际形状，脚本按独立字面合同裁判；不证明 schema 升级兼容或其他业务 CRUD |
 | 普通生产构建是否排除了 E2E 自动化 | `npm run build` | 构建完成后扫描真实 `dist`，拒绝自动化标记 |
@@ -71,6 +72,8 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 7. 相关代码、测试和最近真实证据
 
 不需要每次通读 99 条历史决策。先通过控制地图找到本次任务真正相关的资料。
+
+`product-decision-coverage.md` 使用 `DEC-PRD-001` 至 `DEC-PRD-099` 表示 PRD 历史编号；本文件第 6 节的 `DEC-001` 等编号表示控制面建立后由用户确认的新决定。两套编号不可互相替代。
 
 ## 5. 受控变更流程
 

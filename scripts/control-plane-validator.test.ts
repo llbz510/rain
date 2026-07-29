@@ -10,6 +10,10 @@ const acceptance = `
 实现归属：Runtime Settings Store。
 
 裁判：\`good.test.ts\`。
+
+### AC-TEST-02 尚未确认的行为
+
+状态：\`Proposed\`
 `
 
 const coverage = `
@@ -18,12 +22,26 @@ const coverage = `
 | AC-TEST-01 | \`good.test.ts\` | Strong | 公开行为通过 |
 `
 
+function decisionRows(overrides: Record<number, string> = {}) {
+  return Array.from({ length: 99 }, (_, index) => {
+    const number = index + 1
+    return overrides[number] ?? `| DEC-PRD-${String(number).padStart(3, '0')} | \`M01-positioning.md\` | Confirmed AC | \`AC-TEST-01\` | intent ${number} |`
+  }).join('\n')
+}
+
+const decisionCoverage = `
+| Decision | Current source | Disposition | Current control | Intent |
+| --- | --- | --- | --- | --- |
+${decisionRows()}
+`
+
 function validate(overrides = {}) {
   return validateControlPlaneDocuments({
     acceptance,
     coverage,
+    decisionCoverage,
     projectState: '# State\n\n## Known defects\n\nNone.\n\n## What changed\n',
-    availableFiles: ['good.test.ts'],
+    availableFiles: ['good.test.ts', 'M01-positioning.md'],
     ...overrides,
   })
 }
@@ -68,5 +86,59 @@ describe('control-plane validator', () => {
 
     expect(validate({ acceptance: conflictingAcceptance }))
       .toContain('AC-TEST-01 has conflicting acceptance statuses: Confirmed, Proposed.')
+  })
+
+  it('rejects a missing or duplicate historical product decision', () => {
+    const missing = decisionCoverage.replace(/^\| DEC-PRD-099 .*\r?\n?/m, '')
+    const duplicate = `${decisionCoverage}\n${decisionRows({ 1: '| DEC-PRD-001 | `M01-positioning.md` | Proposed | not accepted | duplicate |' }).split('\n')[0]}`
+
+    expect(validate({ decisionCoverage: missing }))
+      .toContain('Product decision coverage is missing DEC-PRD-099.')
+    expect(validate({ decisionCoverage: duplicate }))
+      .toContain('DEC-PRD-001 is mapped 2 times (expected exactly 1).')
+  })
+
+  it('rejects invalid dispositions and incomplete current controls', () => {
+    const invalidDisposition = decisionCoverage.replace(
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+      '| DEC-PRD-001 | `M01-positioning.md` | Implemented | `AC-TEST-01` | intent 1 |',
+    )
+    const unknownAc = decisionCoverage.replace(
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-99` | intent 1 |',
+    )
+    const proposedAc = decisionCoverage.replace(
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-02` | intent 1 |',
+    )
+    const emptyBoundary = decisionCoverage.replace(
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+      '| DEC-PRD-001 | `M01-positioning.md` | Proposed | — | intent 1 |',
+    )
+
+    expect(validate({ decisionCoverage: invalidDisposition }))
+      .toContain('DEC-PRD-001 has invalid disposition: Implemented.')
+    expect(validate({ decisionCoverage: unknownAc }))
+      .toContain('DEC-PRD-001 references AC-TEST-99, which is not a Confirmed acceptance criterion.')
+    expect(validate({ decisionCoverage: proposedAc }))
+      .toContain('DEC-PRD-001 references AC-TEST-02, which is not a Confirmed acceptance criterion.')
+    expect(validate({ decisionCoverage: emptyBoundary }))
+      .toContain('DEC-PRD-001 is Proposed but has no current boundary.')
+  })
+
+  it('rejects historical or missing product fact sources', () => {
+    const historical = decisionCoverage.replace(
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+      '| DEC-PRD-001 | `HANDOFF.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+    )
+    const missingSource = decisionCoverage.replace(
+      '| DEC-PRD-001 | `M01-positioning.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+      '| DEC-PRD-001 | `M99-missing.md` | Confirmed AC | `AC-TEST-01` | intent 1 |',
+    )
+
+    expect(validate({ decisionCoverage: historical }))
+      .toContain('DEC-PRD-001 references non-current product source: HANDOFF.md.')
+    expect(validate({ decisionCoverage: missingSource }))
+      .toContain('DEC-PRD-001 references missing product source: M99-missing.md.')
   })
 })

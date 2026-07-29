@@ -31,6 +31,20 @@ function parseCoverageRows(source) {
   })
 }
 
+function parseDecisionCoverageRows(source) {
+  return source.split(/\r?\n/).flatMap((line) => {
+    if (!/^\|\s*DEC-PRD-\d{3}\s*\|/.test(line)) return []
+    const columns = line.split('|').slice(1, -1).map((column) => column.trim())
+    return [{
+      id: columns[0],
+      sources: columns[1] ?? '',
+      disposition: columns[2] ?? '',
+      control: columns[3] ?? '',
+      intent: columns[4] ?? '',
+    }]
+  })
+}
+
 function referencedJudgeFiles(judges) {
   return [...judges.matchAll(/`([^`]+\.(?:test\.(?:ts|tsx)|ps1|rs))`/g)]
     .map((match) => match[1].replaceAll('\\', '/'))
@@ -46,12 +60,14 @@ function hasFile(reference, availableFiles) {
 export function validateControlPlaneDocuments({
   acceptance,
   coverage,
+  decisionCoverage = '',
   projectState,
   availableFiles,
 }) {
   const errors = []
   const criteria = parseAcceptanceCriteria(acceptance)
   const coverageRows = parseCoverageRows(coverage)
+  const decisionRows = parseDecisionCoverageRows(decisionCoverage)
   const files = new Set(availableFiles.map((path) => path.replaceAll('\\', '/')))
   const criteriaById = new Map(criteria.map((criterion) => [criterion.id, criterion]))
   const confirmed = criteria.filter((criterion) => criterion.status === 'Confirmed')
@@ -93,6 +109,59 @@ export function validateControlPlaneDocuments({
     }
   }
 
+  const decisionGroups = new Map()
+  for (const row of decisionRows) {
+    decisionGroups.set(row.id, [...(decisionGroups.get(row.id) ?? []), row])
+  }
+  for (let number = 1; number <= 99; number += 1) {
+    const id = `DEC-PRD-${String(number).padStart(3, '0')}`
+    const rows = decisionGroups.get(id) ?? []
+    if (rows.length === 0) {
+      errors.push(`Product decision coverage is missing ${id}.`)
+    } else if (rows.length !== 1) {
+      errors.push(`${id} is mapped ${rows.length} times (expected exactly 1).`)
+    }
+  }
+
+  const validDispositions = new Set(['Confirmed AC', 'Proposed', 'Out-of-scope'])
+  const emptyBoundary = (value) => !value.replace(/[—–\-`.。\s]/g, '')
+  for (const row of decisionRows) {
+    if (!/^DEC-PRD-(?:0(?:0[1-9]|[1-9]\d)|099)$/.test(row.id)) {
+      errors.push(`Product decision coverage contains unexpected id: ${row.id}.`)
+    }
+    if (!validDispositions.has(row.disposition)) {
+      errors.push(`${row.id} has invalid disposition: ${row.disposition || '(empty)'}.`)
+    } else if (row.disposition === 'Confirmed AC') {
+      const references = [...new Set(row.control.match(/\bAC-[A-Z]+-\d+\b/g) ?? [])]
+      if (references.length === 0) {
+        errors.push(`${row.id} is Confirmed AC but references no acceptance criterion.`)
+      }
+      for (const reference of references) {
+        if (criteriaById.get(reference)?.status !== 'Confirmed') {
+          errors.push(`${row.id} references ${reference}, which is not a Confirmed acceptance criterion.`)
+        }
+      }
+    } else if (emptyBoundary(row.control)) {
+      errors.push(`${row.id} is ${row.disposition} but has no current boundary.`)
+    }
+
+    if (emptyBoundary(row.intent)) {
+      errors.push(`${row.id} has no product intent summary.`)
+    }
+
+    const sourceReferences = [...row.sources.matchAll(/`([^`]+\.md)`/g)].map((match) => match[1])
+    if (sourceReferences.length === 0) {
+      errors.push(`${row.id} references no current product source.`)
+    }
+    for (const reference of sourceReferences) {
+      if (reference !== 'PRD.md' && !/^M\d{2}-[^/\\]+\.md$/.test(reference)) {
+        errors.push(`${row.id} references non-current product source: ${reference}.`)
+      } else if (!files.has(reference)) {
+        errors.push(`${row.id} references missing product source: ${reference}.`)
+      }
+    }
+  }
+
   const currentFacts = projectState.split(/^## What changed\b/m)[0]
   for (const criterion of confirmed) {
     const contradictoryLine = currentFacts.split(/\r?\n/).find((line) => (
@@ -125,6 +194,7 @@ export function validateControlPlane(root) {
   const paths = {
     acceptance: join(root, 'docs', 'development', 'acceptance-standard.md'),
     coverage: join(root, 'docs', 'development', 'harness-coverage.md'),
+    decisionCoverage: join(root, 'docs', 'development', 'product-decision-coverage.md'),
     projectState: join(root, 'docs', 'PROJECT_STATE.md'),
   }
   const missingDocuments = Object.entries(paths)
@@ -135,6 +205,7 @@ export function validateControlPlane(root) {
   return validateControlPlaneDocuments({
     acceptance: readFileSync(paths.acceptance, 'utf8'),
     coverage: readFileSync(paths.coverage, 'utf8'),
+    decisionCoverage: readFileSync(paths.decisionCoverage, 'utf8'),
     projectState: readFileSync(paths.projectState, 'utf8'),
     availableFiles: repositoryFiles(root),
   })

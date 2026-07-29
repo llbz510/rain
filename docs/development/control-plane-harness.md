@@ -1,7 +1,7 @@
 # Rain Control Plane Harness
 
 > 状态：Active
-> 更新日期：2026-07-28
+> 更新日期：2026-07-29
 > 作用：让仓库机械检查自己的事实源和裁判映射，避免 AI 依赖已经过时但看起来可信的文档。
 
 ## 快速入口
@@ -30,9 +30,12 @@ GitHub Actions workflow `Runtime Settings Desktop E2E` 是 `AC-HE-05` 的手动 
 4. coverage 不得引用验收标准中不存在的 AC。
 5. 同一 AC 不得在验收标准中重复定义或同时具有不同状态。
 6. `PROJECT_STATE.md` 的当前事实区不得把已经 Confirmed 的 AC 重新称为 Proposed；按日期记录的历史区允许保留当时状态。
+7. `product-decision-coverage.md` 必须恰好包含 `DEC-PRD-001` 至 `DEC-PRD-099`，不得缺失、重复或引入范围外编号。
+8. 每条产品决策必须具有当前 PRD/M 事实源、非空意图，以及 `Confirmed AC`、`Proposed`、`Out-of-scope` 三种处置之一。
+9. `Confirmed AC` 行只能引用现存且为 Confirmed 的 AC；另外两种处置必须写明当前边界。历史 `HANDOFF.md`、旧计划和 Evidence 不能充当产品事实源。
 
 ## 责任边界
 
-validator 只裁判“事实与裁判映射是否自洽”，不裁判产品行为是否正确。产品行为仍由 coverage 指向的公开接口测试、Rust 事务测试、真实桌面 Evidence 和必要的人工产品判断负责。
+validator 只裁判“事实与裁判映射是否自洽”，不裁判产品行为是否正确。产品行为仍由 coverage 指向的公开接口测试、Rust 事务测试、真实桌面 Evidence 和必要的人工产品判断负责。决策覆盖数量也不是项目完成百分比；`Proposed` 行可能已有局部代码，而 `Confirmed AC` 行也只能继承所列 AC 的明确范围。
 
 规则实现与 fixture 测试分开：`control-plane-validator.mjs` 是 Node 可执行入口，`control-plane-validator.test.ts` 用独立小文档证明每类错误能被抓住。新增规则必须先有失败 fixture，不能只为当前仓库写恒真检查。

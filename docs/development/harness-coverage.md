@@ -71,6 +71,7 @@
 | AC-HE-03 | `run-runtime-settings-e2e.ps1` | Strong（真实失败 + 真实成功） | `MaxSeconds=0` 的真实 Tauri 启动先证明失败退出仍保留 summary/driver logs、阶段和主错误，注入的探针 Key 不在任何文件中；随后完整无 Key 桌面闭环证明成功会清理单份 latest-failure。诊断捕获不替代产品 AC 或完整 Evidence |
 | AC-HE-04 | `.github/workflows/harness.yml`、`package.json`、GitHub workflow `Harness` / check `Clean Windows Harness` | Strong（真实 hosted runner） | PR run `30327093540` 在干净 `windows-2025` checkout 以只读权限完成 `npm ci` 和唯一 `harness:check`：445 个前端测试、E2E/生产双构建和 96 个 Rust 测试通过；一项 live-key 测试跳过、一项真实 Whisper 模型测试 ignored，均符合既有显式合同 |
 | AC-HE-05 | `.github/workflows/runtime-settings-desktop-e2e.yml`、`src-tauri/src/e2e_config.rs`、`src-tauri/src/lib.rs`、`package.json`、`run-runtime-settings-e2e.ps1`、GitHub workflow `Runtime Settings Desktop E2E` | Strong（真实 target-commit Hosted Windows run） | workflow_dispatch run `30341065896` 在 merge commit `9251962` 的干净 checkout 中核对 WebView2 Runtime/driver 150.0.4078.65，执行未带 `-SkipBuild` 的唯一公开命令，并完成真实 schema、添加、第一次重启保留、删除、第二次重启消失；failure artifact 为 0，未使用 Rain secrets、模型调用、Whisper 下载、视频导入或 Evidence。该结论只签发此目标提交，workflow 仍为人工且非必需门禁 |
+| AC-HE-06 | `control-plane-validator.test.ts`、`control-plane-validator.mjs`、`product-decision-coverage.md` | Strong（纯规则 fixture + 真实 99 项映射） | fixture 锁定 001–099 完整唯一、三种处置、Confirmed AC 引用、非空边界和当前 PRD/M 事实源；`harness:control` 对真实覆盖图执行同一规则。该结论只证明意图有当前去向，不证明 Proposed 或 Out-of-scope 功能已实现 |
 
 ## 6. 架构 Harness 审计
 
@@ -96,7 +97,7 @@
 | 视觉令牌 | `harness/m13-visual.test.ts` | Strong | 读取并装载应用实际使用的 `src/index.css`，通过 CSSOM 检查变量；不再维护 TS 复制品 |
 | 学习页视频语言 | M07 Harness、`study-playback.test.tsx` | Strong | `loadVideo` 将数据库语言写入生产 store，英文译文显示不依赖测试 Context |
 | 测试状态注入 | `harness/support/test-store-provider.tsx` | Test support | 只供测试使用；生产源码禁止导入 `harness/support` |
-| Control Plane 一致性 | `control-plane-validator.test.ts`、`control-plane-validator.mjs` | Strong（纯规则 + 真实仓库） | fixture 证明缺覆盖、缺 Owner/Judge、裁判文件不存在、验收状态冲突和当前事实降级都会失败；`npm run harness:control` 对真实仓库执行同一 validator |
+| Control Plane 一致性 | `control-plane-validator.test.ts`、`control-plane-validator.mjs`、`product-decision-coverage.md` | Strong（纯规则 + 真实仓库） | fixture 证明缺覆盖、缺 Owner/Judge、裁判文件不存在、验收状态冲突、当前事实降级，以及历史产品决策缺失/重复、非法处置、无效 AC 与事实源都会失败；`npm run harness:control` 对真实仓库执行同一 validator |
 
 2026-07-26 经用户批准完成两轮 Harness Migration。旧的影子注册表、假导入队列、未接入树编辑、视觉令牌复制品、旧 ASR 标准化和恒真 Rust 测试已被真实接口行为测试替代或明确退役；详见 `harness-migration-2026-07-26.md`。
 

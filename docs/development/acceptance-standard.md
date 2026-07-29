@@ -441,10 +441,22 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：目标提交上的 GitHub Actions `Runtime Settings Desktop E2E` workflow_dispatch 真实 run 必须执行未带 `-SkipBuild` 的 `npm run e2e:runtime-settings` 并成功；YAML 存在、静态解析、本机运行或默认 `Harness` workflow 通过都不能单独签发本 AC。
 
+### AC-HE-06 历史产品决策必须有完整且可机械检查的当前去向
+
+状态：`Confirmed`
+
+产品决策覆盖图必须把 `DEC-PRD-001` 至 `DEC-PRD-099` 各记录且只记录一次，并为每条决策提供当前 PRD/M 事实源、简明意图和唯一处置：`Confirmed AC`、`Proposed` 或 `Out-of-scope`。`Confirmed AC` 必须引用验收标准中现存且状态为 Confirmed 的 AC；`Proposed` 与 `Out-of-scope` 必须写明当前边界，不能用空值掩盖尚未验收或明确不做的意图。事实源只能指向仓库中现存的 `PRD.md` 或根级 `M*.md`，不得把 `HANDOFF.md`、历史计划或旧 Evidence 当作当前产品事实。
+
+覆盖图只回答历史意图当前由什么控制，不把 PRD 的“已确认”措辞自动升级为实现完成，也不要求每条决策拥有独立 AC。修改产品行为仍必须遵守对应 AC 的 Owner/Judge 和 Harness Migration 规则。
+
+实现归属：`docs/development/product-decision-coverage.md` 拥有 99 条当前映射；`scripts/control-plane-validator.mjs` 负责完整性、唯一性、处置、AC 引用和事实源规则。
+
+裁判：`control-plane-validator.test.ts` 用独立 fixture 覆盖完整映射、缺失/重复编号、非法处置、未知或未确认 AC、空边界和失效事实源；`npm run harness:control` 对真实 Rain 覆盖图执行同一实现。
+
 ## 6. 当前明确不在已验收范围
 
 - “解释当前画面”的视觉助手尚未实现完整验收。
-- 全部 99 条历史产品决策尚未逐条映射到 AC。
+- `product-decision-coverage.md` 中 54 条 `Proposed` 决策尚未形成覆盖其完整当前行为的 Confirmed AC；不能把局部实现或组件 Harness 当作完成。
 
 UI 中未完成的能力应隐藏、禁用并明确标记，不能用无响应按钮表示“已实现”。
 
