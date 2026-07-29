@@ -1,8 +1,8 @@
 # Rain 验收标准
 
 > 状态：Active
-> 更新日期：2026-07-28
-> 当前范围：本地视频导入主链路。其他产品模块会在后续受控梳理中逐步加入。
+> 更新日期：2026-07-29
+> 当前范围：本地视频导入主链路、在线 URL 到受控本地媒体的导入交接。其他产品模块会在后续受控梳理中逐步加入。
 
 ## 1. AC 怎么使用
 
@@ -235,6 +235,16 @@ Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝
 
 裁判：`runtime-settings-store.test.ts` 分别证明未就绪时不持久化、并发动作串行且第二个快照包含第一个提交、晚返回的旧加载结果不能覆盖成功动作；既有 Store/UI/SQLite 裁判继续证明失败保留和单快照原子性；`scripts/run-runtime-settings-e2e.ps1` 等待生产设置页公开的 hydration 状态后才写入，并通过两次真实进程重启补强启动顺序。
 
+### AC-LV-17 在线 URL 必须先形成受控本地媒体再进入现有 Pipeline
+
+状态：`Confirmed`
+
+用户提交一个绝对 HTTP(S) 视频 URL 后，Rain 必须通过桌面 `yt-dlp` 边界创建唯一、可追踪的 URL Video 记录，并在下载完成前保持 `processing/download`，不得把远程 URL 或未完成文件直接交给 ASR。下载进度必须通过现有任务进度协议可观察；取消必须终止对应子进程、清理本次临时输出并把同一记录持久化为 `cancelled/download`；探测、启动、下载、文件提交或交接失败必须失败关闭为 `failed/download`，保留不含秘密的可操作错误。成功下载必须先把应用数据目录中的最终本地 `filePath` 原子附着到同一记录，再转为 `pending` 并复用现有 `VideoImportController` / Pipeline；失败或取消后的重试复用同一记录，不得制造第二条 Video。播放列表、字幕优先、站点特定兼容承诺和完整外网 Evidence 不属于本 AC。
+
+实现归属：`src/pipeline/video-import-controller.ts` 负责 URL 记录、下载状态、重试和现有 Pipeline 交接；`src/models/database-videos.ts` 负责下载元数据与最终本地文件附着的持久化门禁；Rust `ytdlp` module 负责 URL 校验、受调度的元数据探测、唯一临时目录、子进程进度/取消/清理和最终目录提交；`VideoListPage` 只负责桌面输入与错误展示。
+
+裁判：`src/__tests__/video-import-url.test.ts` 通过 `VideoImportController` 公开 interface、真实内存数据库和 Tauri 外部 adapter 证明下载前记录、成功本地交接、进度、URL 秘密值脱敏、显式取消与调度器取消分类、初次发布及附着前后重试均无 Owner 空档、各交接失败关闭、清理失败不得伪装成取消成功，以及重试复用同一记录；数据库 Judge 路径把受门禁的 `filePath` 附着与 `pending` 发布分开，确保失败仍从 `processing/download` 进入终态而不绕过严格状态机；Rust `ytdlp` 邻接测试通过生产深 seam、受控真实子进程和隔离临时目录证明调度器完成、参数、进度、取消唤醒、Windows 进程树终止、临时输出清理失败可见与成功提交。测试不得访问真实视频站点或调用模型。
+
 ## 3. Whisper 模型下载
 
 本节来自 2026-07-27 对当前设置页、Rust command 和历史模型管理规格的核对，并于同日经用户确认。三条 AC 均为当前生效的 `Confirmed` 产品事实。
@@ -433,7 +443,6 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 ## 6. 当前明确不在已验收范围
 
-- 在线 URL 下载和完整处理链路尚未通过真实验收。
 - “解释当前画面”的视觉助手尚未实现完整验收。
 - 全部 99 条历史产品决策尚未逐条映射到 AC。
 

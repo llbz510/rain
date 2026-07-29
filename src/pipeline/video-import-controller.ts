@@ -1,7 +1,10 @@
 import {
+  attachDownloadedMedia,
   getVideoById,
   insertVideo,
+  publishDownloadedMedia,
   transitionVideoImportState,
+  updateUrlVideoMetadata,
   type Database,
 } from '@/models/database'
 import type { Video } from '@/models/types'
@@ -20,7 +23,7 @@ import { isTauri, tauriInvoke } from '@/lib/tauri-env'
 import { runPipeline } from '@/pipeline/pipeline-orchestrator'
 
 export interface ImportProgress {
-  stage: 'asr' | 'stage2' | 'merging'
+  stage: 'download' | 'asr' | 'stage2' | 'merging'
   percent: number
 }
 
@@ -38,6 +41,7 @@ export interface ImportRuntimeSettings {
 
 export interface VideoImportController {
   importLocal: (filePath: string) => Promise<Video>
+  importUrl: (sourceUrl: string) => Promise<Video>
   start: (videoId: string) => void
   cancel: (videoId: string) => void
   acceptProgress: (payload: ProgressPayload) => void
@@ -48,12 +52,21 @@ interface VideoImportControllerOptions {
   loadRuntimeSettings: () => Promise<ImportRuntimeSettings>
   onChanged: () => void | Promise<void>
   onProgress: (videoId: string, progress: ImportProgress | null) => void
-  onError?: (context: 'local-import' | 'pipeline', error: unknown) => void
+  onError?: (context: 'local-import' | 'url-import' | 'pipeline', error: unknown) => void
   onWarning?: (message: string, error: unknown) => void
   now?: () => number
+  createVideoId?: () => string
+}
+
+function createUniqueVideoId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.()
+  return randomId
+    ? `v_${randomId}`
+    : `v_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
 function normalizeProgressStage(stage: string): ImportProgress['stage'] {
+  if (stage === 'download') return 'download'
   if (stage === 'asr' || stage === 'stage2' || stage === 'merging') return stage
   if (stage.startsWith('asr')) return 'asr'
   if (stage.startsWith('merge')) return 'merging'
@@ -62,6 +75,28 @@ function normalizeProgressStage(stage: string): ImportProgress['stage'] {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
+}
+
+function throwIfDownloadCancelled(controller: AbortController): void {
+  if (!controller.signal.aborted) return
+  const error = new Error('Online video download cancelled')
+  error.name = 'AbortError'
+  throw error
+}
+
+function sourceUrlSecrets(sourceUrl: string): string[] {
+  const secrets = new Set<string>([sourceUrl])
+  try {
+    const parsed = new URL(sourceUrl)
+    if (parsed.username) secrets.add(decodeURIComponent(parsed.username))
+    if (parsed.password) secrets.add(decodeURIComponent(parsed.password))
+    for (const value of parsed.searchParams.values()) {
+      if (value) secrets.add(value)
+    }
+  } catch {
+    // URL validation reports the primary error.
+  }
+  return [...secrets]
 }
 
 function assertRoleCapability(
@@ -91,11 +126,16 @@ export function createVideoImportController(
 ): VideoImportController {
   const active = new Map<string, AbortController>()
   const now = options.now ?? Date.now
+  const createVideoId = options.createVideoId ?? createUniqueVideoId
 
-  const processVideo = async (videoId: string): Promise<void> => {
-    if (active.has(videoId)) return
+  const processVideo = async (
+    videoId: string,
+    claimedController?: AbortController,
+  ): Promise<void> => {
+    const currentController = active.get(videoId)
+    if (currentController && currentController !== claimedController) return
 
-    const controller = new AbortController()
+    const controller = claimedController ?? new AbortController()
     active.set(videoId, controller)
     let attemptedVideo: Video | null = null
 
@@ -103,6 +143,20 @@ export function createVideoImportController(
       const video = await getVideoById(options.db, videoId)
       if (!video) return
       attemptedVideo = video
+
+      if (controller.signal.aborted) {
+        const error = new Error('Import cancelled')
+        error.name = 'AbortError'
+        if (video.status === 'pending' && !video.stage) {
+          await transitionVideoImportState(
+            options.db,
+            video.id,
+            { status: 'pending', stage: null },
+            { status: 'processing', stage: 'asr' },
+          )
+        }
+        throw error
+      }
 
       const settings = await options.loadRuntimeSettings()
       if (!settings.ready) {
@@ -143,6 +197,7 @@ export function createVideoImportController(
       )
     } catch (cause) {
       const error = asError(cause)
+      const cancelled = controller.signal.aborted || error.name === 'AbortError'
       if (attemptedVideo) {
         try {
           const persisted = await getVideoById(options.db, attemptedVideo.id)
@@ -157,7 +212,7 @@ export function createVideoImportController(
               persisted.id,
               { status: persisted.status, stage: persisted.stage ?? null },
               {
-                status: 'failed',
+                status: cancelled ? 'cancelled' : 'failed',
                 stage: persisted.stage ?? 'asr',
                 errorMessage: error.message,
               },
@@ -169,10 +224,156 @@ export function createVideoImportController(
       }
       options.onError?.('pipeline', error)
     } finally {
-      active.delete(videoId)
+      if (active.get(videoId) === controller) active.delete(videoId)
       options.onProgress(videoId, null)
       await options.onChanged()
     }
+  }
+
+  const closeTrackedDownload = async (
+    video: Video,
+    downloadController: AbortController,
+    cause: unknown,
+  ): Promise<Error> => {
+    const sourceUrl = video.sourceUrl
+    if (!sourceUrl) throw new Error(`URL video "${video.id}" has no source URL`)
+    const causeError = asError(cause)
+    const cleanupFailed = causeError.message.startsWith('Download cleanup error:')
+    const cancelled = !cleanupFailed && (
+      downloadController.signal.aborted
+      || causeError.message === 'Online video download cancelled'
+    )
+    const error = new Error(cancelled
+      ? 'Online video download cancelled'
+      : redactSecret(causeError.message, sourceUrlSecrets(sourceUrl)))
+    if (cancelled) error.name = 'AbortError'
+    try {
+      const persisted = await getVideoById(options.db, video.id)
+      if (persisted?.status === 'processing' && persisted.stage === 'download') {
+        await transitionVideoImportState(
+          options.db,
+          video.id,
+          { status: 'processing', stage: 'download' },
+          {
+            status: cancelled ? 'cancelled' : 'failed',
+            stage: 'download',
+            errorMessage: error.message,
+          },
+        )
+        await options.onChanged()
+      }
+    } catch {
+      // Keep the download error as the primary failure.
+    }
+    if (!cancelled) options.onError?.('url-import', error)
+    return error
+  }
+
+  const handoffTrackedVideo = async (
+    video: Video,
+    downloadController: AbortController,
+    prepare: () => Promise<void>,
+  ): Promise<Video> => {
+    if (!video.filePath) throw new Error(`URL video "${video.id}" has no attached media`)
+
+    active.set(video.id, downloadController)
+    let pipelineOwnsController = false
+    try {
+      await prepare()
+      throwIfDownloadCancelled(downloadController)
+      const published = await publishDownloadedMedia(options.db, video.id, video.filePath)
+      pipelineOwnsController = true
+      void processVideo(video.id, downloadController)
+      return published
+    } catch (cause) {
+      throw await closeTrackedDownload(video, downloadController, cause)
+    } finally {
+      if (!pipelineOwnsController && active.get(video.id) === downloadController) {
+        active.delete(video.id)
+      }
+    }
+  }
+
+  const downloadTrackedVideo = async (
+    video: Video,
+    downloadController: AbortController,
+    prepare: () => Promise<void>,
+  ): Promise<Video> => {
+    const sourceUrl = video.sourceUrl
+    if (!sourceUrl) throw new Error(`URL video "${video.id}" has no source URL`)
+
+    active.set(video.id, downloadController)
+    let pipelineOwnsController = false
+    try {
+      await prepare()
+      throwIfDownloadCancelled(downloadController)
+      const result = await tauriInvoke<{
+        title: string
+        duration: number
+        thumbnail: string
+        filePath: string
+      }>(
+        'import_online_video',
+        { videoId: video.id, sourceUrl },
+      )
+      throwIfDownloadCancelled(downloadController)
+      await updateUrlVideoMetadata(options.db, video.id, {
+        title: result.title,
+        duration: result.duration,
+        thumbnail: result.thumbnail,
+      })
+      throwIfDownloadCancelled(downloadController)
+      await attachDownloadedMedia(options.db, video.id, result.filePath)
+      throwIfDownloadCancelled(downloadController)
+      await options.onChanged()
+      throwIfDownloadCancelled(downloadController)
+      const published = await publishDownloadedMedia(options.db, video.id, result.filePath)
+
+      // The same AbortController owns the task while the DB atomically publishes
+      // pending and while Pipeline starts, leaving no ownerless cancellation gap.
+      pipelineOwnsController = true
+      void processVideo(video.id, downloadController)
+      return published
+    } catch (cause) {
+      throw await closeTrackedDownload(video, downloadController, cause)
+    } finally {
+      if (!pipelineOwnsController && active.get(video.id) === downloadController) {
+        active.delete(video.id)
+      }
+    }
+  }
+
+  const startVideo = async (videoId: string): Promise<void> => {
+    const video = await getVideoById(options.db, videoId)
+    if (active.has(videoId)) return
+    if (
+      video?.source === 'url'
+      && video.stage === 'download'
+      && (video.status === 'failed' || video.status === 'cancelled')
+    ) {
+      const downloadController = new AbortController()
+      const processingVideo: Video = {
+        ...video,
+        status: 'processing',
+        errorMessage: undefined,
+      }
+      const prepareRetry = async () => {
+        await transitionVideoImportState(
+          options.db,
+          video.id,
+          { status: video.status, stage: 'download' },
+          { status: 'processing', stage: 'download' },
+        )
+        await options.onChanged()
+      }
+      if (video.filePath) {
+        await handoffTrackedVideo(processingVideo, downloadController, prepareRetry)
+        return
+      }
+      await downloadTrackedVideo(processingVideo, downloadController, prepareRetry)
+      return
+    }
+    await processVideo(videoId)
   }
 
   return {
@@ -219,8 +420,42 @@ export function createVideoImportController(
       }
     },
 
+    async importUrl(sourceUrl) {
+      const normalizedUrl = sourceUrl.trim()
+      let parsedUrl: URL
+      try {
+        parsedUrl = new URL(normalizedUrl)
+      } catch {
+        throw new Error('Enter an absolute HTTP(S) video URL')
+      }
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        throw new Error('Enter an absolute HTTP(S) video URL')
+      }
+
+      const timestamp = now()
+      const video: Video = {
+        id: createVideoId(),
+        title: parsedUrl.hostname,
+        source: 'url',
+        sourceUrl: normalizedUrl,
+        thumbnail: '',
+        duration: 0,
+        language: '',
+        status: 'processing',
+        stage: 'download',
+        createdAt: timestamp,
+        position: 0,
+        lastStudiedAt: timestamp,
+      }
+      const downloadController = new AbortController()
+      return downloadTrackedVideo(video, downloadController, async () => {
+        await insertVideo(options.db, video)
+        await options.onChanged()
+      })
+    },
+
     start(videoId) {
-      void processVideo(videoId)
+      void startVideo(videoId).catch(() => undefined)
     },
 
     cancel(videoId) {

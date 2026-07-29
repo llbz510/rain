@@ -36,6 +36,29 @@ pub async fn check_ytdlp_command() -> Result<ytdlp::YtdlpResult, String> {
     Ok(ytdlp::check_ytdlp())
 }
 
+#[tauri::command]
+pub async fn import_online_video(
+    app: AppHandle,
+    scheduler: State<'_, Arc<ImportScheduler>>,
+    video_id: String,
+    source_url: String,
+) -> Result<ytdlp::OnlineVideoImportResult, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve app data dir: {error}"))?;
+    let output_root = data_dir.join("online-videos");
+    ytdlp::import_online_video(
+        &app,
+        scheduler.inner().as_ref(),
+        &output_root,
+        &video_id,
+        &source_url,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
 /// 读取当前桌面运行能力（用于前端运行前自检）
 #[tauri::command]
 pub async fn get_runtime_capability() -> Result<crate::runtime::RuntimeCapability, String> {

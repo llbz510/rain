@@ -1,4 +1,5 @@
 export type ImportStage =
+  | 'download'
   | 'pending'
   | 'asr'
   | 'stage2'
@@ -8,6 +9,7 @@ export type ImportStage =
   | 'cancelled'
 
 const ALLOWED_TRANSITIONS: Record<ImportStage, readonly ImportStage[]> = {
+  download: ['pending', 'failed', 'cancelled'],
   pending: ['asr'],
   asr: ['stage2', 'failed', 'cancelled'],
   stage2: ['merging', 'failed', 'cancelled'],

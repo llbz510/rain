@@ -35,7 +35,7 @@ export interface Video {
   createdAt: number
   position: number
   lastStudiedAt: number
-  stage?: 'asr' | 'stage2' | 'merging'
+  stage?: 'download' | 'asr' | 'stage2' | 'merging'
   errorMessage?: string
 }
 
