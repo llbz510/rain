@@ -32,6 +32,7 @@ export function getImportStatus(video: Video, progressPercent?: number): ImportS
   if (video.status === 'ready') return null
   const stage = video.stage ?? 'pending'
   const stages: Record<string, { label: string; percent: number }> = {
+    download: { label: '下载在线视频', percent: 0 },
     pending: { label: '等待开始', percent: 0 },
     asr: { label: 'Whisper 转写', percent: 10 },
     stage2: { label: '整理章节', percent: 67 },

@@ -12,6 +12,7 @@ export const IMPORT_CANCELLED_EVENT = 'import_cancelled'
 export interface ProgressPayload {
   videoId: string
   stage:
+    | 'download'
     | 'asr'
     | 'asr_extraction'
     | 'asr_transcription'

@@ -71,6 +71,9 @@ export async function runPipeline(
 
   try {
     const workingVideo = await resumePersistedImport(video, db, transition)
+    if (workingVideo.stage === 'download') {
+      throw new Error(`Video "${workingVideo.id}" cannot enter Pipeline before local media is attached`)
+    }
     currentStage = workingVideo.stage ?? 'asr'
     let rawSentences: Sentence[]
     if (currentStage === 'asr') {

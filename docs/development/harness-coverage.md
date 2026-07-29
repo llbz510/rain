@@ -1,7 +1,7 @@
 # Rain Harness 覆盖矩阵
 
 > 状态：Active
-> 更新日期：2026-07-28
+> 更新日期：2026-07-29
 > 作用：说明每条 AC 由谁检查，以及现有检查能证明到什么程度。
 
 ## 1. 覆盖等级
@@ -36,6 +36,7 @@
 | AC-LV-14 | `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`database-settings.test.ts`、`model-pool.test.ts`、`run-runtime-settings-e2e.ps1`、M20、Rust `settings_persistence` tests | Strong（UI/Store 提交门禁 + 业务批次 + Rust 事务 + 真实桌面重启） | 添加、删除和角色选择只在快照落库后发布；失败保留两个内存副本并可见报错；Settings UI 不得绕过 Store hydration。模型快照保存与旧格式迁移均组装单批 mutation，Rust 锁定成功提交、无关 key 隔离和末步失败全回滚；短 E2E 证明无 Key 测试模型经真实 Tauri/SQL plugin/隔离 SQLite 添加后跨进程存在 |
 | AC-LV-15 | `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`model-pool.test.ts`、`run-runtime-settings-e2e.ps1`、database Settings tests、Rust `settings_persistence` tests | Strong（Store 候选快照 + 持久化事务 + 真实桌面重启） | 公开删除动作把模型、全部角色引用和能力记录放入同一候选快照；旧 Key 由同一 mutation batch 清理；失败时 UI、Store 和 SQLite 均保留旧事实；短 E2E 删除后再次启动并证明条目没有复活 |
 | AC-LV-16 | `runtime-settings-store.test.ts`、`settings-readiness-observability.test.tsx`、`run-runtime-settings-e2e.ps1`、既有 Runtime Settings Store/UI/SQLite tests | Strong（独立时序 + 真实启动 hydration + 既有纵向裁判） | 直接控制加载与保存 Promise 的完成顺序，证明未就绪拒绝、跨动作串行、第二快照继承首个提交和 stale hydration 失效；设置页公开 loading/ready/error 状态供桌面 Judge 等待，短 E2E 在 ready 后写入并跨两次进程重启；数据库事务协议不变 |
+| AC-LV-17 | `video-import-url.test.ts`、`src-tauri/src/ytdlp_tests.rs`、M20 | Strong（公开 Controller 纵切 + 生产 Rust 深 seam + 受控真实子进程 + 精确注册边界） | Controller 与真实内存数据库证明外部进程前的唯一记录、失败关闭、URL 与独立 query secret 脱敏、进度、显式/调度器取消、初次发布及两类重试的连续 Owner、清理失败分类、交接失败关闭、受门禁的本地文件附着与严格 `download → pending` 发布，以及附着前后同记录重试；Rust Judge 直接执行生产调度 seam，并以真实 PowerShell 子进程和隔离临时目录证明可取消探测、下载进度、Windows 后代进程终止、清理失败可见、单文件目录提交和提交后幂等复用；经批准的 M20 只新增深 command `import_online_video` 并继续拒绝其他未批准 command。结论不扩展到真实站点兼容或完整外网 Evidence |
 
 ## 3. Whisper 模型下载
 
@@ -104,7 +105,7 @@
 | 能力 | 状态 | 处理规则 |
 | --- | --- | --- |
 | 高级树编辑（拆分、合并、重挂、改类型） | Proposed | 没有 Active AC 和真实 UI/数据库闭环；不得恢复只供 Harness 调用的 `tree-ops` |
-| 在线 URL 完整导入 | Gap | 进入验收范围前，不得用空 `start_import` command 或字幕/API 标准化函数表示已实现 |
+| 在线 URL 真实站点兼容与完整外网 Evidence | Gap | `AC-LV-17` 只确认无网络的受控本地交接；站点差异、登录态、播放列表、多小时/GB 级下载和完整模型链路仍需独立 Evidence |
 | Vision 解释当前画面 | Gap | 必须有截图、图像请求和模型能力验证后才能加入完成门禁 |
 
 ## 8. 变更时如何查表

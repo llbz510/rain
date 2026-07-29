@@ -1,7 +1,7 @@
 # Rain 模块地图
 
 > 状态：Active
-> 更新日期：2026-07-28
+> 更新日期：2026-07-29
 > 作用：规定知识和变化应该集中在哪里。这里的“接口”包括调用方式、状态约束、错误模式和副作用。
 
 ## 1. 总体依赖方向
@@ -162,8 +162,8 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | --- | ---: | --- | --- |
 | `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
 | `src/models/database.ts` | 约 163 行 | 稳定公共导出和两种 adapter 构造 | 保持 `@/models/database` 稳定；业务持久化进入已有内部 module，不把公共入口重新长成实现集合 |
-| `src-tauri/src/commands.rs` | 约 293 行 | 16 个 command 的参数/路径适配 | ASR 已分别进入 execution/transcript module，模型下载已进入独立 module；继续保持 command 薄适配，其他 command 不因文件长度被拆分 |
-| `src/pages/VideoListPage.tsx` | 约 555 行 | 列表 UI、搜索排序、文件选择；URL 导入仍在页面 | 本地导入控制已提取；后续只在 URL 功能进入验收范围时迁移 URL 流程 |
+| `src-tauri/src/commands.rs` | 约 320 行 | command 的参数/路径适配 | ASR、模型下载和在线媒体进程控制分别归属深模块；command 只解析 Tauri State/应用数据路径并委托，不因文件长度拆分 |
+| `src/pages/VideoListPage.tsx` | 约 542 行 | 列表 UI、搜索排序、文件/URL 输入和错误展示 | 本地文件与 URL 流程均委托 `VideoImportController`；页面不得重新编排探测、下载、持久化或 Pipeline |
 | `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |
 
 文件行数不是拆分理由；职责因为不同原因变化、需要不同测试，才是拆分理由。
@@ -183,7 +183,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 已完成：
 
-- 新建 `video-import-controller.ts`，接口为 `importLocal/start/cancel/acceptProgress`。
+- 新建 `video-import-controller.ts`；当前接口为 `importLocal/importUrl/start/cancel/acceptProgress`。
 - 页面不再直接组合本地媒体探测、Pipeline 参数、失败状态修复和 Rust 取消。
 - 数据库未准备好时导入按钮禁用，不再静默丢失用户操作。
 - 新增 AC-LV-02 页面到数据库贯通测试。
@@ -192,7 +192,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 剩余工作：
 
-- 在线 URL 导入尚未经过真实验收，相关逻辑暂时仍在页面中。
+- 在线 URL 的受控本地媒体交接已进入 `AC-LV-17`：Controller 拥有可追踪记录、失败/取消/重试和 Pipeline 交接，Rust `ytdlp` module 拥有可取消探测/下载、进度、临时目录和最终提交，页面只保留输入适配。真实站点差异与完整外网 Evidence 仍是独立 Gap。
 - 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。`ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash`（结构化、文本助手）已有 schema v2 Evidence；下一个模型配置仍须独立探针和完整 E2E，不得继承这个 `Verified` 结论。
 - 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
 

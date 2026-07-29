@@ -35,6 +35,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::cancel_import,
             commands::check_ytdlp_command,
+            commands::import_online_video,
             commands::get_runtime_capability,
             commands::probe_video_info,
             commands::generate_thumbnail,

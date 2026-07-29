@@ -11,7 +11,6 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   listVideos,
   searchVideosByTitle,
-  insertVideo,
   type Database,
 } from '@/models/database'
 import { getDb } from '@/models/db-singleton'
@@ -246,7 +245,7 @@ export function VideoListPage() {
   const [urlError, setUrlError] = useState('')
   const [localImportError, setLocalImportError] = useState('')
   const [openError, setOpenError] = useState('')
-  const [pipelineProgress, setPipelineProgress] = useState<Record<string, { stage: 'asr' | 'stage2' | 'merging'; percent: number }>>({})
+  const [pipelineProgress, setPipelineProgress] = useState<Record<string, { stage: 'download' | 'asr' | 'stage2' | 'merging'; percent: number }>>({})
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
   useEffect(() => {
@@ -381,17 +380,18 @@ export function VideoListPage() {
 
   const handleUrlImport = async () => {
     setImportMenuOpen(false)
+    setLocalImportError('')
     try {
       const { isTauri, tauriInvoke } = await import('@/lib/tauri-env')
       if (!isTauri()) {
-        alert('请在桌面应用中使用在线视频导入')
+        setLocalImportError('请在桌面应用中使用在线视频导入')
         return
       }
       const ytdlpResult = await tauriInvoke<{ available: boolean; version: string | null }>(
         'check_ytdlp_command', {},
       )
       if (!ytdlpResult.available) {
-        alert('请先安装 yt-dlp 并加入 PATH')
+        setLocalImportError('请先安装 yt-dlp 并加入 PATH')
         return
       }
       setUrlDialogOpen(true)
@@ -399,47 +399,25 @@ export function VideoListPage() {
       setUrlError('')
     } catch (err) {
       console.error('[VideoListPage] yt-dlp 检查失败', err)
+      setLocalImportError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  const handleUrlSubmit = async () => {
+  const handleUrlSubmit = () => {
     if (!importUrl.trim()) {
       setUrlError('请输入 URL')
       return
     }
-    try {
-      const { tauriInvoke } = await import('@/lib/tauri-env')
-      const info = await tauriInvoke<{ title: string; duration: number; thumbnail: string }>(
-        'probe_video_info',
-        { filePath: '', sourceUrl: importUrl.trim() },
-      )
-
-      if (!db) return
-      const video: Video = {
-        id: `v_${Date.now()}`,
-        title: info.title,
-        source: 'url',
-        sourceUrl: importUrl.trim(),
-        thumbnail: info.thumbnail,
-        duration: info.duration,
-        language: '',
-        status: 'pending',
-        createdAt: Date.now(),
-        position: 0,
-        lastStudiedAt: Date.now(),
-      }
-      await insertVideo(db, video)
-      const list = keyword.trim()
-        ? await searchVideosByTitle(db, keyword.trim())
-        : await listVideos(db, sortBy)
-      setVideos(list)
-      setUrlDialogOpen(false)
-
-      // Trigger pipeline processing
-      void handleOpenImport(video.id)
-    } catch (err) {
-      setUrlError(`导入失败: ${err}`)
+    if (!importController) {
+      setUrlError('数据库正在初始化，请稍后重试')
+      return
     }
+    const sourceUrl = importUrl.trim()
+    setUrlDialogOpen(false)
+    setImportUrl('')
+    void importController.importUrl(sourceUrl).catch((error) => {
+      setLocalImportError(error instanceof Error ? error.message : String(error))
+    })
   }
 
   const handleSettingsClick = () => {
@@ -481,6 +459,9 @@ export function VideoListPage() {
             <div style={dropdownStyle}>
               <button onClick={handleLocalImport} style={dropdownItemStyle}>
                 本地文件
+              </button>
+              <button onClick={handleUrlImport} style={dropdownItemStyle}>
+                在线视频
               </button>
             </div>
           )}
@@ -533,13 +514,15 @@ export function VideoListPage() {
 
       {urlDialogOpen && (
         <div style={overlayStyle}>
-          <div style={modalStyle}>
-            <div style={modalTitleStyle}>导入在线视频</div>
+          <div role="dialog" aria-modal="true" aria-labelledby="online-import-title" style={modalStyle}>
+            <div id="online-import-title" style={modalTitleStyle}>导入在线视频</div>
             <div style={modalBodyStyle}>
-              <label style={fieldLabelStyle}>
+              <label htmlFor="online-video-url" style={fieldLabelStyle}>
                 视频 URL（YouTube/Bilibili 等）
               </label>
               <input
+                id="online-video-url"
+                aria-label="视频 URL"
                 type="text"
                 value={importUrl}
                 onChange={(e) => { setImportUrl(e.target.value); setUrlError('') }}

@@ -48,6 +48,9 @@ export {
   updateNoteContent,
 } from './database-notes'
 export {
+  attachDownloadedMedia,
+  publishDownloadedMedia,
+  updateUrlVideoMetadata,
   getVideoById,
   insertVideo,
   listVideos,

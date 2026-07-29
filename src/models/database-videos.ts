@@ -85,6 +85,116 @@ export async function getVideoById(db: Database, id: string): Promise<Video | nu
   return row ? rowToVideo(row) : null
 }
 
+export async function attachDownloadedMedia(
+  db: Database,
+  id: string,
+  filePath: string,
+): Promise<Video> {
+  if (isSqlDatabase(db)) {
+    await db.exec(
+      "UPDATE video SET file_path = $1 WHERE id = $2 AND status = 'processing' AND stage = 'download'",
+      [filePath, id],
+    )
+  } else {
+    const memory = asMemoryDatabase(db)
+    const rows = memory.readTable('video')
+    const row = rows.find((candidate) => candidate.id === id)
+    if (!row || row.status !== 'processing' || row.stage !== 'download') {
+      throw new Error(`Persisted download state changed for video "${id}"`)
+    }
+    row.file_path = filePath
+    memory.replaceTable('video', rows)
+  }
+
+  const attached = await getVideoById(db, id)
+  if (
+    !attached
+    || attached.filePath !== filePath
+    || attached.status !== 'processing'
+    || attached.stage !== 'download'
+  ) {
+    throw new Error(`Downloaded media was not attached for video "${id}"`)
+  }
+  return attached
+}
+
+export async function publishDownloadedMedia(
+  db: Database,
+  id: string,
+  filePath: string,
+): Promise<Video> {
+  if (isSqlDatabase(db)) {
+    await db.exec(
+      "UPDATE video SET status = 'pending', stage = NULL, error_message = NULL WHERE id = $1 AND file_path = $2 AND status = 'processing' AND stage = 'download'",
+      [id, filePath],
+    )
+  } else {
+    const memory = asMemoryDatabase(db)
+    const rows = memory.readTable('video')
+    const row = rows.find((candidate) => candidate.id === id)
+    if (
+      !row
+      || row.file_path !== filePath
+      || row.status !== 'processing'
+      || row.stage !== 'download'
+    ) {
+      throw new Error(`Persisted download handoff changed for video "${id}"`)
+    }
+    row.status = 'pending'
+    row.stage = null
+    row.error_message = null
+    memory.replaceTable('video', rows)
+  }
+
+  const published = await getVideoById(db, id)
+  if (
+    !published
+    || published.filePath !== filePath
+    || published.status !== 'pending'
+    || published.stage
+  ) {
+    throw new Error(`Downloaded media was not published for video "${id}"`)
+  }
+  return published
+}
+
+export async function updateUrlVideoMetadata(
+  db: Database,
+  id: string,
+  metadata: Pick<Video, 'title' | 'thumbnail' | 'duration'>,
+): Promise<Video> {
+  if (isSqlDatabase(db)) {
+    await db.exec(
+      "UPDATE video SET title = $1, thumbnail = $2, duration = $3 WHERE id = $4 AND status = 'processing' AND stage = 'download'",
+      [metadata.title, metadata.thumbnail, metadata.duration, id],
+    )
+  } else {
+    const memory = asMemoryDatabase(db)
+    const rows = memory.readTable('video')
+    const row = rows.find((candidate) => candidate.id === id)
+    if (!row || row.status !== 'processing' || row.stage !== 'download') {
+      throw new Error(`Persisted download state changed for video "${id}"`)
+    }
+    row.title = metadata.title
+    row.thumbnail = metadata.thumbnail
+    row.duration = metadata.duration
+    memory.replaceTable('video', rows)
+  }
+
+  const updated = await getVideoById(db, id)
+  if (
+    !updated
+    || updated.status !== 'processing'
+    || updated.stage !== 'download'
+    || updated.title !== metadata.title
+    || updated.thumbnail !== metadata.thumbnail
+    || updated.duration !== metadata.duration
+  ) {
+    throw new Error(`URL metadata was not attached for video "${id}"`)
+  }
+  return updated
+}
+
 export async function updateVideoStatus(
   db: Database,
   id: string,
