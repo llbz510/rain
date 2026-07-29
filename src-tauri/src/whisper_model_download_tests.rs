@@ -431,7 +431,10 @@ async fn cancellation_interrupts_a_stalled_network_read() {
     progressed.acquire().await.unwrap().forget();
 
     assert!(manager.cancel("tiny").await);
-    let result = tokio::time::timeout(std::time::Duration::from_millis(50), task)
+    // The server never sends the remaining bytes, so successful completion can
+    // only come from cancellation. Keep a generous timeout as a deadlock guard;
+    // cancellation latency is not an AC-MM-02 performance contract.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), task)
         .await
         .expect("cancel must wake a stalled response read")
         .unwrap();

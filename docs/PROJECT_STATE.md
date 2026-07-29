@@ -1541,6 +1541,16 @@ Protected PR #9 then passed `Clean Windows Harness` run `30340365264` and merged
 
 The evidence-promotion boundary changes only `PROJECT_STATE.md`, `harness-coverage.md` and the Runtime Settings desktop runbook. Its final `npm run harness:check` passed before independent commit; locked Harness files and production implementation are unchanged in this boundary.
 
+## What changed in the 2026-07-29 deterministic stalled-read Judge slice
+
+The independent Windows Harness exposed an `AC-MM-02` Judge flake on merge commit `f96a3db`: run `30342375378` attempt 1 failed only `cancellation_interrupts_a_stalled_network_read` at its 50 ms timeout, while the same-SHA rerun passed. Sixty serial local replays and 24 concurrent replays did not reproduce a lost cancellation; under concurrent load the test duration nevertheless reached 40 ms, leaving almost no budget for Hosted Windows scheduling and temporary-file cleanup.
+
+- The acceptance contract remains unchanged: a per-model cancellation must wake a permanently stalled response read, remove the partial file and return `Cancelled`. `AC-MM-02` does not define a 50 ms latency target.
+- Owner remains `src-tauri/src/whisper_model_download.rs`; Judge remains the adjacent `src-tauri/src/whisper_model_download_tests.rs`. The server fixture still never sends the remaining bytes, so the download task can complete only through cancellation.
+- The Judge now uses a five-second deadlock guard instead of treating the complete cancellation, async cleanup and task-teardown path as a 50 ms performance assertion. This does not weaken the behavioral assertion or change production code.
+- A mutation check temporarily suppressed the production `Notify` wakeup and made the revised Judge fail at the deadlock guard; restoring the wakeup returned the focused test and all 11 model-download tests to GREEN. The mutation was not retained.
+- Boundary scope is deterministic adjudication of the existing stalled-network cancellation behavior. Model-download behavior, acceptance text, coverage strength, locked `harness/`, locked `src-tauri/tests/`, live-key workflows and desktop E2E remain unchanged.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
