@@ -2,7 +2,10 @@ import type { Video, Node, Sentence } from '@/models/types'
 import type { LlmSettings } from '@/llm/types'
 import { callStage2 } from '@/llm/client'
 import { assertTransition, type ImportStage } from '@/pipeline/import-state'
-import { runStage2Stage } from '@/pipeline/stage2-runner'
+import {
+  runStage2Stage,
+  type Stage2Progress,
+} from '@/pipeline/stage2-runner'
 import {
   isCancellationError,
   runAsrStage,
@@ -19,7 +22,7 @@ import {
 } from '@/models/database'
 
 export interface PipelineCallbacks {
-  onProgress: (stage: string, percent: number) => void
+  onProgress: (stage: string, percent: number, details?: Stage2Progress) => void
   onComplete: (video: Video, nodes: Node[], sentences: Sentence[]) => void
   onError: (error: Error) => void
 }
@@ -106,6 +109,7 @@ export async function runPipeline(
       db,
       callStage2: dependencies.callStage2,
       signal: dependencies.signal,
+      onProgress: (progress) => callbacks.onProgress('stage2', progress.percent, progress),
     })
     callbacks.onProgress('stage2', 100)
 

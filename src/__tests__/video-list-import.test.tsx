@@ -24,18 +24,19 @@ describe('video import status display', () => {
     expect(getImportStatus(makeVideo({ status: 'ready' }))).toBeNull()
   })
 
-  it('renders a retry action for a failed import and keeps study unavailable', () => {
-    const onRetry = vi.fn()
+  it('keeps task actions out of the card and delegates opening the task details', () => {
+    const onOpenImport = vi.fn()
     const onOpen = vi.fn()
     render(<VideoCard
       video={makeVideo({ status: 'failed', stage: 'stage2', errorMessage: 'Qwen unavailable' })}
       onOpen={onOpen}
-      onRetryImport={onRetry}
+      onOpenImport={onOpenImport}
     />)
     expect(screen.getByTestId('import-status-v1')).toHaveTextContent('整理章节 · 67%')
     expect(screen.getByText('Qwen unavailable')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '重试导入' }))
-    expect(onRetry).toHaveBeenCalledWith('v1')
+    expect(screen.queryByRole('button', { name: '重试导入' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Signal'))
+    expect(onOpenImport).toHaveBeenCalledWith('v1')
     expect(onOpen).not.toHaveBeenCalled()
   })
 })

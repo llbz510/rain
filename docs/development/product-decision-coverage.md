@@ -75,7 +75,7 @@
 | DEC-PRD-059 | `M01-positioning.md`、`M17-video-list.md` | Proposed | 标题查询有实现级测试；搜索 UI 与无筛选边界没有 Active AC | v1 只按标题关键词搜索，不建设标签、筛选或跨视频正文检索 |
 | DEC-PRD-060 | `M15-data-persistence.md`、`M17-video-list.md` | Proposed | `AC-LV-13` 已确认数据库级联删除和保留本地源文件；M17 同时要求删除应用缩略图，但当前没有覆盖派生文件清理/GC 的 Active AC | 删除视频以单事务级联业务数据、删除应用缩略图，并保留用户本地源文件 |
 | DEC-PRD-061 | `M17-video-list.md` | Out-of-scope | v1 不提供学习数据或视频导出 | 暂不实现导出 |
-| DEC-PRD-062 | `M17-video-list.md` | Proposed | 状态一致性受 `AC-LV-10` 控制；非 ready 卡重开导入框、顶栏和空状态未形成完整 AC | 列表提供导入、排序、搜索、空状态和非 ready 任务入口 |
+| DEC-PRD-062 | `M17-video-list.md` | Proposed | 状态一致性受 `AC-LV-10` 控制，非 ready 任务详情入口受 `AC-LV-19` 控制；排序、搜索、顶栏和空状态仍没有完整 Active AC | 列表提供导入、排序、搜索、空状态和非 ready 任务入口 |
 | DEC-PRD-063 | `M13-visual-design.md` | Proposed | 暗色主题存在于实现，但没有 Active AC 禁止亮色或跟随系统 | 只提供暗色主题 |
 | DEC-PRD-064 | `M13-visual-design.md` | Proposed | 中性色阶没有产品级视觉 Judge | 背景、面板、分隔和文字采用四档中性色阶 |
 | DEC-PRD-065 | `M13-visual-design.md` | Proposed | 控件强调语义没有产品级视觉 Judge | 不使用品牌强调色，控件依靠灰白、明暗和字重 |

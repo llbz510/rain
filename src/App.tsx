@@ -15,23 +15,15 @@ import { E2eAutomation } from '@/e2e/entry'
 export default function App() {
   const currentPage = useRainStore((s) => s.currentPage)
 
-  let page: React.ReactNode
-  switch (currentPage) {
-    case 'settings':
-      page = <SettingsPage />
-      break
-    case 'study':
-      page = <StudyInterface />
-      break
-    default:
-      page = <VideoListPage />
-  }
-
   return (
     <>
       <ShortcutManager />
       <E2eAutomation />
-      {page}
+      <div hidden={currentPage !== 'list'}>
+        <VideoListPage />
+      </div>
+      {currentPage === 'settings' && <SettingsPage />}
+      {currentPage === 'study' && <StudyInterface />}
     </>
   )
 }
