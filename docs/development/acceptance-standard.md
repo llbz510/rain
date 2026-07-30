@@ -245,6 +245,16 @@ Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝
 
 裁判：`src/__tests__/video-import-url.test.ts` 通过 `VideoImportController` 公开 interface、真实内存数据库和 Tauri 外部 adapter 证明下载前记录、成功本地交接、进度、URL 秘密值脱敏、显式取消与调度器取消分类、初次发布及附着前后重试均无 Owner 空档、各交接失败关闭、清理失败不得伪装成取消成功，以及重试复用同一记录；数据库 Judge 路径把受门禁的 `filePath` 附着与 `pending` 发布分开，确保失败仍从 `processing/download` 进入终态而不绕过严格状态机；Rust `ytdlp` 邻接测试通过生产深 seam、受控真实子进程和隔离临时目录证明调度器完成、参数、进度、取消唤醒、Windows 进程树终止、临时输出清理失败可见与成功提交。测试不得访问真实视频站点或调用模型。
 
+### AC-LV-18 本地缩略图必须由应用拥有并通过生产媒体桥接渲染
+
+状态：`Confirmed`
+
+本地视频导入必须在任何缩略图副作用前取得唯一 Video ID；生成的缩略图必须位于 Rain 应用数据目录的 `thumbnails/` 下，并以该 Video ID 决定唯一最终文件名。不得在用户源视频目录创建或覆盖缩略图，也不得允许前端指定任意输出路径。生成过程必须先写临时文件，只有非空结果才能原子替换最终文件；失败时不得留下新的临时文件或损坏既有最终文件，并且仍按既有合同以可见警告继续导入。成功返回的应用所有路径必须保存到同一 Video 记录。生产视频卡片必须通过与播放器一致的媒体 URL adapter 把本地缩略图路径转换为 Tauri asset URL；HTTP(S) 缩略图保持原 URL，空缩略图显示稳定的中性占位，不得把空字符串或原始 Windows 路径交给 `<img>`。
+
+实现归属：Rust `thumbnail_storage` module 唯一拥有 app-data 路径、Video ID 校验、目录创建、临时文件、ffmpeg 调用与最终替换；`generate_thumbnail` command 只把 AppHandle 和输入适配到该深 module；`VideoImportController.importLocal` 只生成 Video ID、调用 command 并持久化返回路径；生产 `VideoCard` 复用播放器的 `localMediaUrl` interface，不自行拼接 asset URL。
+
+裁判：`src/__tests__/video-thumbnail-ownership.test.tsx` 通过生产 `VideoCard` 证明本地路径转换、HTTP(S) 保持和空图占位；经批准迁移的 M21 通过公开 `VideoImportController`、真实内存数据库和 Tauri adapter 证明前端只传 `filePath/videoId/timestamp` 并保存 Rust 返回路径；未锁定的 `video-import-local-id.test.ts` 证明两个 Controller 共享数据库并发导入时仍在缩略图调用前取得不同 Video ID，`video-list-local-import.test.tsx` 通过生产页面证明成功路径和“缩略图失败可见但导入继续”；Rust `thumbnail_storage_tests.rs` 通过真实媒体 fixture、隔离临时 app-data 和可控清理失败 seam 证明最终文件位置、非空提交、源目录不变、非法 Video ID 拒绝、普通失败无残留、既有最终文件保护，并在操作系统拒绝清理时保留失败诊断而不伪装成功。本 AC 不签发在线缩略图本地化、派生文件删除/GC、精确卡片视觉或真实桌面 E2E。
+
 ## 3. Whisper 模型下载
 
 本节来自 2026-07-27 对当前设置页、Rust command 和历史模型管理规格的核对，并于同日经用户确认。三条 AC 均为当前生效的 `Confirmed` 产品事实。

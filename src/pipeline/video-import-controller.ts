@@ -66,6 +66,8 @@ function createUniqueVideoId(): string {
     : `v_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
+const allocatedLocalVideoIds = new Set<string>()
+
 function normalizeProgressStage(stage: string): ImportProgress['stage'] {
   if (stage === 'download') return 'download'
   if (stage === 'asr' || stage === 'stage2' || stage === 'merging') return stage
@@ -130,6 +132,19 @@ export function createVideoImportController(
   const stopping = new Set<string>()
   const now = options.now ?? Date.now
   const createVideoId = options.createVideoId ?? createUniqueVideoId
+
+  const allocateLocalVideoId = async (timestamp: number): Promise<string> => {
+    let candidate = options.createVideoId ? createVideoId() : `v_${timestamp}`
+    while (true) {
+      if (!allocatedLocalVideoIds.has(candidate) && !(await getVideoById(options.db, candidate))) {
+        if (!allocatedLocalVideoIds.has(candidate)) {
+          allocatedLocalVideoIds.add(candidate)
+          return candidate
+        }
+      }
+      candidate = createVideoId()
+    }
+  }
 
   const trackTask = <T>(videoId: string, task: Promise<T>): Promise<T> => {
     const tasks = activeTasks.get(videoId) ?? new Set<Promise<unknown>>()
@@ -419,6 +434,8 @@ export function createVideoImportController(
   return {
     async importLocal(filePath) {
       try {
+        const timestamp = now()
+        const videoId = await allocateLocalVideoId(timestamp)
         const info = await tauriInvoke<{ title: string; duration: number; thumbnail: string }>(
           'probe_video_info',
           { filePath, sourceUrl: null },
@@ -426,18 +443,16 @@ export function createVideoImportController(
 
         let thumbnailPath = ''
         try {
-          const outputPath = filePath.replace(/\.[^.]+$/, '_thumb.jpg')
           thumbnailPath = await tauriInvoke<string>(
             'generate_thumbnail',
-            { filePath, outputPath, timestamp: 1.0 },
+            { filePath, videoId, timestamp: 1.0 },
           )
         } catch (error) {
           options.onWarning?.('缩略图生成失败，继续导入', error)
         }
 
-        const timestamp = now()
         const video: Video = {
-          id: `v_${timestamp}`,
+          id: videoId,
           title: info.title,
           source: 'local',
           filePath,

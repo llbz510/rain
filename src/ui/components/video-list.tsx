@@ -6,6 +6,7 @@
 import React, { useRef, useState } from 'react'
 import { getCardAction, buildCardDisplay, buildDeleteConfirmation, getEmptyStateMessage, getImportStatus } from '@/ui/video-list'
 import type { Video } from '@/models/types'
+import { localMediaUrl } from '@/ui/components/video'
 
 interface VideoCardProps {
   video: Video
@@ -29,6 +30,7 @@ export function VideoCard({ video, onOpen, onOpenImport, onCancelImport, onRetry
   const preparingDeleteRef = useRef(false)
   const display = buildCardDisplay(video)
   const importStatus = getImportStatus(video, importProgressPercent)
+  const thumbnailSrc = localMediaUrl(video.thumbnail)
 
   const handleClick = () => {
     if (deleting) return
@@ -70,7 +72,9 @@ export function VideoCard({ video, onOpen, onOpenImport, onCancelImport, onRetry
 
   return (
     <div data-testid={`card-${video.id}`} style={{ cursor: 'pointer' }}>
-      <img src={video.thumbnail} alt={video.title} aria-disabled={deleting} onClick={handleClick} />
+      {thumbnailSrc
+        ? <img src={thumbnailSrc} alt={video.title} aria-disabled={deleting} onClick={handleClick} />
+        : <div aria-disabled={deleting} onClick={handleClick}>暂无缩略图</div>}
       <span aria-disabled={deleting} onClick={handleClick}>{video.title}</span>
       <div>{display.durationText}</div>
       <div>{display.progressPercent}%</div>

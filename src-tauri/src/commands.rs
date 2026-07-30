@@ -12,6 +12,7 @@ use crate::note_persistence::{self, PersistedNote};
 use crate::scheduler::ImportScheduler;
 use crate::settings_persistence::{self, SettingMutation};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
+use crate::thumbnail_storage;
 use crate::video_deletion;
 use crate::whisper::WhisperModelSize;
 use crate::whisper_model_download::{self, ModelDownloadManager};
@@ -94,14 +95,27 @@ pub async fn probe_video_info(
 /// 生成缩略图（决策96）
 #[tauri::command]
 pub async fn generate_thumbnail(
+    app: AppHandle,
     file_path: String,
-    output_path: String,
+    video_id: String,
     timestamp: f64,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || ffmpeg::extract_frame(&file_path, &output_path, timestamp))
-        .await
-        .map_err(|error| format!("Thumbnail task failed: {error}"))?
-        .map_err(|error| error.to_string())
+    let app_data_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve app data dir: {error}"))?;
+    tokio::task::spawn_blocking(move || {
+        thumbnail_storage::generate_thumbnail(
+            &app_data_root,
+            &video_id,
+            Path::new(&file_path),
+            timestamp,
+        )
+    })
+    .await
+    .map_err(|error| format!("Thumbnail task failed: {error}"))?
+    .map(|path| path.to_string_lossy().into_owned())
+    .map_err(|error| error.to_string())
 }
 
 /// 启动 ASR（决策32/94/85）

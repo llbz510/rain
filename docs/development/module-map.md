@@ -112,6 +112,8 @@ cancelAndWait(videoId)
 
 `download_whisper_model`、`cancel_whisper_model_download` 和 `list_whisper_models` 只能解析型号/应用模型目录并调用 `whisper_model_download.rs`。固定来源和哈希、响应分块、临时文件、最终替换、任务 lease、取消唤醒与进度事件都归该模块；设置表单不得绕过 `src/settings/whisper-model-download.ts` 自行拼接多条 Tauri 调用。
 
+`generate_thumbnail` 只能解析 `AppHandle` 的 app-data 根目录并把 `filePath/videoId/timestamp` 交给 `thumbnail_storage.rs`。Video ID 校验、`thumbnails/` 目录、唯一临时文件、ffmpeg 提取、失败清理与原子替换都归该深 module；前端不得指定输出路径。`VideoImportController.importLocal` 通过 module 级进程分配表和数据库查重在任何文件副作用前取得唯一 Video ID，跨页面重建或多个 Controller 也不得复用仍在途的 ID；随后只持久化 command 返回的应用所有路径。生产 `VideoCard` 复用播放器的 `localMediaUrl`，不得自行拼 asset URL。
+
 媒体、Whisper、调度和持久化细节应分别留在对应 Rust 模块。新增 command 时必须同步真实 `generate_handler!`、调用适配器和协议测试，不再维护手写影子 command 清单。
 
 ## 4. 持久化和状态所有权
@@ -200,7 +202,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 - 在线 URL 的受控本地媒体交接已进入 `AC-LV-17`：Controller 拥有可追踪记录、失败/取消/重试和 Pipeline 交接，Rust `ytdlp` module 拥有可取消探测/下载、进度、临时目录和最终提交，页面只保留输入适配。真实站点差异与完整外网 Evidence 仍是独立 Gap。
 - 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。`ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash`（结构化、文本助手）已有 schema v2 Evidence；下一个模型配置仍须独立探针和完整 E2E，不得继承这个 `Verified` 结论。
-- 当前缩略图输出位置仍沿用旧行为，需单独 AC 决定应用数据目录策略后再修改。
+- 本地缩略图创建、持久化和卡片渲染现由 `AC-LV-18` 控制；应用所有缩略图随 Video 删除及孤儿 GC 仍无 Active AC，并使 `DEC-PRD-060` 保持 Proposed。
 
 ## 8. Harness Migration 结果
 
