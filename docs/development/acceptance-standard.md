@@ -201,9 +201,9 @@ Rain 支持模型池中的多种配置。每个配置必须按被分配的角色
 
 用户删除一个 Video 时，该 Video 及其 Node、Sentence（包括直接归属 Video ID 的 ASR 占位句子）、Note、Note-Sentence 引用和 import checkpoint 必须作为一个整体删除。任一步失败时，所有数据必须保持删除前状态；不得留下孤儿记录，也不得删除其他 Video 的数据。删除不存在的 Video 保持幂等。
 
-实现归属：数据库删除接口、Rust SQLite 单事务持久化。
+实现归属：`VideoListPage` 通过公共数据库接口按需读取真实段落/笔记数量，先调用 `VideoImportController.cancelAndWait` 终止并等待同一 Video 的活动导入，再发起删除并发布已提交的列表结果；Controller 在结算期间阻止同一 Video 的新 start/retry，桌面取消失败必须立即返回且不得删除；`VideoCard` 负责单飞准备、确认、取消、进行中状态和可恢复错误；数据库删除接口与 Rust SQLite 单事务负责原子持久化。生产页面和组件不得自行拼接删除 SQL 或复制事务规则。
 
-裁判：公共数据库接口测试、M15 删除 Harness、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册。
+裁判：`src/__tests__/video-list-deletion.test.tsx` 通过生产 `VideoListPage`、真实内存数据库和公开组件交互证明真实数量、单飞准备、确认/取消、重复 start 不得隐藏活动任务、活动 Pipeline 迟到写入先完成再删除、慢速桌面取消期间不得启动新任务、取消命令失败立即可见且不删除、URL 发布交接取消后旧 Owner 必须释放且删除失败保留的记录仍可重试、提交后读取失败不产生 UI 假失败、无 Owner 时不存在静默确认动作、全部归属数据消失，以及准备/删除失败可见且可重试；公共数据库接口测试、M15 删除 Harness、M21 取消协议、Rust SQLite 成功与晚失败回滚测试、M20 真实 command 注册继续裁判双 adapter、桌面取消和事务结果。
 
 ### AC-LV-14 Runtime Settings 必须作为一个快照原子保存
 

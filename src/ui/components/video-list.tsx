@@ -3,7 +3,7 @@
 // M17 视频列表组件（决策54/57/58/59/60/62）
 // ========================================
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { getCardAction, buildCardDisplay, buildDeleteConfirmation, getEmptyStateMessage, getImportStatus } from '@/ui/video-list'
 import type { Video } from '@/models/types'
 
@@ -13,26 +13,65 @@ interface VideoCardProps {
   onOpenImport?: (videoId: string) => void
   onCancelImport?: (videoId: string) => void
   onRetryImport?: (videoId: string) => void
+  onDelete?: (videoId: string) => Promise<void>
+  loadDeleteInfo?: (videoId: string) => Promise<{ nodeCount: number; noteCount: number }>
   importProgressPercent?: number
   nodeCount?: number
   noteCount?: number
 }
 
-export function VideoCard({ video, onOpen, onOpenImport, onCancelImport, onRetryImport, importProgressPercent, nodeCount, noteCount }: VideoCardProps) {
+export function VideoCard({ video, onOpen, onOpenImport, onCancelImport, onRetryImport, onDelete, loadDeleteInfo, importProgressPercent, nodeCount, noteCount }: VideoCardProps) {
   const [showConfirm, setShowConfirm] = useState(false)
+  const [deleteInfo, setDeleteInfo] = useState<{ nodeCount: number; noteCount: number } | null>(null)
+  const [preparingDelete, setPreparingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const preparingDeleteRef = useRef(false)
   const display = buildCardDisplay(video)
   const importStatus = getImportStatus(video, importProgressPercent)
 
   const handleClick = () => {
+    if (deleting) return
     const action = getCardAction(video)
     if (action === 'openVideo') onOpen?.(video.id)
     else onOpenImport?.(video.id)
   }
 
+  const handleDeleteRequest = async () => {
+    if (preparingDeleteRef.current) return
+    preparingDeleteRef.current = true
+    setPreparingDelete(true)
+    setDeleteError(null)
+    setDeleteInfo(null)
+    try {
+      if (loadDeleteInfo) setDeleteInfo(await loadDeleteInfo(video.id))
+      setShowConfirm(true)
+    } catch (error) {
+      setDeleteError(`无法准备删除：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      preparingDeleteRef.current = false
+      setPreparingDelete(false)
+    }
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!onDelete) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await onDelete(video.id)
+      setShowConfirm(false)
+    } catch (error) {
+      setDeleteError(`删除失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div data-testid={`card-${video.id}`} style={{ cursor: 'pointer' }}>
-      <img src={video.thumbnail} alt={video.title} onClick={handleClick} />
-      <span onClick={handleClick}>{video.title}</span>
+      <img src={video.thumbnail} alt={video.title} aria-disabled={deleting} onClick={handleClick} />
+      <span aria-disabled={deleting} onClick={handleClick}>{video.title}</span>
       <div>{display.durationText}</div>
       <div>{display.progressPercent}%</div>
       {display.isComplete && <span>✓</span>}
@@ -41,17 +80,27 @@ export function VideoCard({ video, onOpen, onOpenImport, onCancelImport, onRetry
         <div data-testid={`import-status-${video.id}`}>
           <div>{importStatus.stageLabel} · {importStatus.percent}%</div>
           {importStatus.errorMessage && <div role="alert">{importStatus.errorMessage}</div>}
-          {importStatus.action === 'cancel' && <button aria-label="取消导入" onClick={() => onCancelImport?.(video.id)}>取消导入</button>}
-          {importStatus.action === 'retry' && <button aria-label="重试导入" onClick={() => onRetryImport?.(video.id)}>重试导入</button>}
+          {importStatus.action === 'cancel' && <button disabled={deleting} aria-label="取消导入" onClick={() => onCancelImport?.(video.id)}>取消导入</button>}
+          {importStatus.action === 'retry' && <button disabled={deleting} aria-label="重试导入" onClick={() => onRetryImport?.(video.id)}>重试导入</button>}
         </div>
       )}
-      <button onClick={() => setShowConfirm(true)}>删除</button>
+      <button disabled={preparingDelete || deleting} onClick={() => void handleDeleteRequest()}>
+        {preparingDelete ? '准备删除…' : '删除'}
+      </button>
+      {deleteError && !showConfirm && <div role="alert">{deleteError}</div>}
       {showConfirm && (
         <div data-testid="delete-confirm">
           {buildDeleteConfirmation(video, {
-            nodeCount: nodeCount ?? 0,
-            noteCount: noteCount ?? 0,
+            nodeCount: deleteInfo?.nodeCount ?? nodeCount ?? 0,
+            noteCount: deleteInfo?.noteCount ?? noteCount ?? 0,
           }).message}
+          {deleteError && <div role="alert">{deleteError}</div>}
+          <button disabled={deleting} onClick={() => setShowConfirm(false)}>取消</button>
+          {onDelete && (
+            <button disabled={deleting} onClick={() => void handleDeleteConfirm()}>
+              {deleting ? '删除中…' : '确认删除'}
+            </button>
+          )}
         </div>
       )}
     </div>
