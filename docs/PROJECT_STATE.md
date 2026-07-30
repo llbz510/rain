@@ -16,7 +16,7 @@ The no-key Runtime Settings desktop behavior Judge and its independent Hosted Wi
 Historical product-intent coverage is now mechanically controlled by `AC-HE-06`.
 `docs/development/product-decision-coverage.md` contains exactly `DEC-PRD-001` through `DEC-PRD-099`, each with a current PRD/M source and one disposition: 41 map to existing Confirmed ACs, 54 remain Proposed, and 4 are currently Out-of-scope. These counts expose governance gaps and are not a project-completion percentage; a Proposed row may already have partial code or component Harness, while a Confirmed row inherits only the explicit scope of its referenced AC.
 
-`AC-LV-19` is locally Strong on the production Video-list path: every non-ready card opens a persisted import-task detail without starting work, production Stage2 block/retry progress can overlay the SQLite fact, and only explicit detail actions retry or cancel. Closing the detail leaves the current task running; App page switches retain the same frontend Pipeline Owner; a restart-stale `processing` record can explicitly cancel through the desktop adapter and close its persisted state. The Judge is a production-page/jsdom path with the public Controller and real memory database plus production Stage2/Pipeline tests, not a desktop restart E2E; automatic recovery of a restart-stale `pending` record remains a separate risk below.
+`AC-LV-19` is Strong on merged `master` commit `bcec16f`: every non-ready card opens a persisted import-task detail without starting work, production Stage2 block/retry progress can overlay the SQLite fact, and only explicit detail actions retry or cancel. Closing the detail leaves the current task running; App page switches retain the same frontend Pipeline Owner; a restart-stale `processing` record can explicitly cancel through the desktop adapter and close its persisted state. The production-page/jsdom, public Controller, real memory database and production Stage2/Pipeline Judges passed locally and in the clean Windows merge gate. This still is not a real desktop restart E2E; explicit recovery of a restart-stale `pending` record remains a separate, unconfirmed product boundary below.
 
 The verified real input video is:
 
@@ -1663,7 +1663,38 @@ The user confirmed new `AC-LV-19` after an independent productization audit sele
 - Product-decision counts remain 41 Confirmed mappings, 54 Proposed and 4 Out-of-scope. `DEC-PRD-062` stays Proposed because AC-LV-19 confirms only its non-ready task entry; list sorting, search, top bar and empty-state behavior still lack a complete Active AC. `DEC-PRD-092` and `DEC-PRD-099` also remain Proposed.
 - Locked `harness/`, locked `src-tauri/tests/`, Rust product code, Evidence, live-key behavior and external workflows were not modified.
 
-Final `npm run harness:check` passed: control-plane validation; 84 frontend files / 496 tests with one explicit live-key file/test skipped; complementary E2E and ordinary production builds; and 110 Rust tests with the existing real-model Whisper case ignored. The final `dist` is the ordinary production artifact. TypeScript compilation and `git diff --check` also passed. Final independent Spec review found no functional P0/P1/P2 and confirmed both earlier P1s closed; Standards review recorded the two non-blocking P2 architecture debts in risk 22. This boundary does not sign automatic `pending` restart recovery, a Hosted Windows run, exact visual design or new external Evidence. The recorded stale-`pending` risk remains the leading import-task product gap.
+Final `npm run harness:check` passed: control-plane validation; 84 frontend files / 496 tests with one explicit live-key file/test skipped; complementary E2E and ordinary production builds; and 110 Rust tests with the existing real-model Whisper case ignored. The final `dist` is the ordinary production artifact. TypeScript compilation and `git diff --check` also passed. Final independent Spec review found no functional P0/P1/P2 and confirmed both earlier P1s closed; Standards review recorded the two non-blocking P2 architecture debts in risk 22. This boundary does not sign automatic `pending` restart recovery, a real desktop restart run, exact visual design or new external Evidence. The recorded stale-`pending` risk remains the leading import-task product gap.
+
+## 2026-07-30 authoritative handoff after the import-task merge
+
+This section is the durable handoff for the next AI session. It records verified repository and remote facts, but the next session must still rerun the read-only takeover commands instead of trusting this prose.
+
+- PR [#20](https://github.com/llbz510/rain/pull/20) merged the single AC-LV-19 implementation commit `8160789` into `master` as merge commit `bcec16f`.
+- The pull-request `Clean Windows Harness` passed on target commit `8160789` in [run 30516214689](https://github.com/llbz510/rain/actions/runs/30516214689). The independent `master` push replay passed on merge commit `bcec16f` in [run 30516726030](https://github.com/llbz510/rain/actions/runs/30516726030).
+- Immediately after the merge, local `master` matched `origin/master`, the worktree was clean, and `npm run harness:control` passed. No product code, locked Harness, Evidence or product-decision disposition changed after PR #20.
+- Current product-decision coverage remains exactly 41 Confirmed mappings, 54 Proposed and 4 Out-of-scope. `DEC-PRD-060`, `DEC-PRD-062`, `DEC-PRD-092` and `DEC-PRD-099` remain Proposed.
+
+The highest-benefit next boundary is a recommendation, not an authorization. The user has **not** confirmed `AC-LV-20`, and no AC, test, implementation or branch for it exists yet:
+
+- Proposed intent: a persisted `pending / stage=null` Video left by a previous process must remain idle after restart; opening or closing its task detail must remain side-effect free; the detail should expose an explicit “continue import” action; only that action may ask the current app-lifetime `VideoImportController` to start the same Video ID; duplicate clicks must remain single-flight; progress and terminal results must update the same SQLite row; closing the detail must not cancel the newly started background task.
+- Why explicit rather than automatic: automatic startup could consume GPU or invoke a paid model without a fresh user action. It would also introduce startup scheduling policy beyond AC-LV-19. Explicit continuation closes the current user dead end while reusing the existing production Controller.
+- Proposed Owner: the production `VideoImportController` instance retained for the app lifetime by the current App/VideoListPage composition. `VideoListPage` and `ImportTaskDialog` should only render the persisted fact and forward the explicit intent. Lifting the Controller into a cleaner App-scope module remains separate risk 22 and is outside this proposed boundary.
+- Proposed RED: seed a real memory-database `pending/null` Video as if the old process died, mount a fresh production page/controller, and open its detail. The page must remain side-effect free but expose “continue import”; current `bcec16f` fails because `getImportStatus` gives `pending` no action and the dialog renders no button.
+- Proposed Judges: first, a production page + public Controller + real memory database Judge proving same-record start, single-flight and refresh. To call cross-process restart recovery Strong, also require a no-key Windows/Tauri restart Judge on the target commit: persist `pending/null`, restart the real app, prove no automatic start, click the explicit action, and prove the same SQLite row leaves `pending` with a visible result. It may deterministically fail closed at runtime preflight; live keys, model calls and public network access must not enter the default Harness.
+- Explicitly outside: automatic startup scanning, cross-process task leases/queues, restart-stale `processing` semantics already covered by AC-LV-19, thumbnail deletion/GC, the two risk-22 architecture refactors, DEC-PRD-092 and DEC-PRD-099.
+
+The independent comparison ranked app-owned thumbnail deletion/GC second: it is a real disk-lifecycle gap, but its database/filesystem ordering, cleanup-failure UX, path trust and orphan keep-set need a separate product decision and deeper Rust Judge. Risk 22 is non-blocking architecture debt with no current user-behavior RED. `DEC-PRD-092` and `DEC-PRD-099` have partial M20 controls but no immediate product defect comparable to the stuck `pending` task; neither should be promoted without its own user-approved AC and independent negative policy Judge.
+
+The next session must begin with the repository takeover order in `AGENTS.md`, then verify at least:
+
+```powershell
+git status --short
+git branch --show-current
+git log -5 --oneline
+npm run harness:control
+```
+
+Expected only as a handoff clue: branch `master`, HEAD contains product merge `bcec16f` plus this later documentation handoff merge, the worktree is clean and the control plane passes. If any command disagrees, follow `docs/development/control-map.md` and the repository result. Before implementation, ask the user to confirm or revise the proposed AC-LV-20 contract; do not create a RED or change code merely from this recommendation.
 
 ## Maintenance checklist for every future session
 
