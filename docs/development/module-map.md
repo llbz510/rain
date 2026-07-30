@@ -71,6 +71,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 startLocalImport(file)
 retryImport(videoId)
 cancelImport(videoId)
+cancelAndWait(videoId)
 ```
 
 导入流程模块负责隐藏以下细节：
@@ -94,6 +95,8 @@ cancelImport(videoId)
 - `mergeImportAtomically`
 
 新代码不得在页面中拼 SQL 或自行管理事务。`database.ts` 现在只保留稳定公共导出和两种 adapter 的构造；schema、行映射和业务操作均已按职责进入内部 module。调用方仍必须保持现有 `@/models/database` interface，不得绕过入口导入内部实现。
+
+`AC-LV-13` 的生产删除入口由 `VideoListPage` 适配：页面只按需调用公共查询取得段落/笔记数量，通过 `VideoImportController.cancelAndWait` 的 per-Video stopping gate 阻止新任务、请求桌面取消并结算全部活动 Promise，再调用 `deleteVideoWithCascade` 并把已提交结果发布到列表；取消命令失败必须在任何删除前立即返回。Controller 的 URL 下载交接必须在媒体发布后、Pipeline 接管前再次检查取消，以释放旧 Owner；删除失败保留的记录不得因此失去重试入口。`VideoCard` 只负责单飞准备、确认、取消、进行中状态和错误展示。跨表清理与回滚仍唯一归属 `database-video-deletion.ts` 和 Rust `video_deletion`，页面与组件不得复制其规则。
 
 普通单记录 SQL 可以留在数据库内部 module。凡是一个业务结果需要多个记录或多张表共同提交，SQLite 路径必须经一次专用 Tauri command 进入 Rust persistence module；前端不得再发送事务控制 SQL。该全局边界由 `AC-AR-01` 和可复用的负向 policy fixture 裁判，内存 adapter 或 SQL 调用顺序不能替代 Rust 事务结果。
 
@@ -166,7 +169,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | `src/ui/components/settings/` | 页面编排约 349 行；其余组件 129-251 行 | 设置 UI 已按页面、自检、模型池、表单、角色选择和共享展示资源拆分 | 保持 `settings.tsx` 仅作公共 barrel；新行为进入对应组件，领域裁决继续留在 `src/settings/` |
 | `src/models/database.ts` | 约 163 行 | 稳定公共导出和两种 adapter 构造 | 保持 `@/models/database` 稳定；业务持久化进入已有内部 module，不把公共入口重新长成实现集合 |
 | `src-tauri/src/commands.rs` | 约 320 行 | command 的参数/路径适配 | ASR、模型下载和在线媒体进程控制分别归属深模块；command 只解析 Tauri State/应用数据路径并委托，不因文件长度拆分 |
-| `src/pages/VideoListPage.tsx` | 约 542 行 | 列表 UI、搜索排序、文件/URL 输入和错误展示 | 本地文件与 URL 流程均委托 `VideoImportController`；页面不得重新编排探测、下载、持久化或 Pipeline |
+| `src/pages/VideoListPage.tsx` | 约 568 行 | 列表 UI、搜索排序、文件/URL 输入、删除适配和错误展示 | 本地文件与 URL 流程均委托 `VideoImportController`；删除只结算 Controller 活动任务、调用公共查询/删除接口并发布提交结果；页面不得重新编排探测、下载、跨表清理、持久化事务或 Pipeline |
 | `src/pages/StudyInterface.tsx` | 约 449 行 | 学习页组合、媒体/导航协调、笔记命令适配、助手流生命周期 | 保持页面为组合入口；已有规则继续下沉到 `src/study/` 等深模块。下一次修改助手会话行为时，优先设计小 interface 后提取其流生命周期，不做无行为目标的整页重写 |
 
 文件行数不是拆分理由；职责因为不同原因变化、需要不同测试，才是拆分理由。

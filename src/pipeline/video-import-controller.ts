@@ -44,6 +44,7 @@ export interface VideoImportController {
   importUrl: (sourceUrl: string) => Promise<Video>
   start: (videoId: string) => void
   cancel: (videoId: string) => void
+  cancelAndWait: (videoId: string) => Promise<void>
   acceptProgress: (payload: ProgressPayload) => void
 }
 
@@ -125,8 +126,27 @@ export function createVideoImportController(
   options: VideoImportControllerOptions,
 ): VideoImportController {
   const active = new Map<string, AbortController>()
+  const activeTasks = new Map<string, Set<Promise<unknown>>>()
+  const stopping = new Set<string>()
   const now = options.now ?? Date.now
   const createVideoId = options.createVideoId ?? createUniqueVideoId
+
+  const trackTask = <T>(videoId: string, task: Promise<T>): Promise<T> => {
+    const tasks = activeTasks.get(videoId) ?? new Set<Promise<unknown>>()
+    tasks.add(task)
+    activeTasks.set(videoId, tasks)
+    const releaseTask = () => {
+      tasks.delete(task)
+      if (tasks.size === 0 && activeTasks.get(videoId) === tasks) {
+        activeTasks.delete(videoId)
+      }
+    }
+    void task.then(
+      releaseTask,
+      releaseTask,
+    )
+    return task
+  }
 
   const processVideo = async (
     videoId: string,
@@ -230,6 +250,22 @@ export function createVideoImportController(
     }
   }
 
+  const startTrackedProcess = (
+    videoId: string,
+    claimedController?: AbortController,
+  ): Promise<void> => stopping.has(videoId)
+    ? Promise.resolve()
+    : trackTask(videoId, processVideo(videoId, claimedController))
+
+  const requestCancellation = (videoId: string): Promise<void> => {
+    const controller = active.get(videoId)
+    if (!controller) return Promise.resolve()
+    controller.abort()
+    return isTauri()
+      ? tauriInvoke<void>('cancel_import', { videoId })
+      : Promise.resolve()
+  }
+
   const closeTrackedDownload = async (
     video: Video,
     downloadController: AbortController,
@@ -282,8 +318,9 @@ export function createVideoImportController(
       await prepare()
       throwIfDownloadCancelled(downloadController)
       const published = await publishDownloadedMedia(options.db, video.id, video.filePath)
+      throwIfDownloadCancelled(downloadController)
       pipelineOwnsController = true
-      void processVideo(video.id, downloadController)
+      void startTrackedProcess(video.id, downloadController)
       return published
     } catch (cause) {
       throw await closeTrackedDownload(video, downloadController, cause)
@@ -328,11 +365,12 @@ export function createVideoImportController(
       await options.onChanged()
       throwIfDownloadCancelled(downloadController)
       const published = await publishDownloadedMedia(options.db, video.id, result.filePath)
+      throwIfDownloadCancelled(downloadController)
 
       // The same AbortController owns the task while the DB atomically publishes
       // pending and while Pipeline starts, leaving no ownerless cancellation gap.
       pipelineOwnsController = true
-      void processVideo(video.id, downloadController)
+      void startTrackedProcess(video.id, downloadController)
       return published
     } catch (cause) {
       throw await closeTrackedDownload(video, downloadController, cause)
@@ -344,7 +382,9 @@ export function createVideoImportController(
   }
 
   const startVideo = async (videoId: string): Promise<void> => {
+    if (stopping.has(videoId)) return
     const video = await getVideoById(options.db, videoId)
+    if (stopping.has(videoId)) return
     if (active.has(videoId)) return
     if (
       video?.source === 'url'
@@ -373,7 +413,7 @@ export function createVideoImportController(
       await downloadTrackedVideo(processingVideo, downloadController, prepareRetry)
       return
     }
-    await processVideo(videoId)
+    await startTrackedProcess(videoId)
   }
 
   return {
@@ -412,7 +452,7 @@ export function createVideoImportController(
 
         await insertVideo(options.db, video)
         await options.onChanged()
-        void processVideo(video.id)
+        void startTrackedProcess(video.id)
         return video
       } catch (error) {
         options.onError?.('local-import', error)
@@ -448,22 +488,32 @@ export function createVideoImportController(
         lastStudiedAt: timestamp,
       }
       const downloadController = new AbortController()
-      return downloadTrackedVideo(video, downloadController, async () => {
+      return trackTask(video.id, downloadTrackedVideo(video, downloadController, async () => {
         await insertVideo(options.db, video)
         await options.onChanged()
-      })
+      }))
     },
 
     start(videoId) {
-      void startVideo(videoId).catch(() => undefined)
+      if (stopping.has(videoId)) return
+      void trackTask(videoId, startVideo(videoId)).catch(() => undefined)
     },
 
     cancel(videoId) {
-      const controller = active.get(videoId)
-      if (!controller) return
-      controller.abort()
-      if (isTauri()) {
-        void tauriInvoke<void>('cancel_import', { videoId }).catch(() => undefined)
+      void requestCancellation(videoId).catch(() => undefined)
+    },
+
+    async cancelAndWait(videoId) {
+      stopping.add(videoId)
+      try {
+        await requestCancellation(videoId)
+        while (true) {
+          const tasks = activeTasks.get(videoId)
+          if (!tasks || tasks.size === 0) break
+          await Promise.allSettled([...tasks])
+        }
+      } finally {
+        stopping.delete(videoId)
       }
     },
 

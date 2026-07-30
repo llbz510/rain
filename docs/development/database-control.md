@@ -28,7 +28,7 @@
 | --- | --- | --- | --- |
 | Schema、adapter 与访问边界 | 创建内存数据库或 Tauri SQLite，保持表/字段一致；阻止 plugin、内部 module 和事务控制逃逸 | AC-AR-01 | `database-architecture-policy.test.ts`、`database-boundary.test.ts`、M15/M20 |
 | Video 记录与进度 | Video 创建、查询、列表、搜索、状态和学习进度 | AC-LV-02/09、AC-ST-01/05 | `database-videos.test.ts`、M15、视频列表、学习加载/进度测试 |
-| 视频级联删除 | 原子删除 Video 及其 Node/Sentence/Note/reference/checkpoint | AC-LV-13 | 公共接口测试、M15/M20、Rust SQLite 成功/晚失败回滚/幂等测试（Strong） |
+| 视频级联删除 | 生产页面先阻止新任务、释放取消中的 URL/Pipeline Owner 并结算活动导入，再原子删除 Video 及其 Node/Sentence/Note/reference/checkpoint；提交后立即移除卡片，事务失败保持卡片和可恢复错误 | AC-LV-13 | `video-list-deletion.test.tsx`、公共接口测试、M15/M20/M21、Rust SQLite 成功/晚失败回滚/幂等测试（Strong） |
 | 学习内容读写 | Node/Sentence 普通写入和按 Node/Video 查询 | AC-LV-04/05/09、AC-ST-01 | `database-content.test.ts`、M15、Pipeline/Stage2、学习加载测试 |
 | 设置持久化 | 模型池、角色和能力记录使用的参数化 key-value CRUD | AC-LV-01/12、AC-ST-07 | `database-settings.test.ts`、M15 settings/recovery、模型池/能力/预检测试（Strong） |
 | Runtime Settings 快照保存 | Store 提交成功后发布；原子保存模型列表、独立 Key、角色、能力记录和旧格式迁移 | AC-LV-14 | Runtime Settings Store/UI/boundary 测试、`database-settings.test.ts`、`model-pool.test.ts`、M20、Rust 成功/晚失败回滚测试（Strong） |
@@ -52,7 +52,7 @@
 10. `database-notes.ts` 统一负责 Note 与 sentence 引用持久化；内存 adapter 镜像主键/关联唯一约束和失败回滚。SQLite 创建通过单次 `insert_note_atomically` command 进入 `note_persistence.rs`，由一个连接上的真实事务提交 Note 与全部引用。
 11. `database-content.ts` 统一负责 Node/Sentence 的普通写入和查询；它通过 adapter seam 访问 SQLite 或内存表，并与原子导入模块共享 `database-content-rows.ts` 行格式。业务调用方仍从 `@/models/database` 导入。
 12. `database-videos.ts` 统一负责 Video 行映射、普通读写、列表/搜索和 `AC-ST-05` 进度更新。SQLite characterization 直接锁定 `position < $1`，防止真实数据库进度回退；级联删除不属于这个 module。
-13. `database-video-deletion.ts` 统一负责 `AC-LV-13` 的公共删除行为。SQLite 路径只发送一次 `delete_video_atomically` command，由 `video_deletion.rs` 在单连接事务中清理六类归属数据；内存路径同时清理普通 Sentence 与 `node_id = videoId` 的 ASR 占位句，并保留其他 Video。
+13. `database-video-deletion.ts` 统一负责 `AC-LV-13` 的公共删除行为。SQLite 路径只发送一次 `delete_video_atomically` command，由 `video_deletion.rs` 在单连接事务中清理六类归属数据；内存路径同时清理普通 Sentence 与 `node_id = videoId` 的 ASR 占位句，并保留其他 Video。`VideoListPage` 只通过公共查询按需准备确认信息、先用 Controller 结算活动任务、调用该删除接口并发布提交结果；`VideoCard` 只管理用户确认和可恢复错误，不拥有跨表规则。
 14. `database-settings.ts` 统一负责参数化 key-value CRUD。SQLite characterization 锁定 upsert/read/delete SQL、空字符串与缺失值语义及错误传播；M15 继续锁定内存 adapter。模型 JSON 与 Key 分离、迁移和能力失效属于更高层 `src/settings/` module，由其行为测试负责。
 15. `saveRuntimeSettings` 和旧格式迁移把模型列表、Key、角色和能力记录组装为一个有序 `SettingMutation[]`，再调用 `applySettingMutationsAtomically`。SQLite 只发送一次 `apply_settings_atomically` command，由 `settings_persistence.rs` 在单连接事务中提交；内存 adapter 先计算完整结果再替换表。
 16. Store 是 Runtime Settings 的发布门禁：添加模型、删除模型和角色分配先从当前 Store 状态构造候选快照，保存成功后才替换 Zustand 和模块内模型池副本。Settings UI 只消费这些公开动作，不得直接访问数据库进行影子 hydration。
@@ -68,6 +68,6 @@
 2. `Completed`：导入状态、检查点和原子合并。adapter interface、检查点、状态转换、恢复判断、ASR 保存、句子归属和最终合并均已移出公共入口，由 AC-LV-03 至 AC-LV-09 的测试和 Rust/Evidence 裁判。
 3. `Completed`：学习内容与 Video 普通持久化。Note/reference、Node/Sentence、Video 行映射、列表/搜索和 `AC-ST-05` 进度均有独立 module 与裁判。
 4. `Completed`：设置持久化。公共 CRUD 由 SQLite characterization 与 M15 双 adapter 裁判；模型池、能力记录和预检继续裁判上层配置行为。
-5. `Completed`：视频级联删除。`AC-LV-13`、公共接口、锁定 M15/M20 和 Rust 真实事务测试共同裁判；迁移记录见 `harness-migration-2026-07-27-video-deletion.md`。
+5. `Completed`：视频级联删除。`AC-LV-13` 由生产列表页交互、公共接口、锁定 M15/M20 和 Rust 真实事务测试纵向裁判；迁移记录见 `harness-migration-2026-07-27-video-deletion.md`。
 
 禁止一次性重写整个数据库层。每一步都必须保持 `@/models/database` 导出兼容、运行对应裁判、更新本文件和 `PROJECT_STATE.md`。

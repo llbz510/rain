@@ -9,6 +9,9 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
+  deleteVideoWithCascade,
+  getNodesByVideoId,
+  getNotesByVideoId,
   listVideos,
   searchVideosByTitle,
   type Database,
@@ -347,6 +350,26 @@ export function VideoListPage() {
   const handleCancelImport = useCallback((videoId: string) => {
     importController?.cancel(videoId)
   }, [importController])
+
+  const handleDelete = useCallback(async (videoId: string) => {
+    if (!db) return
+    await importController?.cancelAndWait(videoId)
+    await deleteVideoWithCascade(db, videoId)
+    setVideos((current) => current.filter((video) => video.id !== videoId))
+  }, [db, importController])
+
+  const loadDeleteInfo = useCallback(async (videoId: string) => {
+    if (!db) return { nodeCount: 0, noteCount: 0 }
+    const [nodes, notes] = await Promise.all([
+      getNodesByVideoId(db, videoId),
+      getNotesByVideoId(db, videoId),
+    ])
+    return {
+      nodeCount: nodes.filter((node) => node.kind === 'paragraph').length,
+      noteCount: notes.length,
+    }
+  }, [db])
+
   const handleImportClick = () => {
     setImportMenuOpen((prev) => !prev)
   }
@@ -506,6 +529,8 @@ export function VideoListPage() {
                 importProgressPercent={pipelineProgress[v.id]?.percent}
                 onCancelImport={handleCancelImport}
                 onRetryImport={handleOpenImport}
+                onDelete={handleDelete}
+                loadDeleteInfo={loadDeleteInfo}
               />
             ))}
           </div>
