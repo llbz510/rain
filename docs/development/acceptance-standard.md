@@ -1,7 +1,7 @@
 # Rain 验收标准
 
 > 状态：Active
-> 更新日期：2026-07-29
+> 更新日期：2026-07-30
 > 当前范围：本地视频导入主链路、在线 URL 到受控本地媒体的导入交接。其他产品模块会在后续受控梳理中逐步加入。
 
 ## 1. AC 怎么使用
@@ -264,6 +264,16 @@ Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝
 实现归属：`App` 在自身生命周期内保持唯一 `VideoListPage`/Controller Owner，不得因切换列表、设置或学习页丢失仍运行的前端 Pipeline；`VideoListPage` 只拥有当前详情目标和开关；生产 `ImportTaskDialog` 只展示任务事实并把显式动作适配到回调；`VideoImportController` 继续唯一拥有 start/retry/cancel 和任务生命周期；Stage2 runner 生成真实分块位置与重试状态，Pipeline/Controller 只传递并归一化；SQLite `Video` 是跨重启 status、stage、error 的事实源，实时进度只作为当前会话覆盖，不得另存为新的业务事实。
 
 裁判：生产页面 Judge 通过公开卡片和 dialog 交互、真实内存数据库、公开 Video 读取及 Pipeline 外部 seam 证明：打开和关闭所有非就绪状态均无任务或持久化副作用；持久状态、错误和实时详细进度可见；只有显式重试会启动一次现有 Controller 路径，处理中任务即使来自进程重启也能经桌面取消并闭合持久态；关闭活动任务详情后后台继续，设置页往返后仍能取消原 Pipeline，并在终态刷新同一记录。Stage2 runner 与 Pipeline Judge 必须用真实多分块和失败重试 seam 证明 block/percent/retrying 由生产者产生并贯通公开回调，不得只向 UI 注入虚构事件。锁定 M17 继续只裁判 `openImportDialog` 组件合同，不得把点击卡片直接启动 Pipeline 当成替代 Judge。本 AC 只控制 `DEC-PRD-062` 的非就绪任务入口，不确认排序、搜索、顶栏、空状态或精确视觉。
+
+### AC-LV-20 重启遗留的 pending 任务必须由用户显式继续
+
+状态：`Confirmed`
+
+前一应用进程遗留的 `pending / stage=null` Video 在新进程启动后必须保持空闲；启动扫描、打开或关闭任务详情均不得自动启动、重试、取消 Pipeline 或改变持久化状态。详情必须为这条状态提供明确的“继续导入”动作。只有用户点击该动作，当前应用生命周期内的 `VideoImportController` 才能启动同一个 Video ID；重复点击必须保持 single-flight，不得创建第二条 Video 或第二个活动 Pipeline。进度和终态必须更新原来的同一条 SQLite Video 记录；关闭详情不得取消显式启动的后台任务。
+
+实现归属：由 `App` 生命周期保留的现有 `VideoListPage` / `VideoImportController` 继续作为唯一前端任务 Owner；Controller 负责同 Video ID 的 start、活动任务去重、Pipeline 和持久化结果，`VideoListPage` 只转发显式继续意图，`ImportTaskDialog` 只按持久状态渲染动作。该边界不要求把 Controller 提升到新的 App-scope module，也不引入启动扫描器、跨进程 lease 或持久任务队列。
+
+裁判：`src/__tests__/video-import-task-dialog.test.tsx` 必须通过新挂载的生产页面、公开 Controller 和真实内存数据库证明重启遗留的 `pending/null` 记录保持空闲、打开/关闭无副作用、显式继续启动同一记录、重复点击 single-flight、关闭后后台继续且终态刷新原记录。`scripts/run-runtime-settings-e2e.ps1` 还必须在无 Key、无模型调用和无公网的真实 Windows/Tauri/隔离 SQLite 三次启动流程中写入 `pending/null`，重启证明没有自动启动，点击显式动作并证明同一行离开 `pending`、结果可见且再次重启后仍存在；运行时预检允许确定性失败关闭。默认 Harness 不运行该桌面 Judge。本 AC 不包含 stale `processing` 语义、自动启动、跨进程队列、缩略图删除/GC、risk 22 架构重构、`DEC-PRD-092` 或 `DEC-PRD-099`。
 
 ## 3. Whisper 模型下载
 

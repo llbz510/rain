@@ -7,6 +7,7 @@ interface ImportTaskDialogProps {
   video: Video
   progress?: ImportProgress
   onClose: () => void
+  onContinue: (videoId: string) => void
   onRetry: (videoId: string) => void
   onCancel: (videoId: string) => void
 }
@@ -83,6 +84,7 @@ export function ImportTaskDialog({
   video,
   progress,
   onClose,
+  onContinue,
   onRetry,
   onCancel,
 }: ImportTaskDialogProps) {
@@ -111,13 +113,36 @@ export function ImportTaskDialog({
           {visibleVideo.errorMessage && <div role="alert">{visibleVideo.errorMessage}</div>}
         </div>
         <div style={actionsStyle}>
+          {status?.action === 'continue' && (
+            <button
+              data-testid={`continue-import-${video.id}`}
+              style={primaryButtonStyle}
+              onClick={() => onContinue(video.id)}
+            >
+              继续导入
+            </button>
+          )}
           {status?.action === 'retry' && (
-            <button style={primaryButtonStyle} onClick={() => onRetry(video.id)}>重试导入</button>
+            <button
+              data-testid={`retry-import-${video.id}`}
+              style={primaryButtonStyle}
+              onClick={() => onRetry(video.id)}
+            >
+              重试导入
+            </button>
           )}
           {status?.action === 'cancel' && (
-            <button style={primaryButtonStyle} onClick={() => onCancel(video.id)}>取消导入</button>
+            <button
+              data-testid={`cancel-import-${video.id}`}
+              style={primaryButtonStyle}
+              onClick={() => onCancel(video.id)}
+            >
+              取消导入
+            </button>
           )}
-          <button style={buttonStyle} onClick={onClose}>关闭</button>
+          <button data-testid={`close-import-${video.id}`} style={buttonStyle} onClick={onClose}>
+            关闭
+          </button>
         </div>
       </div>
     </div>

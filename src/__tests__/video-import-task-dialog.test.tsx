@@ -29,7 +29,7 @@ vi.mock('@/lib/tauri-env', () => ({
 import { VideoListPage } from '@/pages/VideoListPage'
 import App from '@/App'
 import { getDb, resetDb } from '@/models/db-singleton'
-import { getVideoById, insertVideo, transitionVideoImportState } from '@/models/database'
+import { getVideoById, insertVideo, listVideos, transitionVideoImportState } from '@/models/database'
 import { recordCapabilityCheck } from '@/settings/model-capabilities'
 import {
   runtimeModelFromPoolEntry,
@@ -101,7 +101,7 @@ afterEach(() => {
   resetDb()
 })
 
-describe('AC-LV-19 import task details', () => {
+describe('AC-LV-19 and AC-LV-20 import task details', () => {
   it('opens and closes every non-ready state without starting a task or changing SQLite', async () => {
     const db = await getDb()
     const records: Video[] = [
@@ -187,6 +187,103 @@ describe('AC-LV-19 import task details', () => {
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
       expect(await getVideoById(db, record.id)).toEqual(before)
     }
+  })
+
+  it('continues one restart-stale pending record only after an explicit single-flight action', async () => {
+    const db = await getDb()
+    await insertVideo(db, {
+      id: 'stale-pending-task',
+      title: '等待继续课程',
+      source: 'local',
+      filePath: 'D:\\courses\\stale-pending.mp4',
+      thumbnail: '',
+      duration: 60,
+      language: 'zh',
+      status: 'pending',
+      createdAt: 1,
+      position: 0,
+      lastStudiedAt: 1,
+    })
+    configureRunnableSettings()
+    let finishPipeline: () => void = () => undefined
+    const pipelineGate = new Promise<void>((resolve) => {
+      finishPipeline = resolve
+    })
+    let pipelineSignal: AbortSignal | undefined
+    mocks.runPipeline.mockImplementation(async (
+      inputVideo,
+      _settings,
+      callbacks,
+      inputDb,
+      _asrModel,
+      options,
+    ) => {
+      pipelineSignal = options.signal
+      await transitionVideoImportState(
+        inputDb,
+        inputVideo.id,
+        { status: 'pending', stage: null },
+        { status: 'processing', stage: 'asr' },
+      )
+      callbacks.onProgress('asr', 25)
+      await pipelineGate
+      await transitionVideoImportState(
+        inputDb,
+        inputVideo.id,
+        { status: 'processing', stage: 'asr' },
+        {
+          status: 'failed',
+          stage: 'asr',
+          errorMessage: '确定性测试终态',
+        },
+      )
+    })
+
+    render(<VideoListPage />)
+    const card = await screen.findByTestId('card-stale-pending-task')
+    fireEvent.click(within(card).getByText('等待继续课程'))
+    let dialog = await screen.findByRole('dialog', { name: '等待继续课程导入任务' })
+
+    expect(mocks.runPipeline).not.toHaveBeenCalled()
+    expect(await getVideoById(db, 'stale-pending-task')).toMatchObject({
+      status: 'pending',
+      stage: undefined,
+    })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(mocks.runPipeline).not.toHaveBeenCalled()
+    expect(await getVideoById(db, 'stale-pending-task')).toMatchObject({
+      status: 'pending',
+      stage: undefined,
+    })
+
+    fireEvent.click(within(card).getByText('等待继续课程'))
+    dialog = await screen.findByRole('dialog', { name: '等待继续课程导入任务' })
+    const continueButton = within(dialog).getByRole('button', { name: '继续导入' })
+    act(() => {
+      continueButton.click()
+      continueButton.click()
+    })
+
+    await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledOnce())
+    await waitFor(() => expect(dialog).toHaveTextContent('Whisper 转写 · 25%'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    expect(pipelineSignal?.aborted).toBe(false)
+
+    await act(async () => {
+      finishPipeline()
+      await pipelineGate
+    })
+    await waitFor(async () => expect(await getVideoById(db, 'stale-pending-task')).toMatchObject({
+      status: 'failed',
+      stage: 'asr',
+      errorMessage: '确定性测试终态',
+    }))
+    expect((await listVideos(db, 'createdAt')).map((video) => video.id)).toEqual([
+      'stale-pending-task',
+    ])
+    expect(mocks.runPipeline).toHaveBeenCalledOnce()
   })
 
   it('opens a failed task without retrying it or changing its persisted failure', async () => {
