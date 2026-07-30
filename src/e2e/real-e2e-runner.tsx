@@ -6,6 +6,7 @@ import {
   getSentencesByVideoId,
   getVideoById,
   insertVideo,
+  listVideos,
   type Database,
 } from '@/models/database'
 import type { ImportCheckpoint, Sentence, Video, VideoStatus } from '@/models/types'
@@ -90,13 +91,26 @@ interface RuntimeSettingsSchemaResult {
   error?: string
 }
 
+interface PendingImportRecoveryResult {
+  status: 'running' | 'passed' | 'failed'
+  videoId?: string
+  videoStatus?: VideoStatus
+  videoStage?: Video['stage'] | null
+  matchingVideoCount?: number
+  totalVideoCount?: number
+  error?: string
+}
+
 declare global {
   interface Window {
     __RAIN_E2E_RESULT__?: RealE2eResult
     __RAIN_E2E_START__?: boolean
     __RAIN_RUNTIME_SETTINGS_SCHEMA__?: RuntimeSettingsSchemaResult
+    __RAIN_PENDING_IMPORT_RECOVERY__?: PendingImportRecoveryResult
   }
 }
+
+const PENDING_IMPORT_RECOVERY_VIDEO_ID = 'rain-pending-import-recovery-e2e-video'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -218,6 +232,44 @@ async function publishRuntimeSettingsSchema(): Promise<void> {
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause)
     window.__RAIN_RUNTIME_SETTINGS_SCHEMA__ = { status: 'failed', error }
+  }
+}
+
+async function publishPendingImportRecoveryFixture(seedIfMissing: boolean): Promise<void> {
+  window.__RAIN_PENDING_IMPORT_RECOVERY__ = { status: 'running' }
+  try {
+    const db = await getDb()
+    let video = await getVideoById(db, PENDING_IMPORT_RECOVERY_VIDEO_ID)
+    if (!video && seedIfMissing) {
+      const createdAt = Date.now()
+      await insertVideo(db, {
+        id: PENDING_IMPORT_RECOVERY_VIDEO_ID,
+        title: 'Rain Pending Import Recovery E2E',
+        source: 'local',
+        filePath: 'D:\\rain-e2e\\pending-import-recovery.mp4',
+        thumbnail: '',
+        duration: 1,
+        language: '',
+        status: 'pending',
+        createdAt,
+        position: 0,
+        lastStudiedAt: createdAt,
+      })
+      video = await getVideoById(db, PENDING_IMPORT_RECOVERY_VIDEO_ID)
+    }
+    if (!video) throw new Error('Pending import recovery fixture is missing')
+    const videos = await listVideos(db, 'createdAt')
+    window.__RAIN_PENDING_IMPORT_RECOVERY__ = {
+      status: 'passed',
+      videoId: video.id,
+      videoStatus: video.status,
+      videoStage: video.stage ?? null,
+      matchingVideoCount: videos.filter((candidate) => candidate.id === video.id).length,
+      totalVideoCount: videos.length,
+    }
+  } catch (cause) {
+    const error = cause instanceof Error ? cause.message : String(cause)
+    window.__RAIN_PENDING_IMPORT_RECOVERY__ = { status: 'failed', error }
   }
 }
 
@@ -507,11 +559,18 @@ export function RealE2eRunner() {
   useEffect(() => {
     if (!isTauri()) return
     let cancelled = false
+    let pendingImportRefreshId: number | undefined
     void tauriInvoke<RealE2eConfig | null>('get_real_e2e_config')
       .then(async (config) => {
         if (cancelled || !config?.enabled) return
         if (config.runMode === 'runtime-settings') {
           await publishRuntimeSettingsSchema()
+          await publishPendingImportRecoveryFixture(true)
+          if (!cancelled) {
+            pendingImportRefreshId = window.setInterval(() => {
+              void publishPendingImportRecoveryFixture(false)
+            }, 250)
+          }
           return
         }
         setStatus('running')
@@ -531,6 +590,7 @@ export function RealE2eRunner() {
       })
     return () => {
       cancelled = true
+      if (pendingImportRefreshId !== undefined) window.clearInterval(pendingImportRefreshId)
     }
   }, [])
 

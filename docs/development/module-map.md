@@ -1,7 +1,7 @@
 # Rain 模块地图
 
 > 状态：Active
-> 更新日期：2026-07-29
+> 更新日期：2026-07-30
 > 作用：规定知识和变化应该集中在哪里。这里的“接口”包括调用方式、状态约束、错误模式和副作用。
 
 ## 1. 总体依赖方向
@@ -29,7 +29,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | 模块 | 负责 | 不负责 | 主要位置 |
 | --- | --- | --- | --- |
 | UI | 收集用户操作、展示状态和错误 | 编排完整导入、决定数据库事务、调用多个底层命令 | `src/pages/`、`src/ui/` |
-| Import Task Details | `App` 保持跨可见页面的列表/Controller Owner；`VideoListPage` 只选择当前 Video；dialog 合并 SQLite 任务事实与当前会话进度，并适配显式重试/取消 | 卡片点击时启动任务、保存实时进度、重新实现 Pipeline 生命周期 | `src/App.tsx`、`src/pages/VideoListPage.tsx`、`src/ui/components/import-task-dialog.tsx` |
+| Import Task Details | `App` 保持跨可见页面的列表/Controller Owner；`VideoListPage` 只选择当前 Video；dialog 合并 SQLite 任务事实与当前会话进度，并适配显式继续/重试/取消 | 卡片点击时启动任务、保存实时进度、重新实现 Pipeline 生命周期、扫描并自动恢复重启遗留任务 | `src/App.tsx`、`src/pages/VideoListPage.tsx`、`src/ui/components/import-task-dialog.tsx` |
 | Video Import Controller | 创建本地视频记录，启动/重试/取消 Pipeline，归一化进度并修复失败状态 | 文件选择 UI、列表排序和卡片渲染 | `src/pipeline/video-import-controller.ts` |
 | Import Pipeline | 执行 ASR -> Stage2 -> merging，处理取消、失败和恢复 | 页面布局、具体 SQL、Whisper 内部实现 | `src/pipeline/pipeline-orchestrator.ts` |
 | ASR Stage | 解析模型、调用 Whisper、校验结果、原子保存 ASR | Stage2、页面提示布局 | `src/pipeline/asr-runner.ts` |
@@ -100,6 +100,8 @@ cancelAndWait(videoId)
 `AC-LV-13` 的生产删除入口由 `VideoListPage` 适配：页面只按需调用公共查询取得段落/笔记数量，通过 `VideoImportController.cancelAndWait` 的 per-Video stopping gate 阻止新任务、请求桌面取消并结算全部活动 Promise，再调用 `deleteVideoWithCascade` 并把已提交结果发布到列表；取消命令失败必须在任何删除前立即返回。Controller 的 URL 下载交接必须在媒体发布后、Pipeline 接管前再次检查取消，以释放旧 Owner；删除失败保留的记录不得因此失去重试入口。`VideoCard` 只负责单飞准备、确认、取消、进行中状态和错误展示。跨表清理与回滚仍唯一归属 `database-video-deletion.ts` 和 Rust `video_deletion`，页面与组件不得复制其规则。
 
 `AC-LV-19` 把非 ready 卡片点击定义为无副作用的详情导航：`App` 在应用生命周期内保持 `VideoListPage` 挂载，页面只保存所选 Video ID，`ImportTaskDialog` 从页面给出的 SQLite `Video` 与可选 `ImportProgress` 渲染状态，且只把详情内显式动作回调给 Controller。`VideoImportController` 继续唯一拥有 start/retry/cancel、活动 AbortController 和实时进度接收；设置/学习页切换不得制造第二个看不见旧 Pipeline 的 Owner。Stage2 runner 是 block/attempt 的唯一生产者，经 Pipeline 可选详细回调进入 Controller；UI 不得自行猜分块或重试。实时进度结束时必须清除，不能覆盖新的持久终态。URL 下载在媒体已发布、Pipeline 尚未接管的取消竞态中，Controller 只能以精确 `pending/null` 比较交换收口自己刚发布的记录，不能覆盖其他 Owner 已推进的状态。进程重启后的静态 `processing` 可由显式取消闭合；`pending` 的自动恢复尚未归入本 AC。
+
+`AC-LV-20` 只补充重启遗留 `pending/null` 的显式恢复：新进程加载列表和打开/关闭详情仍必须完全空闲，dialog 只为这一精确持久状态提供“继续导入”，页面把该意图转给当前应用生命周期内的现有 Controller。Controller 的同 Video ID 活动任务表负责 single-flight，Pipeline 和数据库继续更新原记录；关闭 dialog 只释放 UI 选择，不触碰 AbortController。不得把该入口扩展为启动扫描、跨进程 lease/队列或 Controller 架构迁移。
 
 普通单记录 SQL 可以留在数据库内部 module。凡是一个业务结果需要多个记录或多张表共同提交，SQLite 路径必须经一次专用 Tauri command 进入 Rust persistence module；前端不得再发送事务控制 SQL。该全局边界由 `AC-AR-01` 和可复用的负向 policy fixture 裁判，内存 adapter 或 SQL 调用顺序不能替代 Rust 事务结果。
 

@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Get-Item -LiteralPath (Split-Path -Parent $PSScriptRoot)).FullName
 $testAlias = 'Rain Runtime Settings E2E'
 $testModel = 'rain-runtime-settings-e2e-model'
+$pendingImportVideoId = 'rain-pending-import-recovery-e2e-video'
 $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $diagnosticsRoot = Join-Path $temporaryRoot 'rain-runtime-settings-e2e-latest-failure'
 $runRoot = Join-Path $temporaryRoot ("rain-runtime-settings-e2e-" + [Guid]::NewGuid().ToString('N'))
@@ -229,6 +230,95 @@ return { ok: errors.length === 0, error: errors.join('; ') };
   }
 }
 
+function Assert-PendingImportFixture(
+  [string]$SessionId,
+  [string]$ExpectedStatus,
+  [AllowNull()][string]$ExpectedStage
+) {
+  $expectedStageExpression = if ([string]::IsNullOrEmpty($ExpectedStage)) {
+    'null'
+  } else {
+    "'$ExpectedStage'"
+  }
+  Wait-WebDriverCondition $SessionId "pending import fixture status $ExpectedStatus" @"
+const fixture = window.__RAIN_PENDING_IMPORT_RECOVERY__;
+return fixture?.status === 'passed'
+  && fixture.videoId === '$pendingImportVideoId'
+  && fixture.videoStatus === '$ExpectedStatus'
+  && (fixture.videoStage ?? null) === $expectedStageExpression;
+"@
+  $result = Invoke-WebDriverScript $SessionId @'
+const fixture = window.__RAIN_PENDING_IMPORT_RECOVERY__;
+return {
+  status: fixture?.status || 'missing',
+  error: fixture?.error || '',
+  videoId: fixture?.videoId || '',
+  videoStatus: fixture?.videoStatus || '',
+  videoStage: fixture?.videoStage ?? null,
+  matchingVideoCount: fixture?.matchingVideoCount ?? -1,
+  totalVideoCount: fixture?.totalVideoCount ?? -1,
+};
+'@
+  if ($result.status -ne 'passed') {
+    throw "Pending import recovery fixture failed: $($result.error)"
+  }
+  if ($result.videoId -ne $pendingImportVideoId -or $result.videoStatus -ne $ExpectedStatus -or [string]$result.videoStage -ne [string]$ExpectedStage -or $result.matchingVideoCount -ne 1 -or $result.totalVideoCount -ne 1) {
+    throw "Pending import fixture did not preserve one SQLite row: $($result | ConvertTo-Json -Compress)"
+  }
+}
+
+function Open-PendingImportDialog([string]$SessionId) {
+  Wait-WebDriverCondition $SessionId 'the pending import recovery card' @"
+return Boolean(document.querySelector('[data-testid="card-$pendingImportVideoId"]'));
+"@
+  $opened = Invoke-WebDriverScript $SessionId @"
+const card = document.querySelector('[data-testid="card-$pendingImportVideoId"]');
+const title = card?.querySelector('span[aria-disabled]');
+if (!title) return false;
+title.click();
+return true;
+"@
+  if ($opened -ne $true) { throw 'Could not open the pending import recovery task detail.' }
+  Wait-WebDriverCondition $SessionId 'the pending import recovery dialog' @"
+return Boolean(document.querySelector('[aria-labelledby="import-task-title-$pendingImportVideoId"]'));
+"@
+}
+
+function Close-PendingImportDialog([string]$SessionId) {
+  $closed = Invoke-WebDriverScript $SessionId @"
+const dialog = document.querySelector('[aria-labelledby="import-task-title-$pendingImportVideoId"]');
+const button = dialog?.querySelector('[data-testid="close-import-$pendingImportVideoId"]');
+if (!button) return false;
+button.click();
+return true;
+"@
+  if ($closed -ne $true) { throw 'Could not close the pending import recovery task detail.' }
+  Wait-WebDriverCondition $SessionId 'the pending import recovery dialog to close' @"
+return !document.querySelector('[aria-labelledby="import-task-title-$pendingImportVideoId"]');
+"@
+}
+
+function Continue-PendingImport([string]$SessionId) {
+  $continued = Invoke-WebDriverScript $SessionId @"
+const dialog = document.querySelector('[aria-labelledby="import-task-title-$pendingImportVideoId"]');
+const button = dialog?.querySelector('[data-testid="continue-import-$pendingImportVideoId"]');
+if (!button) return false;
+button.click();
+button.click();
+return true;
+"@
+  if ($continued -ne $true) { throw 'The pending import detail did not expose the explicit continue action.' }
+}
+
+function Assert-PendingImportFailureVisible([string]$SessionId) {
+  Wait-WebDriverCondition $SessionId 'the explicit pending import terminal result' @"
+const dialog = document.querySelector('[aria-labelledby="import-task-title-$pendingImportVideoId"]');
+const alert = dialog?.querySelector('[role="alert"]');
+const retry = dialog?.querySelector('[data-testid="retry-import-$pendingImportVideoId"]');
+return Boolean(alert?.textContent?.trim()) && Boolean(retry);
+"@
+}
+
 function Test-ModelVisible([string]$SessionId) {
   return Invoke-WebDriverScript $SessionId @"
 return [...document.querySelectorAll('[data-testid^="model-entry-"]')]
@@ -369,11 +459,31 @@ try {
   Write-Output 'Runtime Settings E2E phase: add model'
   $phase = 'add-model'
   Add-TestModel $sessionId
+  Write-Output 'Runtime Settings E2E phase: seed pending import recovery fact'
+  $phase = 'seed-pending-import'
+  Assert-PendingImportFixture $sessionId 'pending' $null
   Close-WebDriverSession $sessionId
   $sessionId = $null
 
   $phase = 'first-restart'
   $sessionId = New-WebDriverSession $appBinary
+  Wait-WebDriverCondition $sessionId 'the video list page after first restart' @'
+return Boolean(document.querySelector('[data-testid="video-list-page"]'));
+'@
+  Write-Output 'Runtime Settings E2E phase: prove pending import remains idle after restart'
+  Assert-PendingImportFixture $sessionId 'pending' $null
+  Start-Sleep -Milliseconds 1000
+  Assert-PendingImportFixture $sessionId 'pending' $null
+  Open-PendingImportDialog $sessionId
+  Close-PendingImportDialog $sessionId
+  Assert-PendingImportFixture $sessionId 'pending' $null
+  Open-PendingImportDialog $sessionId
+  Write-Output 'Runtime Settings E2E phase: explicitly continue the same pending import'
+  $phase = 'continue-pending-import'
+  Continue-PendingImport $sessionId
+  Assert-PendingImportFixture $sessionId 'failed' 'asr'
+  Assert-PendingImportFailureVisible $sessionId
+  Close-PendingImportDialog $sessionId
   Open-ReadySettingsPage $sessionId
   Write-Output 'Runtime Settings E2E phase: verify first restart'
   if (-not (Test-ModelVisible $sessionId)) { throw 'The test model did not survive the first desktop restart.' }
@@ -385,12 +495,20 @@ try {
 
   $phase = 'second-restart'
   $sessionId = New-WebDriverSession $appBinary
+  Wait-WebDriverCondition $sessionId 'the video list page after second restart' @'
+return Boolean(document.querySelector('[data-testid="video-list-page"]'));
+'@
+  Write-Output 'Runtime Settings E2E phase: verify pending import result survived restart'
+  Assert-PendingImportFixture $sessionId 'failed' 'asr'
+  Open-PendingImportDialog $sessionId
+  Assert-PendingImportFailureVisible $sessionId
+  Close-PendingImportDialog $sessionId
   Open-ReadySettingsPage $sessionId
   Write-Output 'Runtime Settings E2E phase: verify second restart'
   if (Test-ModelVisible $sessionId) { throw 'The deleted test model returned after the second desktop restart.' }
 
   $runSucceeded = $true
-  Write-Output 'Runtime Settings desktop E2E passed: initialize -> add -> restart -> delete -> restart.'
+  Write-Output 'Runtime Settings desktop E2E passed: initialize -> add -> pending restart recovery -> delete -> restart.'
 } catch {
   $primaryError = $_
 } finally {

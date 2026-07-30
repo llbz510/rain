@@ -1,16 +1,17 @@
-# Rain Runtime Settings Desktop E2E
+# Rain Runtime Settings and Pending Import Desktop E2E
 
 > 状态：Active
-> 更新日期：2026-07-28
-> 作用：定义无需 live-key 的 Runtime Settings 短桌面 Judge，防止 Store、Tauri SQL plugin、SQLite 和进程重启之间出现假绿。
+> 更新日期：2026-07-30
+> 作用：定义无需 live-key 的 Runtime Settings 与 pending 导入恢复短桌面 Judge，防止 Store、Controller、Tauri SQL plugin、SQLite 和进程重启之间出现假绿。
 
 ## 对应合同
 
 - `AC-LV-14`：添加模型形成的完整 Runtime Settings 快照必须真实落库，重启后仍存在。
 - `AC-LV-15`：删除模型后再次重启，条目不得复活。
 - `AC-LV-16`：首次 hydration 完成前不得写入；桌面 Judge 必须等待生产设置页公开的 `ready` 状态。
+- `AC-LV-20`：重启遗留的 `pending/null` Video 必须保持空闲，只有详情内显式“继续导入”才能启动同一记录；重复点击 single-flight，确定性终态必须跨再次重启保留。
 
-Runtime Settings Owner 保持为生产 Store、Runtime Settings 规划、数据库 Settings interface 和 Rust `settings_persistence`；schema Owner 是 `createDatabase`/`TauriSqlDatabase`。`RealE2eRunner` 的短模式只通过公共 `Database.listTables/getTableColumns` interface 报告实际值，`scripts/run-runtime-settings-e2e.ps1` 拥有独立期望合同和验证编排；二者都不复制建表 SQL，也不绕过应用直接查询 SQLite。
+Runtime Settings Owner 保持为生产 Store、Runtime Settings 规划、数据库 Settings interface 和 Rust `settings_persistence`；schema Owner 是 `createDatabase`/`TauriSqlDatabase`。pending 恢复 Owner 保持为 App 生命周期内现有 `VideoImportController`，页面与 dialog 只转发显式意图。`RealE2eRunner` 的短模式通过公共 `Database.listTables/getTableColumns` interface 报告实际 schema，并通过公共 Video insert/read/list interface 建立和观察唯一 pending fixture；`scripts/run-runtime-settings-e2e.ps1` 拥有独立期望合同、进程重启和生产 UI 编排。二者都不复制建表 SQL、不直接查询 SQLite，也不绕过 Controller 启动导入。
 
 ## 公开命令
 
@@ -24,18 +25,20 @@ npm run e2e:runtime-settings
 2. 启动真实 Tauri，进入生产设置页并等待 Runtime Settings `ready`；
 3. 读取生产数据库公开的实际 metadata，以独立字面合同检查 7 张表及全部必需列；
 4. 通过真实表单添加一个 API Key 为空的测试 LLM；
-5. 关闭应用并重启，确认该条目仍可见；
-6. 通过真实模型池 UI 删除条目；
-7. 再次关闭并重启，确认条目不再出现；
-8. 关闭 WebDriver 并清理隔离目录。
+5. 通过应用公共数据库 interface 写入唯一 `pending/null` Video，关闭应用并重启；
+6. 在第一次重启中两次确认该 Video 仍为空闲，打开/关闭详情无副作用，再双击显式“继续导入”；
+7. 确认当前 Controller 只启动同一记录，Runtime Settings 预检在无角色配置时失败关闭该行，数据库仍只有一个 Video；
+8. 确认测试模型跨第一次重启可见，再通过真实模型池 UI 删除条目；
+9. 再次关闭并重启，确认模型不再出现，同时同一 Video 的可见失败终态仍存在且没有第二条记录；
+10. 关闭 WebDriver 并清理隔离目录。
 
 `-SkipBuild` 只供本地迭代已构建的同一工作树二进制使用，不是正式交付命令。
 
 ## 安全与边界
 
-边界内：真实 Tauri、生产 Store 初始化与动作、Tauri SQL plugin、真实 SQLite 必需表/列形状、Runtime Settings 事务、两次进程重启和生产设置 UI。
+边界内：真实 Tauri、生产 Store 初始化与动作、Tauri SQL plugin、真实 SQLite 必需表/列形状、Runtime Settings 事务、公共 Video insert/read/list、生产视频列表与任务详情、当前 `VideoImportController` 显式 start、同记录失败关闭、两次进程重启和生产设置 UI。
 
-边界外：schema 版本迁移和新增列兼容政策、其他业务 CRUD 语义、模型连接、能力探针、收费调用、API Key 持久化、Whisper 下载、角色分配、事务故障注入、完整视频导入和 `Verified` Evidence。脚本在启动 driver 前清空当前进程中的已知 LLM Key 环境变量，并确认表单 Key 为空；成功不代表任何模型 `Compatible` 或 `Verified`。
+边界外：schema 版本迁移和新增列兼容政策、其他业务 CRUD 语义、自动启动扫描、跨进程 lease/队列、真实 ASR/Stage2、模型连接、能力探针、收费调用、API Key 持久化、Whisper 下载、角色分配、事务故障注入、完整视频导入和 `Verified` Evidence。脚本在启动 driver 前清空当前进程中的已知 LLM Key 环境变量，并确认表单 Key 为空；pending 流程必须在任何模型请求前因缺少角色配置而确定性失败关闭。成功不代表任何模型 `Compatible` 或 `Verified`。
 
 该 Judge 不进入默认 `harness:check`，因为它依赖 Windows WebView2、`tauri-driver` 和匹配的 `msedgedriver`。相关代码改动交付时仍必须显式运行它，并在 `PROJECT_STATE.md` 记录结果。带 `RAIN_E2E_BUILD=1` 的产物只用于自动化，不得作为普通发布包；默认 `npm run build` 会反向验证普通产物不包含自动化标记。
 
@@ -47,7 +50,7 @@ Tauri/wry 不会仅凭进程中的 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 自�
 
 远端失败时只上传脚本已生成的 `rain-runtime-settings-e2e-latest-failure` 脱敏目录，保留 7 天；隔离 SQLite 和整个临时目录都不上传。该 workflow 不自动响应 pull request/push，不成为默认合并门禁，不生成 Evidence。纯 workflow_dispatch 文件必须先存在于默认分支才可首次触发，因此首次合并前只能记录为 Gap，不能以 YAML 存在冒充远端 GREEN。
 
-首次完整 GREEN 为 workflow_dispatch run `30341065896`，目标是 merge commit `9251962`。该 run 在精确匹配的 WebView2 Runtime/driver 150.0.4078.65 上完成真实 schema、添加、第一次重启保留、删除和第二次重启消失，且没有失败 artifact；它签发 `AC-HE-05` 对该目标提交的 Strong 覆盖，不自动签发后续提交。
+首次完整 GREEN 为 workflow_dispatch run `30341065896`，目标是 merge commit `9251962`。该历史 run 在精确匹配的 WebView2 Runtime/driver 150.0.4078.65 上完成当时的真实 schema、添加、第一次重启保留、删除和第二次重启消失，且没有失败 artifact；它签发 `AC-HE-05` 对该目标提交的 Strong 覆盖，不自动签发后续提交，也不签发后来新增的 `AC-LV-20`。`AC-LV-20` 必须由包含新断言的当前公开命令在对应目标代码上重新运行。
 
 ## 失败诊断
 

@@ -25,7 +25,7 @@ export interface ImportStatusDisplay {
   stageLabel: string
   percent: number
   errorMessage?: string
-  action?: 'cancel' | 'retry'
+  action?: 'cancel' | 'continue' | 'retry'
 }
 
 export function getImportStatus(video: Video, progressPercent?: number): ImportStatusDisplay | null {
@@ -42,6 +42,9 @@ export function getImportStatus(video: Video, progressPercent?: number): ImportS
   if (video.status === 'processing') return { stageLabel: detail.label, percent: detail.percent, action: 'cancel' }
   if (video.status === 'failed' || video.status === 'cancelled') {
     return { stageLabel: detail.label, percent: detail.percent, errorMessage: video.errorMessage, action: 'retry' }
+  }
+  if (video.status === 'pending' && video.stage == null) {
+    return { stageLabel: detail.label, percent: detail.percent, action: 'continue' }
   }
   return { stageLabel: detail.label, percent: detail.percent }
 }

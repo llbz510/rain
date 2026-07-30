@@ -355,6 +355,10 @@ export function VideoListPage() {
     setSelectedImportVideoId(videoId)
   }, [])
 
+  const handleContinueImport = useCallback((videoId: string) => {
+    importController?.start(videoId)
+  }, [importController])
+
   const handleRetryImport = useCallback((videoId: string) => {
     importController?.start(videoId)
   }, [importController])
@@ -576,6 +580,7 @@ export function VideoListPage() {
               video={selectedVideo}
               progress={pipelineProgress[selectedVideo.id]}
               onClose={() => setSelectedImportVideoId(null)}
+              onContinue={handleContinueImport}
               onRetry={handleRetryImport}
               onCancel={handleCancelImport}
             />
