@@ -247,6 +247,7 @@ export function VideoListPage() {
   const [importUrl, setImportUrl] = useState('')
   const [urlError, setUrlError] = useState('')
   const [localImportError, setLocalImportError] = useState('')
+  const [localImportWarning, setLocalImportWarning] = useState('')
   const [openError, setOpenError] = useState('')
   const [pipelineProgress, setPipelineProgress] = useState<Record<string, { stage: 'download' | 'asr' | 'stage2' | 'merging'; percent: number }>>({})
 
@@ -333,6 +334,8 @@ export function VideoListPage() {
       },
       onWarning: (message, error) => {
         console.warn(`[VideoListPage] ${message}`, error)
+        const detail = error instanceof Error ? error.message : String(error)
+        setLocalImportWarning(detail ? `${message}：${detail}` : message)
       },
     })
   }, [db])
@@ -377,6 +380,7 @@ export function VideoListPage() {
   const handleLocalImport = async () => {
     setImportMenuOpen(false)
     setLocalImportError('')
+    setLocalImportWarning('')
     try {
       const { isTauri } = await import('@/lib/tauri-env')
       if (!isTauri()) {
@@ -506,6 +510,27 @@ export function VideoListPage() {
               }}
             >
               {localImportError}
+            </div>
+          )}
+          {localImportWarning && (
+            <div
+              role="status"
+              style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                marginTop: '4px',
+                maxWidth: '480px',
+                background: 'var(--color-surface)',
+                border: '1px solid #d29922',
+                borderRadius: 'var(--radius-1)',
+                padding: '6px 10px',
+                fontSize: 'var(--font-size-xs)',
+                color: '#d29922',
+                zIndex: 20,
+              }}
+            >
+              {localImportWarning}
             </div>
           )}
         </div>

@@ -73,7 +73,7 @@
 | DEC-PRD-057 | `M13-visual-design.md`、`M17-video-list.md` | Proposed | 处理中状态受 `AC-LV-10` 控制；ready 卡片全部字段和精确网格没有 Active AC | ready 与非 ready 视频卡采用缩略图网格和不同信息层级 |
 | DEC-PRD-058 | `M17-video-list.md` | Proposed | 数据库有排序实现级测试，但三档 UI 和默认选择没有产品 AC | 视频列表支持最近学习、导入时间、名称三种排序 |
 | DEC-PRD-059 | `M01-positioning.md`、`M17-video-list.md` | Proposed | 标题查询有实现级测试；搜索 UI 与无筛选边界没有 Active AC | v1 只按标题关键词搜索，不建设标签、筛选或跨视频正文检索 |
-| DEC-PRD-060 | `M15-data-persistence.md`、`M17-video-list.md` | Confirmed AC | `AC-LV-13` | 删除视频以单事务级联业务数据，并保留用户本地源文件 |
+| DEC-PRD-060 | `M15-data-persistence.md`、`M17-video-list.md` | Proposed | `AC-LV-13` 已确认数据库级联删除和保留本地源文件；M17 同时要求删除应用缩略图，但当前没有覆盖派生文件清理/GC 的 Active AC | 删除视频以单事务级联业务数据、删除应用缩略图，并保留用户本地源文件 |
 | DEC-PRD-061 | `M17-video-list.md` | Out-of-scope | v1 不提供学习数据或视频导出 | 暂不实现导出 |
 | DEC-PRD-062 | `M17-video-list.md` | Proposed | 状态一致性受 `AC-LV-10` 控制；非 ready 卡重开导入框、顶栏和空状态未形成完整 AC | 列表提供导入、排序、搜索、空状态和非 ready 任务入口 |
 | DEC-PRD-063 | `M13-visual-design.md` | Proposed | 暗色主题存在于实现，但没有 Active AC 禁止亮色或跟随系统 | 只提供暗色主题 |
@@ -116,8 +116,8 @@
 
 ## 读取结论
 
-- 42 条决策已有覆盖其当前概括行为的 Confirmed AC。
-- 53 条决策保留为 Proposed；其中大量行为可能已有局部实现或组件 Harness，但尚不能形成完整完成声明。
+- 41 条决策已有覆盖其当前概括行为的 Confirmed AC。
+- 54 条决策保留为 Proposed；其中大量行为可能已有局部实现或组件 Harness，但尚不能形成完整完成声明。
 - 4 条决策当前为 Out-of-scope：手动分块、导图区编辑、v1 导出和被后续视觉决定替代的早期卡片草案。
 
 这些数量只用于发现控制面缺口，不是项目完成百分比。下一条开发边界应从 Proposed 中按失控风险、用户价值、Judge 成本和 Owner 清晰度排序，而不是按编号顺序补齐。

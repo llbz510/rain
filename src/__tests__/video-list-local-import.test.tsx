@@ -2,11 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  convertFileSrc: vi.fn((path: string) => `asset://local/${encodeURIComponent(path)}`),
   open: vi.fn(),
   runPipeline: vi.fn(),
   tauriInvoke: vi.fn(),
 }))
 
+vi.mock('@tauri-apps/api/core', () => ({ convertFileSrc: mocks.convertFileSrc }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mocks.open }))
 vi.mock('@/lib/tauri-env', () => ({
   isTauri: () => true,
@@ -81,12 +83,15 @@ beforeEach(() => {
   mocks.tauriInvoke.mockReset()
   mocks.open.mockResolvedValue('D:\\courses\\signal.mp4')
   mocks.runPipeline.mockImplementation(() => new Promise<void>(() => undefined))
-  mocks.tauriInvoke.mockImplementation(async (command: string) => {
+  mocks.tauriInvoke.mockImplementation(async (
+    command: string,
+    args?: Record<string, unknown>,
+  ) => {
     if (command === 'probe_video_info') {
       return { title: 'Signal Course', duration: 120, thumbnail: '' }
     }
     if (command === 'generate_thumbnail') {
-      return 'D:\\courses\\signal_thumb.jpg'
+      return `D:\\rain-app-data\\thumbnails\\${String(args?.videoId)}.jpg`
     }
     throw new Error(`Unexpected Tauri command: ${command}`)
   })
@@ -114,9 +119,41 @@ describe('VideoListPage local import', () => {
       title: 'Signal Course',
       source: 'local',
       filePath: 'D:\\courses\\signal.mp4',
+      thumbnail: `D:\\rain-app-data\\thumbnails\\${videos[0].id}.jpg`,
       status: 'pending',
     })
     await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledTimes(1))
     expect(mocks.tauriInvoke).not.toHaveBeenCalledWith('check_ytdlp_command', expect.anything())
   })
+
+  it('keeps importing and shows thumbnail generation and cleanup failures to the user', async () => {
+    mocks.tauriInvoke.mockImplementation(async (command: string) => {
+      if (command === 'probe_video_info') {
+        return { title: 'Signal Course', duration: 120, thumbnail: '' }
+      }
+      if (command === 'generate_thumbnail') {
+        throw new Error(
+          'ffmpeg extraction failed; cleanup temporary thumbnail: partial is locked',
+        )
+      }
+      throw new Error(`Unexpected Tauri command: ${command}`)
+    })
+    render(<VideoListPage />)
+
+    const importButton = screen.getByRole('button', { name: '导入' })
+    await waitFor(() => expect(importButton).toBeEnabled())
+    fireEvent.click(importButton)
+    fireEvent.click(screen.getByRole('button', { name: '本地文件' }))
+
+    expect(await screen.findByText('Signal Course')).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent('缩略图生成失败，继续导入')
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'cleanup temporary thumbnail: partial is locked',
+    )
+    await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledTimes(1))
+    expect(await listVideos(await getDb())).toEqual([
+      expect.objectContaining({ status: 'pending', thumbnail: '' }),
+    ])
+  })
+
 })

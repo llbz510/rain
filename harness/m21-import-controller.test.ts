@@ -1,7 +1,7 @@
 // harness/m21-import-controller.test.ts
 // ========================================
 // M21 Harness: 本地导入桌面命令适配器
-// Harness migration: 2026-07-26
+// Harness migrations: 2026-07-26, 2026-07-30 thumbnail ownership
 // ========================================
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -75,13 +75,13 @@ beforeEach(() => {
     if (command === 'probe_video_info') {
       return { title: 'Course', duration: 90, thumbnail: 'probe-thumb.jpg' }
     }
-    if (command === 'generate_thumbnail') return 'generated-thumb.jpg'
+    if (command === 'generate_thumbnail') return 'D:\\rain-app-data\\thumbnails\\v_2000.jpg'
     if (command === 'cancel_import') return undefined
     throw new Error(`Unexpected Tauri command: ${command}`)
   })
 })
 
-describe('M21 / AC-LV-02: 桌面探测和缩略图命令', () => {
+describe('M21 / AC-LV-02 / AC-LV-18: 桌面探测和缩略图命令', () => {
   it('使用真实命令名和参数，并持久化探测结果', async () => {
     const { controller, db } = await makeHarness()
 
@@ -93,11 +93,15 @@ describe('M21 / AC-LV-02: 桌面探测和缩略图命令', () => {
     })
     expect(mocks.tauriInvoke).toHaveBeenNthCalledWith(2, 'generate_thumbnail', {
       filePath: 'D:\\courses\\course.mp4',
-      outputPath: 'D:\\courses\\course_thumb.jpg',
+      videoId: 'v_2000',
       timestamp: 1,
     })
     expect(await listVideos(db)).toEqual([
-      expect.objectContaining({ title: 'Course', thumbnail: 'generated-thumb.jpg', status: 'pending' }),
+      expect.objectContaining({
+        title: 'Course',
+        thumbnail: 'D:\\rain-app-data\\thumbnails\\v_2000.jpg',
+        status: 'pending',
+      }),
     ])
   })
 

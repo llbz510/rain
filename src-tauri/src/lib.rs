@@ -11,10 +11,15 @@ pub mod runtime;
 pub mod scheduler;
 pub mod settings_persistence;
 pub mod structure_persistence;
+pub mod thumbnail_storage;
 pub mod video_deletion;
 pub mod whisper;
 pub mod whisper_model_download;
 pub mod ytdlp;
+
+#[cfg(test)]
+#[path = "thumbnail_storage_tests.rs"]
+mod thumbnail_storage_tests;
 
 use std::sync::Arc;
 
