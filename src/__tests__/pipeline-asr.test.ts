@@ -480,6 +480,18 @@ describe('fail-closed ASR pipeline', () => {
     })
 
     expect(await getVideoById(db, video.id)).toMatchObject({ status: 'ready' })
+    expect(handlers.onProgress).toHaveBeenCalledWith('stage2', 0, {
+      blockCurrent: 1,
+      blockTotal: 1,
+      percent: 0,
+      retrying: false,
+    })
+    expect(handlers.onProgress).toHaveBeenCalledWith('stage2', 100, {
+      blockCurrent: 1,
+      blockTotal: 1,
+      percent: 100,
+      retrying: false,
+    })
     expect(await getSentencesByVideoId(db, video.id)).toEqual([
       expect.objectContaining({ id: 'real_s_1', nodeId: validStage2.nodes[2].id, sortOrder: 0 }),
       expect.objectContaining({ id: 'real_s_2', nodeId: validStage2.nodes[2].id, sortOrder: 1 }),

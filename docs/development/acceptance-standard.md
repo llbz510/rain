@@ -255,6 +255,16 @@ Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝
 
 裁判：`src/__tests__/video-thumbnail-ownership.test.tsx` 通过生产 `VideoCard` 证明本地路径转换、HTTP(S) 保持和空图占位；经批准迁移的 M21 通过公开 `VideoImportController`、真实内存数据库和 Tauri adapter 证明前端只传 `filePath/videoId/timestamp` 并保存 Rust 返回路径；未锁定的 `video-import-local-id.test.ts` 证明两个 Controller 共享数据库并发导入时仍在缩略图调用前取得不同 Video ID，`video-list-local-import.test.tsx` 通过生产页面证明成功路径和“缩略图失败可见但导入继续”；Rust `thumbnail_storage_tests.rs` 通过真实媒体 fixture、隔离临时 app-data 和可控清理失败 seam 证明最终文件位置、非空提交、源目录不变、非法 Video ID 拒绝、普通失败无残留、既有最终文件保护，并在操作系统拒绝清理时保留失败诊断而不伪装成功。本 AC 不签发在线缩略图本地化、派生文件删除/GC、精确卡片视觉或真实桌面 E2E。
 
+### AC-LV-19 非就绪视频卡必须无副作用地打开导入任务详情
+
+状态：`Confirmed`
+
+用户点击 `pending`、`processing`、`failed` 或 `cancelled` Video 卡时，Rain 必须只打开该 Video 的导入任务详情，不得因此启动、重试或取消 Pipeline，也不得改变持久化状态。详情必须显示 SQLite 中可恢复的状态、阶段和错误；活动任务收到进度事件时，还必须显示真实阶段、百分比、分块位置和重试状态。只有详情中的显式动作才能重试或取消：失败或已取消任务可重试，处理中任务可取消；关闭详情不得停止后台任务。任务完成、失败或取消后必须继续刷新并展示同一 Video 记录。
+
+实现归属：`App` 在自身生命周期内保持唯一 `VideoListPage`/Controller Owner，不得因切换列表、设置或学习页丢失仍运行的前端 Pipeline；`VideoListPage` 只拥有当前详情目标和开关；生产 `ImportTaskDialog` 只展示任务事实并把显式动作适配到回调；`VideoImportController` 继续唯一拥有 start/retry/cancel 和任务生命周期；Stage2 runner 生成真实分块位置与重试状态，Pipeline/Controller 只传递并归一化；SQLite `Video` 是跨重启 status、stage、error 的事实源，实时进度只作为当前会话覆盖，不得另存为新的业务事实。
+
+裁判：生产页面 Judge 通过公开卡片和 dialog 交互、真实内存数据库、公开 Video 读取及 Pipeline 外部 seam 证明：打开和关闭所有非就绪状态均无任务或持久化副作用；持久状态、错误和实时详细进度可见；只有显式重试会启动一次现有 Controller 路径，处理中任务即使来自进程重启也能经桌面取消并闭合持久态；关闭活动任务详情后后台继续，设置页往返后仍能取消原 Pipeline，并在终态刷新同一记录。Stage2 runner 与 Pipeline Judge 必须用真实多分块和失败重试 seam 证明 block/percent/retrying 由生产者产生并贯通公开回调，不得只向 UI 注入虚构事件。锁定 M17 继续只裁判 `openImportDialog` 组件合同，不得把点击卡片直接启动 Pipeline 当成替代 Judge。本 AC 只控制 `DEC-PRD-062` 的非就绪任务入口，不确认排序、搜索、顶栏、空状态或精确视觉。
+
 ## 3. Whisper 模型下载
 
 本节来自 2026-07-27 对当前设置页、Rust command 和历史模型管理规格的核对，并于同日经用户确认。三条 AC 均为当前生效的 `Confirmed` 产品事实。

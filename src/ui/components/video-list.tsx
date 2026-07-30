@@ -12,8 +12,6 @@ interface VideoCardProps {
   video: Video
   onOpen?: (videoId: string) => void
   onOpenImport?: (videoId: string) => void
-  onCancelImport?: (videoId: string) => void
-  onRetryImport?: (videoId: string) => void
   onDelete?: (videoId: string) => Promise<void>
   loadDeleteInfo?: (videoId: string) => Promise<{ nodeCount: number; noteCount: number }>
   importProgressPercent?: number
@@ -21,7 +19,7 @@ interface VideoCardProps {
   noteCount?: number
 }
 
-export function VideoCard({ video, onOpen, onOpenImport, onCancelImport, onRetryImport, onDelete, loadDeleteInfo, importProgressPercent, nodeCount, noteCount }: VideoCardProps) {
+export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInfo, importProgressPercent, nodeCount, noteCount }: VideoCardProps) {
   const [showConfirm, setShowConfirm] = useState(false)
   const [deleteInfo, setDeleteInfo] = useState<{ nodeCount: number; noteCount: number } | null>(null)
   const [preparingDelete, setPreparingDelete] = useState(false)
@@ -84,8 +82,6 @@ export function VideoCard({ video, onOpen, onOpenImport, onCancelImport, onRetry
         <div data-testid={`import-status-${video.id}`}>
           <div>{importStatus.stageLabel} · {importStatus.percent}%</div>
           {importStatus.errorMessage && <div role="alert">{importStatus.errorMessage}</div>}
-          {importStatus.action === 'cancel' && <button disabled={deleting} aria-label="取消导入" onClick={() => onCancelImport?.(video.id)}>取消导入</button>}
-          {importStatus.action === 'retry' && <button disabled={deleting} aria-label="重试导入" onClick={() => onRetryImport?.(video.id)}>重试导入</button>}
         </div>
       )}
       <button disabled={preparingDelete || deleting} onClick={() => void handleDeleteRequest()}>

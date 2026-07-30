@@ -6,6 +6,7 @@ import {
   transitionVideoImportState,
   updateUrlVideoMetadata,
   type Database,
+  type VideoImportState,
 } from '@/models/database'
 import type { Video } from '@/models/types'
 import type { ProgressPayload } from '@/architecture/events'
@@ -25,6 +26,10 @@ import { runPipeline } from '@/pipeline/pipeline-orchestrator'
 export interface ImportProgress {
   stage: 'download' | 'asr' | 'stage2' | 'merging'
   percent: number
+  detailStage?: ProgressPayload['stage']
+  blockCurrent?: number
+  blockTotal?: number
+  retrying?: boolean
 }
 
 export interface ImportRuntimeSettings {
@@ -218,9 +223,18 @@ export function createVideoImportController(
           model: structuringModel.modelName,
         },
         {
-          onProgress: (stage, percent) => {
+          onProgress: (stage, percent, details) => {
             if (stage === 'asr' || stage === 'stage2' || stage === 'merging') {
-              options.onProgress(videoId, { stage, percent })
+              options.onProgress(videoId, details
+                ? {
+                    stage,
+                    percent,
+                    detailStage: stage,
+                    blockCurrent: details.blockCurrent,
+                    blockTotal: details.blockTotal,
+                    retrying: details.retrying,
+                  }
+                : { stage, percent })
             }
           },
           onComplete: () => undefined,
@@ -236,12 +250,20 @@ export function createVideoImportController(
       if (attemptedVideo) {
         try {
           const persisted = await getVideoById(options.db, attemptedVideo.id)
-          if (
-            persisted
-            && persisted.status !== 'ready'
-            && persisted.status !== 'failed'
-            && persisted.status !== 'cancelled'
-          ) {
+          const attemptedWasTerminal = (
+            attemptedVideo.status === 'failed'
+            || attemptedVideo.status === 'cancelled'
+          )
+          const persistedChangedToTerminal = persisted && (
+            persisted.status === 'failed'
+            || persisted.status === 'cancelled'
+          ) && (
+            !attemptedWasTerminal
+            || persisted.status !== attemptedVideo.status
+            || (persisted.stage ?? null) !== (attemptedVideo.stage ?? null)
+            || persisted.errorMessage !== attemptedVideo.errorMessage
+          )
+          if (persisted && persisted.status !== 'ready' && !persistedChangedToTerminal) {
             await transitionVideoImportState(
               options.db,
               persisted.id,
@@ -272,13 +294,26 @@ export function createVideoImportController(
     ? Promise.resolve()
     : trackTask(videoId, processVideo(videoId, claimedController))
 
-  const requestCancellation = (videoId: string): Promise<void> => {
+  const requestCancellation = async (videoId: string): Promise<void> => {
     const controller = active.get(videoId)
-    if (!controller) return Promise.resolve()
-    controller.abort()
-    return isTauri()
-      ? tauriInvoke<void>('cancel_import', { videoId })
-      : Promise.resolve()
+    controller?.abort()
+    if (isTauri()) await tauriInvoke<void>('cancel_import', { videoId })
+    if (controller) return
+
+    const persisted = await getVideoById(options.db, videoId)
+    if (persisted?.status !== 'processing') return
+    await transitionVideoImportState(
+      options.db,
+      videoId,
+      { status: 'processing', stage: persisted.stage ?? null },
+      {
+        status: 'cancelled',
+        stage: persisted.stage ?? null,
+        errorMessage: 'Import cancelled',
+      },
+    )
+    options.onProgress(videoId, null)
+    await options.onChanged()
   }
 
   const closeTrackedDownload = async (
@@ -300,11 +335,17 @@ export function createVideoImportController(
     if (cancelled) error.name = 'AbortError'
     try {
       const persisted = await getVideoById(options.db, video.id)
-      if (persisted?.status === 'processing' && persisted.stage === 'download') {
+      const closableState: VideoImportState | null = persisted?.status === 'processing'
+        && persisted.stage === 'download'
+        ? { status: 'processing', stage: 'download' }
+        : persisted?.status === 'pending' && persisted.stage == null
+          ? { status: 'pending', stage: null }
+          : null
+      if (closableState) {
         await transitionVideoImportState(
           options.db,
           video.id,
-          { status: 'processing', stage: 'download' },
+          closableState,
           {
             status: cancelled ? 'cancelled' : 'failed',
             stage: 'download',
@@ -316,6 +357,7 @@ export function createVideoImportController(
     } catch {
       // Keep the download error as the primary failure.
     }
+    options.onProgress(video.id, null)
     if (!cancelled) options.onError?.('url-import', error)
     return error
   }
@@ -537,6 +579,10 @@ export function createVideoImportController(
       options.onProgress(payload.videoId, {
         stage: normalizeProgressStage(payload.stage),
         percent: payload.percent,
+        detailStage: payload.stage,
+        blockCurrent: payload.blockCurrent,
+        blockTotal: payload.blockTotal,
+        retrying: payload.retrying,
       })
     },
   }

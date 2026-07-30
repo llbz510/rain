@@ -31,6 +31,13 @@ export type Stage2ModelCaller = (
   signal?: AbortSignal,
 ) => Promise<unknown>
 
+export interface Stage2Progress {
+  blockCurrent: number
+  blockTotal: number
+  percent: number
+  retrying: boolean
+}
+
 export interface RunStage2StageInput {
   video: Video
   sentences: Sentence[]
@@ -39,6 +46,7 @@ export interface RunStage2StageInput {
   signal?: AbortSignal
   maxBlockTokens?: number
   callStage2?: Stage2ModelCaller
+  onProgress?: (progress: Stage2Progress) => void
 }
 
 export interface RunStage2StageResult {
@@ -149,6 +157,7 @@ async function requestValidatedOutput(
   signal: AbortSignal | undefined,
   block: Stage2InputBlock,
   existingNodeIds: ReadonlySet<string>,
+  onRetryState?: (retrying: boolean) => void,
 ): Promise<Stage2BlockOutput> {
   let lastValidationErrors: string[] = []
   let lastError: unknown
@@ -160,7 +169,10 @@ async function requestValidatedOutput(
       const normalized = normalizeStage2BlockOutputCandidate(value, block)
       const validationErrors = validateStage2BlockOutput(block, normalized, existingNodeIds)
       const parsed = parseStage2BlockOutput(normalized)
-      if (parsed && validationErrors.length === 0) return parsed
+      if (parsed && validationErrors.length === 0) {
+        onRetryState?.(false)
+        return parsed
+      }
       lastValidationErrors = validationErrors
       lastError = undefined
     } catch (error) {
@@ -168,7 +180,10 @@ async function requestValidatedOutput(
       if (error instanceof LlmHttpError && !error.retryable) throw error
       lastValidationErrors = []
       lastError = error
-      if (error instanceof LlmHttpError && error.retryable && attempt < MAX_ATTEMPTS) {
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      onRetryState?.(true)
+      if (lastError instanceof LlmHttpError && lastError.retryable) {
         await waitBeforeRetry(attempt, signal)
       }
     }
@@ -311,8 +326,19 @@ export async function runStage2Stage(input: RunStage2StageInput): Promise<RunSta
   const seenNodeIds = new Set<string>()
   const blockCaller = input.callStage2 ?? callStage2
 
-  for (const block of blocks) {
+  for (const [blockIndex, block] of blocks.entries()) {
     throwIfAborted(input.signal)
+    const blockCurrent = blockIndex + 1
+    const startPercent = Math.round((blockIndex / blocks.length) * 100)
+    const reportProgress = (percent: number, retrying: boolean): void => {
+      input.onProgress?.({
+        blockCurrent,
+        blockTotal: blocks.length,
+        percent,
+        retrying,
+      })
+    }
+    reportProgress(startPercent, false)
     const saved = savedById.get(block.blockId)
     const savedErrors = saved ? validateStage2BlockOutput(block, saved, seenNodeIds) : ['missing']
     const output = saved && savedErrors.length === 0
@@ -329,6 +355,7 @@ export async function runStage2Stage(input: RunStage2StageInput): Promise<RunSta
         input.signal,
         block,
         seenNodeIds,
+        (retrying) => reportProgress(startPercent, retrying),
       )
     outputs.push(output)
     output.nodes.forEach((node) => seenNodeIds.add(node.id))
@@ -339,6 +366,7 @@ export async function runStage2Stage(input: RunStage2StageInput): Promise<RunSta
       completedBlockOutputs: outputs,
       updatedAt: Date.now(),
     })
+    reportProgress(Math.round((blockCurrent / blocks.length) * 100), false)
   }
 
   const finalOutput = outputs.length > 1

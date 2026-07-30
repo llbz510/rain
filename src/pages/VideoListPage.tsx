@@ -18,11 +18,15 @@ import {
 } from '@/models/database'
 import { getDb } from '@/models/db-singleton'
 import { VideoCard } from '@/ui/components/video-list'
+import { ImportTaskDialog } from '@/ui/components/import-task-dialog'
 import { getEmptyStateMessage } from '@/ui/video-list'
 import { useRainStore } from '@/store/rain-store'
 import type { Video } from '@/models/types'
 import { listenProgress, unlistenProgress } from '@/pipeline/progress-listener'
-import { createVideoImportController } from '@/pipeline/video-import-controller'
+import {
+  createVideoImportController,
+  type ImportProgress,
+} from '@/pipeline/video-import-controller'
 
 type SortBy = 'lastStudied' | 'createdAt' | 'title'
 
@@ -249,7 +253,8 @@ export function VideoListPage() {
   const [localImportError, setLocalImportError] = useState('')
   const [localImportWarning, setLocalImportWarning] = useState('')
   const [openError, setOpenError] = useState('')
-  const [pipelineProgress, setPipelineProgress] = useState<Record<string, { stage: 'download' | 'asr' | 'stage2' | 'merging'; percent: number }>>({})
+  const [selectedImportVideoId, setSelectedImportVideoId] = useState<string | null>(null)
+  const [pipelineProgress, setPipelineProgress] = useState<Record<string, ImportProgress>>({})
 
   // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
   useEffect(() => {
@@ -294,7 +299,7 @@ export function VideoListPage() {
     if (!result.ok) setOpenError(result.error)
   }
 
-  // 点非 ready 卡 → 触发处理管线
+  // 导入任务状态变更后，从持久层刷新列表事实。
   const refreshVideos = useCallback(async () => {
     if (!db) return
     const list = keyword.trim() ? await searchVideosByTitle(db, keyword.trim()) : await listVideos(db, sortBy)
@@ -347,6 +352,10 @@ export function VideoListPage() {
   }, [importController])
 
   const handleOpenImport = useCallback((videoId: string) => {
+    setSelectedImportVideoId(videoId)
+  }, [])
+
+  const handleRetryImport = useCallback((videoId: string) => {
     importController?.start(videoId)
   }, [importController])
 
@@ -552,8 +561,6 @@ export function VideoListPage() {
                 onOpen={handleOpen}
                 onOpenImport={handleOpenImport}
                 importProgressPercent={pipelineProgress[v.id]?.percent}
-                onCancelImport={handleCancelImport}
-                onRetryImport={handleOpenImport}
                 onDelete={handleDelete}
                 loadDeleteInfo={loadDeleteInfo}
               />
@@ -561,6 +568,19 @@ export function VideoListPage() {
           </div>
         )}
       </main>
+
+      {selectedImportVideoId && (() => {
+        const selectedVideo = videos.find((video) => video.id === selectedImportVideoId)
+        return selectedVideo
+          ? <ImportTaskDialog
+              video={selectedVideo}
+              progress={pipelineProgress[selectedVideo.id]}
+              onClose={() => setSelectedImportVideoId(null)}
+              onRetry={handleRetryImport}
+              onCancel={handleCancelImport}
+            />
+          : null
+      })()}
 
       {urlDialogOpen && (
         <div style={overlayStyle}>

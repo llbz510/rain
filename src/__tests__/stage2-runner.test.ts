@@ -297,6 +297,38 @@ describe('Stage2 retry, cancellation and HTTP safety', () => {
     expect(result.sentences.map((sentence) => sentence.id)).toEqual(['s1', 's2', 's3', 's4'])
   })
 
+  it('reports real block position, completion percentage, and retry state', async () => {
+    const blocks = buildStage2Blocks(video.id, sentences, 35)
+    expect(blocks).toHaveLength(2)
+    const attempts = new Map<string, number>()
+    const clientMock = vi.fn(async (_prompt: string, payload: string) => {
+      const block = JSON.parse(payload) as Stage2InputBlock
+      const attempt = (attempts.get(block.blockId) ?? 0) + 1
+      attempts.set(block.blockId, attempt)
+      if (block.blockId === blocks[0].blockId && attempt === 1) return 'bad'
+      return validOutput(block)
+    })
+    const onProgress = vi.fn()
+
+    await runStage2Stage({
+      video,
+      sentences,
+      settings,
+      db: await stage2Db(),
+      maxBlockTokens: 35,
+      callStage2: clientMock,
+      onProgress,
+    })
+
+    expect(onProgress.mock.calls.map(([progress]) => progress)).toEqual(expect.arrayContaining([
+      { blockCurrent: 1, blockTotal: 2, percent: 0, retrying: false },
+      { blockCurrent: 1, blockTotal: 2, percent: 0, retrying: true },
+      { blockCurrent: 1, blockTotal: 2, percent: 50, retrying: false },
+      { blockCurrent: 2, blockTotal: 2, percent: 50, retrying: false },
+      { blockCurrent: 2, blockTotal: 2, percent: 100, retrying: false },
+    ]))
+  })
+
   it('stops retrying when the active request aborts', async () => {
     const controller = new AbortController()
     const clientMock = vi.fn().mockImplementation(async () => {

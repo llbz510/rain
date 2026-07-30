@@ -278,7 +278,9 @@ describe('AC-LV-13 production Video deletion', () => {
       thumbnail: '',
       duration: 60,
       language: 'zh',
-      status: 'pending',
+      status: 'failed',
+      stage: 'asr',
+      errorMessage: '上次处理失败',
       createdAt: 1,
       position: 0,
       lastStudiedAt: 1,
@@ -303,9 +305,9 @@ describe('AC-LV-13 production Video deletion', () => {
     render(<VideoListPage />)
     const card = await screen.findByTestId('card-active-import')
     fireEvent.click(within(card).getByText('处理中课程'))
+    const dialog = await screen.findByRole('dialog', { name: '处理中课程导入任务' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
     await waitFor(() => expect(pipelineSignal).toBeDefined())
-    fireEvent.click(within(card).getByText('处理中课程'))
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
     fireEvent.click(within(card).getByRole('button', { name: '删除' }))
     fireEvent.click(within(await screen.findByTestId('delete-confirm')).getByRole('button', { name: '确认删除' }))
@@ -415,7 +417,9 @@ describe('AC-LV-13 production Video deletion', () => {
       thumbnail: '',
       duration: 60,
       language: 'zh',
-      status: 'pending',
+      status: 'failed',
+      stage: 'asr',
+      errorMessage: '上次处理失败',
       createdAt: 1,
       position: 0,
       lastStudiedAt: 1,
@@ -438,6 +442,8 @@ describe('AC-LV-13 production Video deletion', () => {
     render(<VideoListPage />)
     const card = await screen.findByTestId('card-slow-cancel')
     fireEvent.click(within(card).getByText('慢取消课程'))
+    const dialog = await screen.findByRole('dialog', { name: '慢取消课程导入任务' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
     await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledOnce())
     fireEvent.click(within(card).getByRole('button', { name: '删除' }))
     fireEvent.click(within(await screen.findByTestId('delete-confirm')).getByRole('button', { name: '确认删除' }))
@@ -470,7 +476,9 @@ describe('AC-LV-13 production Video deletion', () => {
       thumbnail: '',
       duration: 60,
       language: 'zh',
-      status: 'pending',
+      status: 'failed',
+      stage: 'asr',
+      errorMessage: '上次处理失败',
       createdAt: 1,
       position: 0,
       lastStudiedAt: 1,
@@ -487,6 +495,8 @@ describe('AC-LV-13 production Video deletion', () => {
     render(<VideoListPage />)
     const card = await screen.findByTestId('card-cancel-fails')
     fireEvent.click(within(card).getByText('取消失败课程'))
+    const dialog = await screen.findByRole('dialog', { name: '取消失败课程导入任务' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
     await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledOnce())
     fireEvent.click(within(card).getByRole('button', { name: '删除' }))
     fireEvent.click(within(await screen.findByTestId('delete-confirm')).getByRole('button', { name: '确认删除' }))
@@ -536,8 +546,10 @@ describe('AC-LV-13 production Video deletion', () => {
 
     render(<VideoListPage />)
     const card = await screen.findByTestId('card-handoff-cancel')
+    fireEvent.click(within(card).getByText('交接取消课程'))
+    const dialog = await screen.findByRole('dialog', { name: '交接取消课程导入任务' })
     await act(async () => {
-      fireEvent.click(within(card).getByRole('button', { name: '重试导入' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
       await publishStarted
     })
     await waitFor(async () => expect(await getVideoById(db, 'handoff-cancel')).toMatchObject({
@@ -552,14 +564,20 @@ describe('AC-LV-13 production Video deletion', () => {
       releasePublish()
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
-    expect(await within(card).findByRole('alert')).toHaveTextContent('删除失败：删除事务失败')
+    expect(within(card).getByText('删除失败：删除事务失败')).toHaveAttribute('role', 'alert')
+    await waitFor(async () => expect(await getVideoById(db, 'handoff-cancel')).toMatchObject({
+      status: 'cancelled',
+      stage: 'download',
+      errorMessage: 'Online video download cancelled',
+    }))
 
     mocks.failVideoDeletion = false
+    mocks.afterPublish = null
     let releaseRetry: () => void = () => undefined
     mocks.runPipeline.mockImplementationOnce(() => new Promise<void>((resolve) => {
       releaseRetry = resolve
     }))
-    fireEvent.click(within(card).getByText('交接取消课程'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
     await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledOnce())
     await act(async () => {
       releaseRetry()
