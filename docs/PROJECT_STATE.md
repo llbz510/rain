@@ -16,7 +16,7 @@ The no-key Runtime Settings desktop behavior Judge and its independent Hosted Wi
 Historical product-intent coverage is now mechanically controlled by `AC-HE-06`.
 `docs/development/product-decision-coverage.md` contains exactly `DEC-PRD-001` through `DEC-PRD-099`, each with a current PRD/M source and one disposition: 72 map to Confirmed ACs, 23 Post-release rows remain Proposed, and 4 are Out-of-scope. These counts are not a project-completion percentage. The 31 M1-S2 promotions freeze Launch product semantics, while `harness-coverage.md` conservatively keeps the new ACs at their actual Partial/Gap strength.
 
-M1-S2 and M2-S1 are complete. PR #25's prerequisite Clean Windows Harness passed on exact head `b64a22f20962980089b08c1873b4bc8294850dbe`, the protected merge produced `master` commit `a329059b8172dab82c7326deb0af322045a0c396`, and that exact commit passed the manual Hosted Runtime Settings replay. The unique next roadmap action is M2-S2: audit the freshness of the current canonical schema v2 Evidence without running a paid model.
+M1-S2, M2-S1 and M2-S2 are complete. PR #25's prerequisite Clean Windows Harness passed on exact head `b64a22f20962980089b08c1873b4bc8294850dbe`, the protected merge produced `master` commit `a329059b8172dab82c7326deb0af322045a0c396`, and that exact commit passed the manual Hosted Runtime Settings replay. The M2-S2 audit classifies the schema v2 package as historical target Evidence rather than current RC Evidence. The unique next roadmap action is M3-S1: confirm the release artifact contract.
 
 `AC-LV-19` is Strong on merged `master` commit `bcec16f`: every non-ready card opens a persisted import-task detail without starting work, production Stage2 block/retry progress can overlay the SQLite fact, and only explicit detail actions retry or cancel. Closing the detail leaves the current task running; App page switches retain the same frontend Pipeline Owner; a restart-stale `processing` record can explicitly cancel through the desktop adapter and close its persisted state. The production-page/jsdom, public Controller, real memory database and production Stage2/Pipeline Judges passed locally and in the clean Windows merge gate. That AC still does not claim automatic `pending` restart recovery; the separately confirmed explicit recovery boundary is now `AC-LV-20` below.
 
@@ -28,7 +28,7 @@ The verified real input video is:
 
 `D:\xiazaiwenjian\bilidown\【华中科技大学】电子技术基础 张林（全138讲）电子信息工程专业必修课\1.2.1 信号及其放大.mp4`
 
-Current schema v2 canonical evidence committed in this branch:
+Latest tracked schema v2 Evidence package (historical target Evidence; see the M2-S2 freshness audit):
 
 `evidence/rain-real-e2e-20260726-195652/`
 
@@ -41,16 +41,16 @@ Important evidence facts:
 - ASR sentence count: 1953
 - Structuring block count: 12
 - Database status/stage: `ready` / `ready`
-- Database node count: 59
+- Database node count: 34
 - ASR timing: 1408 seconds
 - Structuring timing: 1050 seconds
 - Pipeline timing: 2459 seconds
 - Role status: the same configuration fingerprint passed ASR, structuring and text-assistant `Compatible` checks and was then recorded as `Verified`
 - Runtime gates: missing ASR/structuring capability was rejected by `VideoImportController`; missing assistant capability was rejected before chat
 - UI proof: WebDriver captured the production study page with the matching video, visible player and 21 rendered paragraphs
-- Scope: this proves the named configuration and text assistant only; it does not verify other compatible models or vision
+- Scope: this historically proves the named configuration and text assistant on the repository-associated 408b6db-era path only; it does not verify the current target, other compatible models or vision
 
-The previous schema v1 evidence at `evidence/rain-real-e2e-20260720-024848/` remains valid historical evidence for its recorded configuration, but it is not the current schema v2 capability proof.
+The previous schema v1 evidence at `evidence/rain-real-e2e-20260720-024848/` remains valid historical evidence for its recorded configuration, but it is not the latest tracked schema v2 package.
 
 Fresh verification performed before repair commit `a9c5c26` (recorded from the repair session transcript; full test logs were not committed as separate artifacts):
 
@@ -87,9 +87,10 @@ Read in this order:
 11. `docs/development/release-acceptance-contract.md` — Active M1-S2 confirmation/traceability record; its 50 ACs are formalized in `acceptance-standard.md`, while completion strength remains in `harness-coverage.md`.
 12. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
 13. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
-14. `package.json` — runnable frontend/test/E2E commands.
-15. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-16. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+14. `docs/development/canonical-evidence-freshness-2026-08-02.md` — Active M2-S2 audit; classifies canonical schema v2 claims as immutable historical facts, current validator coverage or exact-RC rerun requirements.
+15. `package.json` — runnable frontend/test/E2E commands.
+16. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+17. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -141,7 +142,7 @@ Important evidence rule: `.gitignore` ignores `evidence/rain-real-e2e-*/` for ne
 10. The main checkout at `D:\gongju\shengcan\rain` has been fast-forwarded to include the `codex/rain-real-local-video` repair branch through `7a9eeb1`. The separate worktree still exists and can be removed later only with explicit user approval.
 11. PowerShell console output can display Chinese text as mojibake in some command pipelines. Check UTF-8 files with a direct UTF-8 reader before concluding that project artifacts are corrupt.
 12. `git status` may show `M src-tauri/Cargo.toml` even when `git diff --exit-code -- src-tauri/Cargo.toml` returns 0. The observed cause is line-ending normalization: the committed blob contains CRLF line endings while the working-tree file has LF line endings under `core.autocrlf=true`. Treat this as a line-ending/index hygiene issue, not a Rust dependency change, unless `git diff` shows real content.
-13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate, learning-page assistant gate, and schema v2 Evidence Harness are implemented. `AC-LV-12` has Strong + Evidence for the exact `ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash` structuring/text-assistant configuration. Other model fingerprints remain merely `Compatible` or `Unavailable` until they receive their own complete evidence.
+13. DEC-001's generic records, stale-result invalidation, role-assignment gate, real short-sample Whisper probe, provider-neutral structuring and text-assistant probes, preflight integration, local-video runtime gate, learning-page assistant gate, and schema v2 Evidence Harness are implemented. `AC-LV-12` has current Strong capability/runtime gates plus Historical Evidence for the exact `ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash` structuring/text-assistant configuration; the current isolated worker and exact RC remain an Evidence Gap. Other model fingerprints remain merely `Compatible` or `Unavailable` until they receive their own complete evidence.
 14. Advanced tree editing is not in the current Active acceptance scope. Its old Harness-only implementation and no-op controls were removed; restoring it requires a new AC plus real UI, persistence, and behavior tests.
 15. Live LLM smoke tests intentionally skip when no process environment Key is present. The current smoke test reads generic `RAIN_LIVE_LLM_*` variables and otherwise uses the current `qwen3-omni-flash` default; historical schema v1 evidence continues to validate its recorded `qwen3.5-omni-flash` fingerprint and must not be rewritten as current evidence.
 16. `src/ui/components/layout-switch.tsx` is a placeholder composition used only by the locked M16 component Harness; it is not the production learning page. It can remain a local layout-contract judge, but must not sign off `AC-ST-08`. Retiring or replacing it requires an explicit Harness Migration because the locked test imports it.
@@ -754,7 +755,7 @@ The full production path completed against the real lecture video and isolated S
 - text assistant: exact streamed capability token passed; vision was not tested or granted;
 - gates: missing ASR/structuring evidence was rejected through `VideoImportController`, and missing assistant evidence was rejected through `decideModelRoleAssignment`;
 - recovery: cancellation and retry completed through the production import controller;
-- persistence: the matching video reached `ready`, with 1953 sentences and 59 nodes;
+- persistence: the matching video reached `ready`, with 1953 sentences and 34 nodes;
 - timing: ASR 1408 seconds, structuring 1050 seconds, total pipeline 2459 seconds.
 
 The first screenshot attempt exposed a Harness false positive: the validator accepted a valid PNG even though the app was still showing stale list/cancel state. That evidence was not accepted. The fix:
@@ -1913,6 +1914,22 @@ The first independent M2-S1 review used baseline a329059b8172dab82c7326deb0af322
 The correction explicitly labels the agent-first opening snapshot historical, sets the M2 milestone to In progress — M2-S1 Complete; M2-S2 Next, records both review axes here and restores Markdown section separation. The same Spec and Standards reviewers must recheck the corrected staged diff before commit.
 
 The corrected staged diff then received final PASS from both independent axes with P0/P1/P2 empty and no baseline smell. Spec confirmed no semantic drift or Evidence overclaim. Standards confirmed every first-round finding closed, only the intended four documentation files staged, no temporary residue or forbidden write, npm.cmd run harness:control PASS and git diff --cached --check against a329059b8172dab82c7326deb0af322045a0c396 PASS. This dual verdict completes the independent review gate for the M2-S1 Evidence sync; M2-S2 remains the unique next action.
+
+## 2026-08-02 M2-S2 canonical Evidence freshness audit
+
+The read-only audit is recorded in docs/development/canonical-evidence-freshness-2026-08-02.md against master b2fb7113318e389200b9ce07c912d8aebd4474f1. The complete schema v2 Evidence tree is unchanged since repository association commit 408b6db9b37d753522e153d6b7801fe887500eb1, the current validator still returns ok=true, and no paid model, video run or Evidence mutation occurred.
+
+The audit separates immutable artifact facts from current product proof. The package remains citable for its recorded video hash, transcript, blocks, configuration, timings and screenshot, and remains a useful current validator regression fixture. It does not prove the current isolated CUDA worker, refactored persistence/import recovery paths or evolved StudyInterface. The manifest also lacks a Git commit field, so 408b6db is a repository association point rather than cryptographic source binding. All current-target full-pipeline claims require an exact-RC rerun.
+
+The audit corrected one stale fact: database-summary.json records 34 Nodes, not the 59 previously stated here. Coverage rows that referenced the canonical package now distinguish current Strong tests from Historical Evidence; AC-LV-09 is explicitly a current-target Evidence Gap. The independent gate is closed, M2-S2 is complete, and M3-S1 release artifact contract confirmation is the unique next action.
+
+Required pre-commit checks are the current public Evidence validator, npm run harness:control, git diff --check and an independent read-only Spec/Standards review. Full harness:check is not required for this docs-only classification Slice; no product, workflow, locked Harness, script or Evidence path is changed. Findings, closure and final verdict must be appended before commit.
+
+The first independent M2-S2 review used baseline `b2fb7113318e389200b9ce07c912d8aebd4474f1` and the staged six-document diff. Both Spec and Standards returned FAIL with no P0/P2 or baseline implementation smell. Both found one P1 status contradiction: the new audit result prematurely called M2-S2 complete and advanced M3-S1 while every controlling plan correctly kept the Slice in review. Spec also found the historical schema v2 session narrative still said 59 Nodes even though `database-summary.json` records 34 and this Slice claimed to correct the stale fact.
+
+The correction kept the audit decision ready but M2-S2 `In review`, made closing the independent gate the unique current action, and changed the remaining stale narrative count to 34. It did not change the Evidence package, an AC, a coverage-strength decision or the exact-RC rerun contract.
+
+The corrected staged diff then received final PASS from both independent axes with P0/P1/P2 empty and no baseline smell. Spec independently reconfirmed the repository association, missing manifest target binding, blob/hash/count facts, conservative Historical/current-Gap classifications, unchanged ACs, exact-RC rerun boundary and no paid-call authorization. Standards confirmed both first-round findings closed, consistent In-review/Pending status during review, discoverable Active audit, six-document-only write set, no temporary residue or forbidden path, and proportionate docs-only validation. Both reviewers reported `npm.cmd run harness:control`, the current public Evidence validator and `git diff --cached --check b2fb7113318e389200b9ce07c912d8aebd4474f1` passing. This dual PASS closes M2-S2; the conclusion-only status sync makes M3-S1 the unique next action.
 
 ## Maintenance checklist for every future session
 
