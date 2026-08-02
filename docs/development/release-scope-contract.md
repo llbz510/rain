@@ -1,9 +1,9 @@
 # Rain Core Release Scope Contract
 
-> 状态：`Proposed — awaiting user confirmation`
+> 状态：`Active — user-confirmed`
 > 更新日期：2026-08-02
 > 路线图位置：M1-S1 Release Scope Contract
-> 产品授权边界：本文件是首发范围建议，不修改 AC、产品决策处置或覆盖等级。只有用户明确确认后，才进入 M1-S2 Release AC。
+> 产品授权边界：用户已确认本文件的首发范围，并把公开分发形态修订为单一 GPU 增强通用安装包。本文件仍不修改 AC、产品决策处置或覆盖等级；Launch 行必须在 M1-S2 或后续原子 Slice 中获得 Confirmed AC 后才能实施或宣称完成。
 
 ## 1. Slice Contract
 
@@ -14,10 +14,10 @@
 | User-visible result | 用户得到一份逐条、无遗漏的首发/后续版本范围，并能一次确认或指出要调整的行 |
 | In scope | 当前全部 Confirmed AC 的首发归属；54 条 Proposed 决策逐条归入 Launch 或 Post-release；既有 4 条 Out-of-scope 的首发边界；首发外部能力承诺 |
 | Out of scope | 新增/确认 Release AC、产品代码、锁定 Harness、外部 workflow、模型/视频调用、安装器和 Evidence |
-| Owner | 本文件；确认后由 `product-decision-coverage.md` 和 M1-S2 release acceptance 文档接管正式产品语义 |
-| Judge | 54 条当前 Proposed ID 完整、唯一且每条只有一个去向；Launch 行必须进入 M1-S2 AC 队列；独立只读 Spec/Standards 审查；最终由用户确认 |
+| Owner | 本文件拥有已确认的 Release Scope；M1-S2 release acceptance 与后续 `product-decision-coverage.md` 更新拥有正式产品行为语义 |
+| Judge | 54 条当前 Proposed ID 完整、唯一且每条只有一个去向；Launch 行必须进入 M1-S2 AC 队列；用户确认记录；独立只读 Spec/Standards 审查 |
 | Evidence tier | 文档控制面 + 独立审查；不产生运行时 Evidence |
-| Allowed writes | 本文件、`control-map.md`、`PROJECT_STATE.md` |
+| Allowed writes | 本文件、`control-map.md`、`rain-project-delivery-plan.md`、`agent-first-development-plan.md`、`PROJECT_STATE.md` |
 | Locked files | `harness/`、`src-tauri/tests/`、现有 AC/coverage/product-decision dispositions 和全部产品源码 |
 
 ## 2. 范围状态的精确定义
@@ -39,7 +39,7 @@ Rain Core Release 推荐定位为：
 - 当前全部 40 条 Confirmed AC 进入 Launch 基线，实际范围只以 AC 原文为准。
 - 本地视频、现有受控 URL-to-local-media 接口、模型下载/能力门禁、Runtime Settings、学习页核心、原子持久化和 Harness 属于 Launch。
 - 首发必须补齐正式安装、双硬件环境、schema 升级、派生文件生命周期、签名/许可、RC 和回滚合同；这些在 M1-S2 形成 Release AC。
-- GPU 产品化属于 Launch。推荐发布两个明确下载物：CPU-safe 安装包，以及包含隔离 CUDA worker/runtime 的 GPU 安装包；发布页和安装器必须提前展示约 804 MB GPU payload、受支持 NVIDIA 硬件、失败重试和 CPU-safe 选择。该推荐仍须用户确认，并在 M1-S2 形成独立 AC。
+- GPU 产品化属于 Launch。用户确认只公开分发一个 **GPU 增强通用安装包**：它同时包含 CPU-safe Rain 主程序、CPU adapter，以及隔离的 CUDA worker/runtime；不再提供独立的公开 CPU 安装包。兼容 NVIDIA 环境下 `Auto` 优先使用 CUDA；没有兼容 NVIDIA/驱动/runtime 时，应用仍须正常启动、显示原因并回退 CPU。Forced CPU/Forced GPU 的现有语义保持不变。发布页和安装器必须提前披露约 804 MB payload、硬件要求、失败/重试和 CPU fallback。普通 CPU-safe/Harness 构建继续作为内部验证产物存在，不作为第二个公开安装包。该边界须在 M1-S2 形成独立 Confirmed AC。
 - 首发不承诺任何真实视频站点兼容性。`AC-LV-17` 只保证受控 HTTP(S) URL 进入 app-owned 本地媒体；真实站点 Evidence 属于 Post-release。
 - 首发只承诺本地 Whisper ASR。云端 ASR、自动翻译、Vision 和高级树编辑进入 Post-release。
 - 首发保留现有文本助手能力，但不承诺图像输入、当前帧解释或包含 Vision 暗示的完整助手视觉合同。
@@ -151,10 +151,10 @@ Rain Core Release 推荐定位为：
 
 ### 5.2 M1-S2 必须形成的 Release AC 队列
 
-如果用户确认本范围，M1-S2 至少逐条提出并确认：
+用户已确认本范围。M1-S2 至少逐条提出并确认：
 
 1. Windows x64 安装包身份、版本和发布渠道；
-2. GPU payload 分发：确认推荐的 CPU/GPU 两个安装包，或改选内置、独立下载/按需安装；无论选择哪种方式，都必须裁判约 804 MB 大小披露、硬件要求、失败重试和 CPU fallback；
+2. 单一 GPU 增强通用安装包：公开渠道只有一个安装包；其中 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime 共存；约 804 MB 大小披露、硬件要求、无 NVIDIA 环境启动与可见 CPU fallback、Forced CPU/GPU、失败重试，以及普通 CPU-safe/Harness 构建仅作内部验证产物均须由 Confirmed AC 裁判；
 3. 干净安装、同版本重装、旧版升级、卸载和数据保留/清理；
 4. 无 NVIDIA/CUDA 环境安装、启动、Auto 可见回退和 CPU 短样本；
 5. NVIDIA 环境安装、CUDA/Forced CPU/Forced GPU 和取消/失败分类；
@@ -181,18 +181,18 @@ Rain Core Release 推荐定位为：
 
 Release Notes 必须把“不承诺”与“当前受控接口存在”分开描述，尤其不能把 `yt-dlp` command 存在写成真实站点保证。
 
-## 7. 用户确认门
+## 7. 用户确认记录
 
-本文件只有在用户明确确认以下整体选择后才能从 Proposed 进入 Active：
+用户在 2026-08-02 明确确认并修订了以下整体选择，本文件因此从 Proposed 进入 Active：
 
-1. 接受 31 条 Proposed 进入 Launch、23 条进入 Post-release、0 条新增 Out-of-scope；
-2. 接受现有 4 条 Out-of-scope 处置不变；
-3. 接受 Core Release 不承诺真实站点兼容、云端 ASR、翻译、Vision 和高级树编辑；
-4. 接受 GPU 产品化进入 Launch，并采用推荐的 CPU/GPU 两个安装包；若不接受，请在确认时选择内置、独立下载/按需安装或只发布 CPU；
-5. 接受 risk 22 两项行为保持架构工作进入 Launch 且分别实施；
-6. 接受 M1-S2 按第 5.2 节建立 Release AC，而不是直接开始产品实现。
+1. 31 条 Proposed 进入 Launch、23 条进入 Post-release、0 条新增 Out-of-scope；
+2. 现有 4 条 Out-of-scope 处置不变；
+3. Core Release 不承诺真实站点兼容、云端 ASR、翻译、Vision 和高级树编辑；
+4. GPU 产品化进入 Launch，但公开分发形态由原建议的双安装包修订为一个 GPU 增强通用安装包；CPU-safe 主程序、CPU adapter、Auto 可见回退和 Forced CPU 仍是同一产品的必需组成，不得把“只发 GPU 版本”解释为删除 CPU 路径；
+5. risk 22 两项行为保持架构工作进入 Launch 且分别实施；
+6. 下一步是 M1-S2 按第 5.2 节建立并由用户确认 Release AC，而不是直接开始产品实现。
 
-用户可以按 Decision ID 调整任意行。未明确回复的行不得视为已经确认。
+本确认冻结的是发布去向与安装包产品边界，不会自动把 31 条 Launch 行从 Proposed 提升为 Confirmed，也不会签发现有 Evidence。后续调整仍须按 Decision ID 或 Release AC 明确记录，并重新经过独立审查。
 
 ## 8. 本轮完成条件
 
@@ -202,4 +202,4 @@ Release Notes 必须把“不承诺”与“当前受控接口存在”分开描
 - `npm run harness:control` 与 `git diff --check` 通过；
 - 独立只读 reviewer 按 Spec 后 Standards 检查完整性、混合决策边界、越权和假完成；
 - 审查发现及关闭方式写入 `PROJECT_STATE.md`；
-- 用户确认前不进入 M1-S2。
+- 用户确认记录与单一安装包修订已同步到全部 Active 计划；完成独立审查后，下一唯一动作进入 M1-S2。

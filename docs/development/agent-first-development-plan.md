@@ -121,7 +121,7 @@ npm run harness:control
 
 ### P0 — 重放执行时目标提交的 Hosted Runtime Settings Judge
 
-状态：`Ready after M1 confirmation and explicit dispatch`；不改变产品代码。
+状态：`Ready after M1-S2 confirmation and explicit dispatch`；M1-S1 已确认，但 M1 尚未退出；不改变产品代码。
 
 - **控制范围**：`AC-HE-05`，并核对后续加入同一脚本的 `AC-LV-20` 重启恢复路径。
 - **原因**：最后一次 Hosted GREEN 是 `9251962`；此后的桌面脚本和 E2E adapter 已有实质扩展。截至本次审查，尚无覆盖这些扩展的 Hosted replay。
@@ -132,7 +132,7 @@ npm run harness:control
 
 ### P1 — 补齐 AC-LV-21 的无 NVIDIA/CUDA Release Evidence
 
-状态：`Confirmed AC / Evidence Gap`；执行目标环境和产物方案需用户明确选择。
+状态：`Confirmed AC / Evidence Gap`；公开产物已选择单一 GPU 增强通用安装包，具体 Release AC、执行目标环境和 Evidence 合同仍须在 M1-S2 明确确认。
 
 第一个 Slice 只设计并确认可复放 Evidence 合同，不同时处理签名、许可和下载 UX：
 
@@ -153,9 +153,9 @@ npm run harness:control
 
 ### P2 — 为应用所有缩略图建立删除与孤儿 GC 产品合同
 
-状态：`Proposed`；对应 `DEC-PRD-060`，不得直接实现。
+状态：`Proposed behavior / user-confirmed Launch scope`；对应 `DEC-PRD-060`，必须先在 M1-S2 获得 Confirmed AC，不得直接实现。
 
-第一个会话只向用户提交产品选项和 Proposed AC，必须决定：
+第一个原子 Slice 只起草并请用户确认产品 AC，必须决定：
 
 - 数据库删除成功但缩略图删除失败时，用户看到成功、部分成功还是整体失败；
 - 文件删除与 SQLite 事务的顺序、补偿和重试语义；
@@ -167,7 +167,7 @@ npm run harness:control
 
 ### P3 — 在扩展导入导航前关闭 risk 22 的两个架构债
 
-状态：`Proposed architecture boundaries`；当前不是用户可见 P0/P1。
+状态：`User-confirmed Launch architecture boundaries / AC gaps`；当前不是用户可见 P0/P1，必须先在 M1-S2 明确行为保持 AC。
 
 按两个独立 Slice 处理，不合并重写：
 
@@ -178,7 +178,7 @@ npm run harness:control
 
 ### P4 — 完成高价值、低外部成本的视频列表闭环
 
-状态：`Proposed`；候选覆盖 `DEC-PRD-058`、`DEC-PRD-059`、`DEC-PRD-062`。
+状态：`Proposed behavior / user-confirmed Launch scope`；覆盖 `DEC-PRD-058`、`DEC-PRD-059`、`DEC-PRD-062`，必须先在 M1-S2 逐条定位 Confirmed AC。
 
 先审计现有排序、搜索、顶栏和空状态的真实生产行为，再向用户提出一个最小 AC。推荐拆分为：
 
@@ -188,22 +188,22 @@ npm run harness:control
 
 前两项可由生产 `VideoListPage` + 公共数据库接口 + 双 adapter 行为测试裁判；若涉及真实桌面布局或视觉，则增加截图/DOM/视觉 reviewer，而不是把 jsdom 称为完整视觉 Evidence。
 
-### P5 — 用户选择下一条产品能力线
+### P5 — M1-S1 已确认的能力线路由
 
-状态：`Decision needed after P0–P4`。
+状态：`Superseded as a free-choice queue by the Active release scope`。
 
-下列能力不得并行铺开；每次选择一条，先形成 Confirmed AC 和证据预算：
+下列能力仍不得并行铺开。进入 Core Release 的线路先在 M1-S2 形成 Confirmed AC 和证据预算；Post-release 线路不阻断本次发布，也不得由局部实现静默带入：
 
-| 候选 | 主要未决边界 | 预计 Judge 成本 |
-| --- | --- | --- |
-| 英文翻译 | 生成、存储、显示、开关、原文不变 | 中到高，需真实模型 Evidence |
-| Vision 当前帧解释 | 截帧、模型图像能力、隐私、引用/时刻 | 高，需视觉模型 Evidence |
-| 高级树编辑 | 时间序、内容不丢、持久化、撤销/重做 | 高，需 UI + SQLite 纵向 Judge |
-| 快捷键完整集 | 输入焦点门禁、selection origin、跨布局行为 | 中，生产页面行为 Judge |
-| 精确视觉系统 | 卡片、目录、字幕、动效、无障碍 | 高，需视觉基准与独立 visual reviewer |
-| 在线真实站点 | 站点差异、登录、播放列表、长下载 | 高，需外网与可复放 Evidence |
+| 能力线 | M1-S1 路由 | 主要未决边界 | 预计 Judge 成本 |
+| --- | --- | --- | --- |
+| 英文翻译 | Post-release | 生成、存储、显示、开关、原文不变 | 中到高，需真实模型 Evidence |
+| Vision 当前帧解释 | Post-release | 截帧、模型图像能力、隐私、引用/时刻 | 高，需视觉模型 Evidence |
+| 高级树编辑 | Post-release | 时间序、内容不丢、持久化、撤销/重做 | 高，需 UI + SQLite 纵向 Judge |
+| 快捷键完整集 | Launch | 输入焦点门禁、selection origin、跨布局行为 | 中，生产页面行为 Judge |
+| 精确视觉系统 | Launch | 卡片、目录、字幕、动效、无障碍 | 高，需视觉基准与独立 visual reviewer |
+| 在线真实站点 | Post-release | 站点差异、登录、播放列表、长下载 | 高，需外网与可复放 Evidence |
 
-选择标准依次为：用户价值、失控风险、Owner 清晰度、能否建立真实 Judge、外部成本。不得按 DEC 编号顺序机械补齐 54 条 Proposed。
+实际顺序以完整交付路线图和 Active `release-scope-contract.md` 为准。不得按 DEC 编号顺序机械补齐 54 条 Proposed，也不得把 Launch 路由误称为实现授权。
 
 ## 5. 持续 Harness 改进队列
 
@@ -227,4 +227,4 @@ npm run harness:control
 
 ## 7. 下一会话唯一推荐动作
 
-只执行总交付计划的 M1-S1 工作包：由用户确认 Core Release 候选簇分别属于 `Launch`、`Post-release` 或 `Out-of-scope`，并把未决项记录为明确选择，不写产品代码。M1-S1 经独立只读审查后，再执行 M1-S2 确认 Release AC；两者完成后，才按总交付计划进入 M2 Hosted replay。未经 M1 确认，不提前触发外部 workflow、开始 P1 或实施产品行为。
+只执行总交付计划的 M1-S2 工作包：以用户已确认的 [`release-scope-contract.md`](release-scope-contract.md) 为边界，逐条起草 Release AC matrix，覆盖 31 条 Launch 决策、单一 GPU 增强通用安装包、安装生命周期、双硬件环境、签名/许可、schema、派生文件、risk 22 和 RC Evidence，并交由用户明确确认。本工作包不写产品代码、不触发外部 workflow、不运行安装器或签发 Evidence；M1-S2 经独立只读审查并获用户确认后，才进入 M2 Hosted replay。

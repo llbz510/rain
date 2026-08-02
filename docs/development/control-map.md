@@ -15,7 +15,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 当前状态、最近验证和已知风险 |
 | 跨会话开发切片按什么流程和优先级执行 | `docs/development/agent-first-development-plan.md` | Active 会话/交付协议与候选队列；不新增产品语义，Proposed 切片仍需用户确认 |
 | 从当前状态到正式发布按什么里程碑推进 | `docs/development/rain-project-delivery-plan.md` | Active 项目交付路线、Release 完成定义、全部 Proposed 决策路由和 RC/上线门禁；不自动授权新行为 |
-| 本次 Core Release 建议包含什么 | `docs/development/release-scope-contract.md` | Proposed M1-S1 范围合同；逐条给出 Launch/Post-release 建议，用户确认前不改变产品语义 |
+| 本次 Core Release 包含什么 | `docs/development/release-scope-contract.md` | Active、用户已确认的 M1-S1 范围合同；记录 Launch/Post-release 去向与单一 GPU 增强通用安装包边界，Launch 行仍须取得 Confirmed AC |
 | 用户希望产品做什么 | 根目录 `PRD.md` 和对应 `M*.md` | 已确认产品意图；不自动代表代码已经实现 |
 | 99 条历史产品决策当前由什么控制 | `docs/development/product-decision-coverage.md` | 每条决策映射到 Confirmed AC、Proposed 或当前范围外；不是完成百分比 |
 | 本地视频主链路当前按什么设计 | `docs/superpowers/specs/2026-07-17-rain-real-local-video-repair-design.md` | 已实施修复的设计依据；与更晚的事实冲突时需要重新确认 |

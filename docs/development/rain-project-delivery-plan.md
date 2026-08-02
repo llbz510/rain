@@ -72,9 +72,9 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 
 为了避免 54 条 Proposed 同时展开，本计划采用两个连续目标。
 
-### 4.1 Core Release 候选范围
+### 4.1 已确认的 Core Release 范围
 
-推荐本次首次正式落地至少包括：
+M1-S1 已确认本次首次正式落地至少包括：
 
 - 当前所有 Confirmed AC；
 - 证据新鲜度和 `AC-LV-21` 双环境发布证据；
@@ -82,12 +82,12 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 - schema 升级兼容和应用所有缩略图生命周期；
 - 视频列表排序、搜索、空状态和生产卡片闭环；
 - 学习页基础布局、字幕、右侧面板、快捷键和最小可访问性；
-- 真实站点的有限 URL import Evidence，或明确不进入首发；
+- 现有受控 URL-to-local-media 接口；真实站点兼容与对应 Evidence 明确不进入首发；
 - 发布范围内的视觉一致性、性能预算、诊断和文档。
 
-### 4.2 默认建议延后到 Core Release 之后
+### 4.2 已确认延后到 Core Release 之后
 
-以下能力风险、Evidence 成本或产品决策密度较高，默认建议进入后续版本，除非用户在范围冻结阶段明确提升：
+以下能力因风险、Evidence 成本或产品决策密度较高，M1-S1 已确认进入后续版本：
 
 - 云端 ASR 三档完整产品化；
 - 英文段落翻译；
@@ -96,7 +96,7 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 - 需要登录态、播放列表或站点专用适配的在线导入；
 - 非首发必需的精确动画和高级导图手势。
 
-这只是计划建议，不是产品取舍。最终 Launch/Post-release/Out-of-scope 由用户确认。
+精确逐行去向以 Active [`release-scope-contract.md`](release-scope-contract.md) 为准。该确认只冻结发布范围；其中仍为 Proposed 的行为必须在 M1-S2 或后续原子 Slice 获得 Confirmed AC 后才能实施。
 
 ## 5. 关键路径
 
@@ -112,8 +112,9 @@ M0 控制基线
   -> M10 Release Candidate 总验收
   -> M11 正式发布与上线后闭环
 
-M7 模型、语言与翻译 -----------+
-M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 M9 前完成；否则进入 post-release
+M7 本地模型/ASR Launch 缺口 ------> 在 M9 前完成
+M7 云 ASR/语言/翻译扩展 ---------+
+M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 ```
 
 任何里程碑都不能仅以“代码写完”退出。退出条件必须包含定向 Judge、完整门禁、独立审查和状态交接。
@@ -123,14 +124,14 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 | 里程碑 | 目标 | 预计 Slice 数 | 当前状态 | 退出条件 |
 | --- | --- | ---: | --- | --- |
 | M0 | 控制面与 agent-first 会话协议 | 2 | Complete | Active 计划、控制地图、独立审查规则可发现 |
-| M1 | 发布范围冻结与 Release AC | 2–4 | Ready | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
+| M1 | 发布范围冻结与 Release AC | 2–4 | In progress — M1-S1 confirmed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
 | M2 | 当前目标提交证据重放 | 1–3 | Ready with authorization | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
 | M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | Gap | 双环境安装证据、生命周期、签名和许可全部完成 |
 | M4 | 数据、派生文件、schema 与架构边界 | 5–8 | Partial | 升级兼容、缩略图生命周期、risk 22 和架构政策完成 |
-| M5 | 视频列表与导入任务产品闭环 | 6–9 | Partial | 排序/搜索/空状态/卡片/删除交互达到 Strong + 必要桌面证据；Launch URL 有真实站点 Evidence |
+| M5 | 视频列表与导入任务产品闭环 | 6–9 | Partial | 排序/搜索/空状态/卡片/删除交互达到 Strong + 必要桌面证据；受控 URL 接口不被误写为真实站点承诺 |
 | M6 | 学习页基础产品闭环 | 5–9 | Partial | 布局、目录、字幕、右侧面板、快捷键和会话稳定性完成 |
-| M7 | 模型、ASR、语言与翻译 | 4–10 | Decision needed | Launch 范围的模型/语言能力均有独立 capability/Evidence |
-| M8 | 助手 Vision 与高级树编辑 | 7–15 | Decision needed | 仅对被纳入范围的能力完成纵向 UI/SQLite/模型闭环 |
+| M7 | 模型、ASR、语言与翻译 | 4–10 | Split — local core Launch; cloud/translation Post-release | Launch 的本地模型/ASR 均有独立 capability/Evidence；扩展不泄漏进首发 |
+| M8 | 助手 Vision 与高级树编辑 | 7–15 | Post-release; existing text assistant remains Launch | 首发只保留现有 Confirmed 文本助手；Vision 与高级树编辑留在后续队列 |
 | M9 | 视觉、可访问性、性能与可靠性 | 6–10 | Proposed | 视觉基准、键盘/读屏、性能预算和真实长运行通过 |
 | M10 | Release Candidate 总验收 | 4–8 | Blocked by prior milestones | 精确 RC 全门禁、全 Evidence、无阻断审查发现 |
 | M11 | 正式发布与上线后闭环 | 3–6 | Blocked by RC | 已签名发布、下载验证、回滚和首轮生产验证完成 |
@@ -161,10 +162,11 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 
 ### M1-S1 建立 Release Scope Contract
 
-- **产品决定**：用户确认本次发布是 Core Release，还是包含 M7/M8 的一部分。
-- **输出**：发布范围表，每个 Proposed 簇标记 Launch、Post-release 或 Out-of-scope，并写理由。
-- **Owner**：产品决策覆盖图与新的 release acceptance 文档。
-- **Judge**：控制面必须发现 Launch 行为缺 AC、重复 AC、无 Owner/Judge 或仍存在 Decision needed。
+- **状态**：`Complete`。用户已确认 [`release-scope-contract.md`](release-scope-contract.md) 的 31 Launch / 23 Post-release / 0 新增 Out-of-scope，以及现有 4 条 Out-of-scope 不变。
+- **产品决定**：本次发布是 Core Release；不承诺云端 ASR、翻译、Vision、高级树编辑或真实站点兼容。公开分发只有一个 GPU 增强通用安装包，但同一包必须保留 CPU-safe 主程序、CPU adapter 和无 NVIDIA 环境的可见回退。
+- **输出**：Active 发布范围表，每个 Proposed 决策标记 Launch 或 Post-release 并写明理由；Launch 仍不是实现完成或 AC Confirmed。
+- **Owner**：Active `release-scope-contract.md` 拥有已确认的发布去向；M1-S2 release acceptance 接管正式行为语义；`product-decision-coverage.md` 继续只记录当前 disposition。
+- **Judge**：54 条 Proposed 路由恰好为 31 Launch / 23 Post-release 且无重复或遗漏，既有 4 条 Out-of-scope 不变；用户确认和独立只读审查均已记录。
 - **范围外**：本 Slice 不写实现。
 
 ### M1-S2 确认 Release AC
@@ -172,6 +174,7 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 至少需要用户确认以下候选边界，编号以实际添加时为准：
 
 - 安装包身份、版本和目标平台；
+- 公开渠道只有一个 GPU 增强通用安装包，其中 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime 共存，并明确约 804 MB 披露、无 NVIDIA 回退与 Forced CPU/GPU；
 - 安装/升级/卸载和应用数据保留策略；
 - 无 NVIDIA 环境启动与 CPU 短样本；
 - NVIDIA 环境 GPU 短样本与显式/Auto 选择；
@@ -213,7 +216,7 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 
 - 定义 CPU-safe 主程序、GPU worker、CUDA runtime、模型文件和配置文件的精确安装位置。
 - 定义版本、协议、SHA-256 manifest、文件权限和禁止打包的驱动 DLL。
-- Judge 检查普通包无 CUDA 装载依赖，GPU 包只通过资源 worker 获得 CUDA。
+- Judge 检查通用安装包中的 Rain 主程序无 CUDA 装载依赖，CUDA 只经资源 worker 获得；普通内部/Harness 构建继续完全不含 CUDA 资源。
 
 ### M3-S2 无 NVIDIA/CUDA 干净 Windows Evidence
 
@@ -223,7 +226,7 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 
 ### M3-S3 NVIDIA Windows Evidence
 
-- 安装同一版本正式 GPU 包。
+- 安装与无 NVIDIA 环境相同的正式 GPU 增强通用候选包。
 - 证明 Auto 使用 CUDA、Forced CUDA 成功、Forced CPU 不启动 worker。
 - 验证取消、worker 崩溃分类、可见回退与模型错误不跨后端重跑。
 
@@ -249,11 +252,12 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 | M3-S5c | CUDA runtime 再分发许可评审 | 人类 release/legal owner | 签署的许可评审记录；AI 和构建 GREEN 均不得自我批准 |
 | M3-S5d | 发布 artifact 卫生扫描 | release checker Owner | 对 live key、调试 override、开发路径、SQLite、用户数据和意外 DLL 的自动扫描报告 |
 
-### M3-S6 804 MB GPU payload 分发 UX
+### M3-S6 单一 GPU 增强通用安装包 UX
 
-- 用户确认内置、独立下载、按需安装或 CPU/GPU 两种安装器。
-- UI 必须显示大小、硬件要求、失败重试和 CPU fallback。
-- 该决定不能由构建脚本静默决定。
+- 公开渠道只提供一个安装包，不再提供独立公开 CPU 安装包；同一包包含 CPU-safe Rain 主程序、CPU adapter 和隔离 CUDA worker/runtime。
+- 发布页与安装器必须显示约 804 MB 大小、硬件要求、无兼容 NVIDIA 环境的 Auto 可见回退、Forced CPU/GPU、失败与重试。
+- 普通 CPU-safe/Harness 构建继续作为 CI 与内部 release-evidence 产物，不得被误写成第二个公开安装包。
+- 该已确认产品边界仍必须在 M1-S2 获得独立 Confirmed AC，不能由构建脚本或现有 overlay 自我证明。
 
 ### M3 退出条件
 
@@ -335,21 +339,22 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 - 大量 Video 的加载、搜索、排序、卡片更新和后台 progress 有性能预算。
 - 避免 progress 造成全列表无界重渲染；失败诊断可定位。
 
-### M5-S6 真实站点 URL Evidence 工作包（仅当 M1 选择 Launch）
+### M5-S6 Post-release 真实站点 URL Evidence 工作包
 
-- M1 默认只提议支持公开、无需登录的单视频 HTTP(S) URL。登录态、播放列表、字幕优先、站点专用适配和永久兼容承诺必须分别决策，不得从现有 `yt-dlp` 调用静默推导。
+- M1-S1 已确认真实站点兼容不进入 Core Release；Core Release 不执行本工作包，只在 Release Notes 说明受控 URL 接口不等于真实站点保证。
+- 若后续版本由用户把具体站点提升为 Launch，则第一 Slice 只能支持公开、无需登录的单视频 HTTP(S) URL。登录态、播放列表、字幕优先、站点专用适配和永久兼容承诺必须分别决策，不得从现有 `yt-dlp` 调用静默推导。
 - **Owner**：现有 `VideoImportController.importUrl`、Rust `ytdlp` 边界，以及专用 release-evidence runner/manifest；不得建立第二套 Video 或下载状态源。
 - **Judge**：在用户批准的真实网络站点上，验证下载前已有可追踪记录、进度可见、取消/失败可重试、完成后交给 app-owned 本地路径和既有导入流水线，并按 M1 选择验证最终可播放或完整导入结果。
 - **Evidence**：绑定精确目标 SHA、`yt-dlp` 版本、站点/域名、运行时间、下载文件 SHA-256、app-owned 路径、状态/事件/脱敏日志和秘密扫描。该证据只证明记录日期和站点上的兼容性，不构成永久站点保证。
 - **Out-of-scope**：账号、Cookie、付费/受限内容、DRM 绕过、批量播放列表和未确认站点。凭据、源 URL 查询参数和用户媒体不得进入 artifact。
-- 若 M1 将此项置于 Post-release 或 Out-of-scope，Release Notes 必须明确：受控 URL 接口存在不等于承诺任何真实站点兼容性。
+- 当前 Release Notes 必须明确：受控 URL 接口存在不等于承诺任何真实站点兼容性。
 
 ### M5 退出条件
 
 - `DEC-PRD-057/058/059/060/062/077` 的发布范围全部由 Confirmed AC 控制。
 - 生产页面 + 双 adapter + 文件/桌面边界的 Judge 达到相应等级。
 - 独立 reviewer 和必要 visual reviewer 通过。
-- 若真实站点 URL 导入属于 Launch，M5-S6 的单站点/单合同 Evidence Slice 已通过；否则 Release Notes 已记录不承诺站点兼容性。
+- Core Release 的 Release Notes 已记录不承诺站点兼容性；M5-S6 不阻断本次发布。
 
 ## 13. M6 — 学习页基础产品闭环
 
@@ -365,13 +370,14 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 
 ### M6-S3 字幕与译文控制
 
-- 视频原文字幕和文本译文是两个独立开关。
-- Core Release 若不包含翻译，译文开关必须隐藏或明确不可用，不能做空按钮。
+- Core Release 只提供原文字幕独立开关；翻译与译文开关已确认 Post-release，首发不得显示空按钮或暗示可用。
+- 若未来通过显式 scope amendment 引入翻译，原文字幕和文本译文必须使用两个独立开关。
 - 字幕来源、句子边界、显示时机和关闭行为通过真实 media Judge。
 
 ### M6-S4 导图交互
 
-- 节点折叠、缩放、平移、选择、双击跳转和可选 scrub 有明确边界。
+- Core Release 只验收基础节点/连线、缩放、平移、选择和已有导航边界。
+- 节点折叠与 scrub 已确认 Post-release，首发不得展示依赖它们的空手势或控件。
 - 导图继续不承担未确认的 reparent/多选编辑。
 
 ### M6-S5 快捷键与焦点门禁
@@ -382,41 +388,44 @@ M8 助手 Vision 与高级树编辑 ----+--> 若被纳入 Launch，则必须在 
 
 ### M6 退出条件
 
-- `DEC-PRD-011/012/013/022/023/050/051/053/078/079/081/091` 全部获得 Launch/Post-release 去向。
+- `DEC-PRD-011/012/013/022/023/053/078/079/081` 的 Launch 行为获得 Confirmed AC；`DEC-PRD-050/051/091` 保持 Post-release 且不泄漏进首发。
 - Launch 行为有生产 StudyInterface Judge、真实 media 行为和必要视觉复核。
 
 ## 14. M7 — 模型、ASR、语言与翻译
 
-### M7-S1 ASR 产品范围
+### M7-S1 本地 ASR 发布缺口与 Post-release 云 ASR 队列
 
-- 决定首发只支持本地 Whisper，还是包含云端短/长音频档。
-- 每档都必须归一为 Sentence、句级时间戳、取消和失败分类。
-- 云端长音频需要真实供应商 Evidence；连接成功不算能力完成。
+- Core Release 只支持本地 Whisper；完成现有本地 ASR 的 `AC-LV-21` 双环境 Release Evidence 和对应 Release AC。
+- 云端短/长音频档已确认 Post-release，不得进入首发 UI、配置承诺或 RC Evidence。
+- 若未来通过显式 scope amendment 提升云端档，每档都必须归一为 Sentence、句级时间戳、取消和失败分类；云端长音频需要真实供应商 Evidence，连接成功不算能力完成。
 
 ### M7-S2 语言检测合同
 
+- `DEC-PRD-085` 已确认 Post-release，本工作包不阻断 Core Release。
 - 决定自动检测、用户是否可覆盖、检测失败和混合语言策略。
 - 语言结果与句子作为一个原子 ASR 结果保存。
 
 ### M7-S3 翻译生成与持久化
 
+- `DEC-PRD-033` 已确认 Post-release，本工作包不阻断 Core Release。
 - 英文原文不可改写；翻译按段落生成并单独存储。
 - 翻译失败不得破坏 ready 原文或阻止不依赖翻译的学习。
 - 配置变化、取消、重试和成本提示有明确定义。
 
 ### M7-S4 翻译 UI
 
+- `DEC-PRD-086` 已确认 Post-release，本工作包不阻断 Core Release。
 - 原文与中文译文展示、独立开关、重开恢复和助手上下文边界完整。
 - 句子高亮继续作用于原文时间线，不能假造译文句级时间。
 
 ### M7 退出条件
 
-- `DEC-PRD-032/033/085/086` 均被确认、延期或排除。
-- 每个被支持模型/角色有自己的 capability 和完整 Evidence；不继承旧配置 Verified。
+- Core Release 的本地 Whisper/模型角色各有自己的 capability 和完整 Evidence，不继承旧配置 Verified。
+- `DEC-PRD-032/033/085/086` 保持已确认的 Post-release 路由，除非用户以后显式修订 Release Scope。
 
 ## 15. M8 — 助手 Vision 与高级树编辑
 
-本里程碑默认 post-release；若用户纳入 Launch，必须在 M9 前完成。
+本里程碑的 Proposed 扩展已确认 Post-release，不阻断 Core Release。现有 Confirmed 文本助手能力仍属于 Launch 基线；Vision 与高级树编辑只有在用户以后显式修订 Release Scope 后，才可能成为未来版本的发布门禁。
 
 ### M8-A 助手与 Vision
 
@@ -519,8 +528,8 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 
 | 环境 | 必须证明 |
 | --- | --- |
-| 干净 Windows、无 NVIDIA/CUDA | 安装、启动、Auto 可见回退、CPU 短样本、卸载 |
-| 支持 NVIDIA Windows | 安装、CUDA probe、GPU 短样本、Forced CPU/GPU、卸载 |
+| 干净 Windows、无 NVIDIA/CUDA | 安装同一个 GPU 增强通用候选包、启动、Auto 可见回退、CPU 短样本、卸载 |
+| 支持 NVIDIA Windows | 安装同一个 GPU 增强通用候选包、CUDA probe、GPU 短样本、Forced CPU/GPU、卸载 |
 | 旧版升级环境 | schema/设置/视频/笔记/模型保留，失败可回滚 |
 | 重装环境 | 数据保留策略和安装器幂等 |
 
@@ -554,7 +563,7 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 
 - 从已验收 RC 创建正式 tag，不重建不同来源的未知二进制。
 - 上传签名安装包、SHA-256、第三方 notices、SBOM 和 release notes。
-- 发布页明确 CPU/GPU 包、硬件要求、模型下载大小和已验证配置。
+- 发布页明确只有一个 GPU 增强通用安装包，并说明其中的 CPU/GPU 行为、硬件要求、Auto 回退、模型下载大小和已验证配置。
 
 ### M11-S2 下载后独立验证
 
@@ -584,15 +593,15 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 
 下表确保每条 Proposed 决策都进入一个明确里程碑；它不改变其 Proposed 状态。
 
-| 工作簇 | Proposed decisions | 目标里程碑 | 默认建议 |
+| 工作簇 | Proposed decisions | 目标里程碑 | M1-S1 已确认去向 |
 | --- | --- | --- | --- |
-| 高级树编辑与恢复 | 004, 015, 035, 039, 042, 043, 044, 045, 046, 052, 083, 088, 090 | M8 | Post-release，除非用户提升 |
-| 助手与 Vision | 006, 010, 080 | M8 | 文本交互可进 Core；Vision 默认 post-release |
-| 目录、布局、字幕、快捷键 | 011, 012, 013, 022, 023, 050, 051, 053, 078, 079, 081, 091 | M6 | Core Release 按最小闭环确认 |
-| 云端 ASR、语言与翻译 | 032, 033, 085, 086 | M7 | 本地 ASR 保持 Core；云端/翻译默认 post-release |
-| 视频列表与派生文件 | 057, 058, 059, 060, 062, 077 | M4/M5 | Core Release 必须解决 |
-| 视觉系统 | 063, 064, 065, 066, 067, 068, 069, 070, 071, 073, 074, 075, 076 | M9 | Core Release 需冻结最小视觉合同 |
-| 架构边界 | 092, 096, 099 | M4 | 触碰对应模块前确认并机械保护 |
+| 高级树编辑与恢复 | 004, 015, 035, 039, 042, 043, 044, 045, 046, 052, 083, 088, 090 | M8 | 全部 Post-release |
+| 助手与 Vision | 006, 010, 080 | M8 | Proposed 扩展全部 Post-release；现有 Confirmed 文本助手仍在 Launch 基线 |
+| 目录、布局、字幕、快捷键 | 011, 012, 013, 022, 023, 050, 051, 053, 078, 079, 081, 091 | M6 | 011/012/013/022/023/053/078/079/081 Launch；050/051/091 Post-release |
+| 云端 ASR、语言与翻译 | 032, 033, 085, 086 | M7 | 全部 Post-release；本地 ASR 由现有 Confirmed AC 保持 Launch |
+| 视频列表与派生文件 | 057, 058, 059, 060, 062, 077 | M4/M5 | 全部 Launch |
+| 视觉系统 | 063, 064, 065, 066, 067, 068, 069, 070, 071, 073, 074, 075, 076 | M9 | 全部 Launch |
+| 架构边界 | 092, 096, 099 | M4 | 全部 Launch；各自仍须 Confirmed AC |
 
 总数检查：13 + 3 + 12 + 4 + 6 + 13 + 3 = 54。
 
@@ -671,8 +680,8 @@ Next single action:
 
 在本计划获得独立审查并提交后，后续会话严格按以下顺序开始：
 
-1. M1-S1：用户确认 Core Release 范围和 post-release 能力簇。
-2. M1-S2：确认 Release AC。
+1. M1-S1：`Complete` — 用户已确认 Core Release 范围、post-release 能力簇和单一 GPU 增强通用安装包边界。
+2. M1-S2：下一唯一工作包 — 逐条提出并由用户确认 Release AC。
 3. M2-S1：对执行时目标提交重放 Hosted Runtime Settings desktop Judge。
 4. M2-S2：审计 canonical Evidence freshness。
 5. M3-S1：确认正式 release artifact contract。
