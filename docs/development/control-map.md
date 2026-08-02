@@ -1,7 +1,7 @@
 # Rain 项目控制地图
 
 > 状态：Active
-> 更新日期：2026-07-29
+> 更新日期：2026-08-02
 > 作用：告诉人和 AI 在不同问题上应该相信哪份资料，以及资料冲突时如何处理。
 
 ## 1. 事实源不是一个文件
@@ -15,6 +15,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 当前状态、最近验证和已知风险 |
 | 跨会话开发切片按什么流程和优先级执行 | `docs/development/agent-first-development-plan.md` | Active 会话/交付协议与候选队列；不新增产品语义，Proposed 切片仍需用户确认 |
 | 从当前状态到正式发布按什么里程碑推进 | `docs/development/rain-project-delivery-plan.md` | Active 项目交付路线、Release 完成定义、全部 Proposed 决策路由和 RC/上线门禁；不自动授权新行为 |
+| 本次 Core Release 建议包含什么 | `docs/development/release-scope-contract.md` | Proposed M1-S1 范围合同；逐条给出 Launch/Post-release 建议，用户确认前不改变产品语义 |
 | 用户希望产品做什么 | 根目录 `PRD.md` 和对应 `M*.md` | 已确认产品意图；不自动代表代码已经实现 |
 | 99 条历史产品决策当前由什么控制 | `docs/development/product-decision-coverage.md` | 每条决策映射到 Confirmed AC、Proposed 或当前范围外；不是完成百分比 |
 | 本地视频主链路当前按什么设计 | `docs/superpowers/specs/2026-07-17-rain-real-local-video-repair-design.md` | 已实施修复的设计依据；与更晚的事实冲突时需要重新确认 |
@@ -69,11 +70,15 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 2. `docs/development/control-map.md`
 3. `CONTEXT.md`
 4. `docs/PROJECT_STATE.md`
-5. `docs/development/agent-first-development-plan.md`
-6. `docs/development/rain-project-delivery-plan.md`
-7. 与任务有关的 AC、覆盖矩阵和模块地图
-8. 与任务有关的 PRD/spec
-9. 相关代码、测试和最近真实证据
+5. `docs/development/acceptance-standard.md`
+6. `docs/development/product-decision-coverage.md`
+7. `docs/development/harness-coverage.md`
+8. `docs/development/module-map.md`
+9. `docs/development/agent-first-development-plan.md`
+10. `docs/development/rain-project-delivery-plan.md`
+11. M1/发布任务再读 `docs/development/release-scope-contract.md`
+12. 与任务有关的 PRD/spec
+13. 相关代码、测试和最近真实证据
 
 不需要每次通读 99 条历史决策。先通过控制地图找到本次任务真正相关的资料。
 

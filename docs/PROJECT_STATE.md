@@ -81,11 +81,12 @@ Read in this order:
 7. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
 8. `docs/development/agent-first-development-plan.md` — Active one-Slice cross-session execution order and mandatory independent-review gate; it does not define product behavior.
 9. `docs/development/rain-project-delivery-plan.md` — Active milestone roadmap from scope freeze through RC, formal release and post-release verification; Proposed product slices still require user confirmation.
-10. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
-11. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
-12. `package.json` — runnable frontend/test/E2E commands.
-13. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-14. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+10. `docs/development/release-scope-contract.md` — Proposed M1-S1 Core Release scope; read for launch recommendations only, and do not treat it as confirmed before explicit user approval.
+11. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
+12. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
+13. `package.json` — runnable frontend/test/E2E commands.
+14. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+15. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -1778,6 +1779,28 @@ The complete roadmap must pass `npm run harness:control`, `git diff --check` and
 The first independent read-only roadmap review used baseline `495b5e56dab61b3eb4694471347406592868579d` and returned `FAIL` with three P1 findings and one P2. First, the Active per-session plan said Hosted replay was the next unique action while the complete roadmap correctly put M1 scope/Release AC first. Second, a launch choice for real-site URL import had no executable Owner/Judge/Evidence work package. Third, `M#-S#` labels could be mistaken for executable one-AC Slices even when they combined installation lifecycle, signing, SBOM, licensing and artifact hygiene. Fourth, the sample RC Evidence command used a PowerShell-invalid angle-bracket placeholder. The correction makes the complete roadmap the only ordering authority, sets M1-S1 as the next unique action, defines all `M#-S#` entries as work packages that must be decomposed through the Slice Contract, explicitly splits the M3-S5 governance candidates, adds conditional M5-S6 real-site Evidence and replaces the RC command with an executable variable form. The 54-decision routing itself passed the reviewer’s mechanical completeness check; no product decision was promoted.
 
 The same independent reviewer then examined the corrected working tree read-only and returned final verdict `PASS`: P0/P1/P2 were all empty; all four initial findings were closed; the Proposed source and route table both contained 54 unique IDs with no missing, extra or duplicate entry; and no AC, coverage level, locked Harness or product decision changed. The reviewer independently ran `npm run harness:control` and `git diff --check`; both passed, with only normal line-ending warnings. It did not rerun the complete Harness, Hosted desktop, dual-environment installation, signing/licensing, real-video or external-site Evidence, and the roadmap continues to treat those as future gates rather than completed facts. This final PASS is the required independent review for the roadmap documentation slice.
+
+
+## 2026-08-02 M1-S1 Core Release scope proposal
+
+The user authorized execution of the complete delivery roadmap. Work began with the required takeover on branch `codex/m1-release-scope-contract` from committed roadmap baseline `c2204c0`; the worktree was clean and `npm run harness:control` passed before this slice.
+
+- Slice: M1-S1 Release Scope Contract. This is a product-scope proposal, not an implementation or AC-confirmation slice.
+- Observable result: `docs/development/release-scope-contract.md` gives every current Proposed decision one recommended release destination and exposes the exact choices that require user confirmation.
+- In scope: all current Confirmed ACs as the Launch baseline; 54 current Proposed rows classified individually; the existing four Out-of-scope rows recorded unchanged; explicit first-release non-promises; and the M1-S2 Release AC queue.
+- Out of scope: confirming new ACs, changing `product-decision-coverage.md`, product code, locked Harness, external workflow state, model/video calls, installers and Evidence.
+- Owner: the Proposed release scope document. After user confirmation, M1-S2 and the active product-decision/acceptance control plane must own the resulting semantics.
+- Judge: compare the 54 Proposed source rows mechanically with the Launch/Post-release table rows; require one row per ID and counts 31 Launch / 23 Post-release / 0 new Out-of-scope; run `harness:control` and whitespace checks; then obtain independent read-only Spec/Standards review and explicit user confirmation.
+- Recommended Core Release: existing Confirmed behavior plus video-list/derived-file completion, learning-page base interaction, a minimum visual/accessibility system and the three architecture boundaries. Cloud ASR, translation, Vision, advanced tree editing, advanced diagram gestures and real-site compatibility are recommended Post-release. The controlled `AC-LV-17` URL-to-local-media interface remains in the Launch baseline, but Release Notes must not promise any real site.
+- The scope proposal does not promote any Proposed row, lower any AC, alter coverage or authorize M1-S2. User confirmation remains the blocking product gate.
+
+The independent review result, any findings and their closure are appended here before the proposal commit. The next unique action after that commit remains user confirmation of the M1-S1 table; M1-S2 cannot begin from silence or inference.
+
+The first independent read-only M1-S1 review used baseline `c2204c0daf7213e3fa2f3af4229e3b1e89b89d0f` and returned `FAIL` with five P1 findings and one P2. The 54-row mapping itself passed at 31 Launch / 23 Post-release with no missing, extra or duplicate ID; the existing four Out-of-scope rows, mixed-decision boundaries, Confirmed AC baseline and controlled-URL/no-real-site distinction were also correct. The blocking findings were: three Launch architecture decisions were not explicit in the M1-S2 queue; the approximately 804 MB GPU payload delivery UX was hidden inside a generic artifact relation; risk 22's two required architecture debts had no Launch/Post-release destination; the control-map reading order put the Proposed contract before the Active AC/coverage/module sources required by `AGENTS.md`; and this state record did not yet persist the verdict. The P2 was the stale control-map update date. Corrections make the three architecture contracts, GPU distribution decision and both risk 22 items explicit independent M1-S2 inputs; recommend CPU/GPU dual installers while preserving user alternatives; classify both risk 22 items as Launch behavior-preserving work; restore the required source order; add the Proposed contract to the source list; and update the control-map date. These changes require the same reviewer to re-run Spec/Standards review before commit.
+
+The second independent review returned `FAIL` with one remaining P1 and no P0/P2. It confirmed that the first review's GPU, risk 22, source-order, update-date and state-persistence findings were closed, and that the 54-row mapping and all protected boundaries remained correct. The remaining defect was an `or` in the M1-S2 queue that allowed `DEC-PRD-092/096/099` to use an independent governance contract instead of a Confirmed AC, contradicting the release-scope and roadmap exit rules. The queue now requires a Confirmed AC for each of the three decisions; governance records and negative policies may be Judges but cannot replace product confirmation. A final read-only confirmation is required before commit.
+
+The third and final independent read-only confirmation returned `PASS` with P0/P1/P2 all empty. It confirmed that `DEC-PRD-092/096/099` now each require a Confirmed AC, while governance records and negative policies are only Judges; the scope mapping remains exactly 54 unique Proposed rows split into 31 Launch and 23 Post-release; and no AC, coverage level, product disposition, source, Evidence or locked Harness changed. The reviewer rechecked `npm run harness:control` and both tracked/new-file whitespace checks; all passed with only normal line-ending warnings. Full Harness, Hosted workflow, models, video, installers and Evidence were not run because M1-S1 changes only Proposed control documentation. This PASS completes the independent-review gate for the proposal commit, not the product-confirmation gate. The next unique action is explicit user confirmation or amendment of the scope table.
 
 
 ## Maintenance checklist for every future session
