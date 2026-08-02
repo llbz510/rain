@@ -171,16 +171,11 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M1-S2 确认 Release AC
 
-至少需要用户确认以下候选边界，编号以实际添加时为准：
-
-- 安装包身份、版本和目标平台；
-- 公开渠道只有一个 GPU 增强通用安装包，其中 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime 共存，并明确约 804 MB 披露、无 NVIDIA 回退与 Forced CPU/GPU；
-- 安装/升级/卸载和应用数据保留策略；
-- 无 NVIDIA 环境启动与 CPU 短样本；
-- NVIDIA 环境 GPU 短样本与显式/Auto 选择；
-- 签名、哈希、第三方许可和 CUDA runtime 分发；
-- schema 升级兼容和失败回滚；
-- 发布阻断缺陷等级与 Evidence 新鲜度。
+- **状态**：`Proposed — awaiting user confirmation`。
+- **输出**：[`release-acceptance-contract.md`](release-acceptance-contract.md) 提出 50 条原子 AC 及逐项 Evidence tier，逐行覆盖 31 条 Launch decision、risk 22a/22b 和 M1-S1 的 13 类发布缺口。
+- **首发细节建议**：`Rain 0.1.0`、Windows x64、GitHub Releases、单一 NSIS `.exe`；默认卸载保留用户数据/模型并永不删除源视频；首次正式发布从冻结的 `c2eb4c4` 预发布 fixture 升级。
+- **确认边界**：用户可整体确认或按 AC ID 修改；确认前不写 `acceptance-standard.md`/`harness-coverage.md`，不更新 disposition，也不实现或运行 Evidence。
+- **确认后下一 Slice**：只迁移正式 AC 控制面并接受独立审查，不同时写产品代码。
 
 ### M1 退出条件
 
@@ -681,7 +676,7 @@ Next single action:
 在本计划获得独立审查并提交后，后续会话严格按以下顺序开始：
 
 1. M1-S1：`Complete` — 用户已确认 Core Release 范围、post-release 能力簇和单一 GPU 增强通用安装包边界。
-2. M1-S2：下一唯一工作包 — 逐条提出并由用户确认 Release AC。
+2. M1-S2：`Proposed matrix complete` — 下一唯一动作是用户确认或按 AC ID 修订 [`release-acceptance-contract.md`](release-acceptance-contract.md)；确认后另起正式 AC migration Slice。
 3. M2-S1：对执行时目标提交重放 Hosted Runtime Settings desktop Judge。
 4. M2-S2：审计 canonical Evidence freshness。
 5. M3-S1：确认正式 release artifact contract。

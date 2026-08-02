@@ -227,4 +227,4 @@ npm run harness:control
 
 ## 7. 下一会话唯一推荐动作
 
-只执行总交付计划的 M1-S2 工作包：以用户已确认的 [`release-scope-contract.md`](release-scope-contract.md) 为边界，逐条起草 Release AC matrix，覆盖 31 条 Launch 决策、单一 GPU 增强通用安装包、安装生命周期、双硬件环境、签名/许可、schema、派生文件、risk 22 和 RC Evidence，并交由用户明确确认。本工作包不写产品代码、不触发外部 workflow、不运行安装器或签发 Evidence；M1-S2 经独立只读审查并获用户确认后，才进入 M2 Hosted replay。
+只执行 M1-S2 的用户确认门：审阅 Proposed [`release-acceptance-contract.md`](release-acceptance-contract.md) 中 50 条候选 AC、逐项 Evidence tier、31 条 Launch traceability 和六项首发细节建议，并整体确认或按 AC ID 修订。本动作不写产品代码、不触发外部 workflow、不运行安装器或签发 Evidence。用户确认后，下一个原子 Slice 只把获批 AC 迁入 `acceptance-standard.md`/`harness-coverage.md` 并更新 disposition；该迁移经独立审查后 M1 才退出，随后进入 M2 Hosted replay。
