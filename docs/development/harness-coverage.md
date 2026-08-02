@@ -1,7 +1,7 @@
 # Rain Harness 覆盖矩阵
 
 > 状态：Active
-> 更新日期：2026-07-30
+> 更新日期：2026-08-02
 > 作用：说明每条 AC 由谁检查，以及现有检查能证明到什么程度。
 
 ## 1. 覆盖等级
@@ -30,7 +30,7 @@
 | AC-LV-08 | `pipeline-recovery.test.ts`、Stage2 检查点测试、重试证据 | Strong + Evidence | 已覆盖复用 ASR 和重跑坏检查点 |
 | AC-LV-09 | `validate-evidence.ps1`、数据库摘要、WebDriver DOM 状态、学习页截图 | Evidence | schema v2 同时要求真实数据库内容与生产学习页、播放器、段落可见；普通单元测试或仅有 PNG 不能替代 |
 | AC-LV-10 | `video-list-page-recovery.test.tsx`、`video-list-import.test.tsx` | Strong | 覆盖事件驱动 UI 和持久化终态；真实事件链由 E2E 补充 |
-| AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、生产学习页 DOM、截图和秘密；schema v2 不再把“任意 PNG”当作 UI 已就绪 |
+| AC-LV-11 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Strong + Evidence | 覆盖哈希、乱码、demo、CUDA、结构、取消、重启、生产学习页 DOM、截图和秘密；schema v2 不再把“任意 PNG”当作 UI 已就绪。外部 PowerShell 集成 Judge 使用局部 30s 环境预算，所有正负断言和验证器脚本保持不变 |
 | AC-LV-12 | 上述能力/运行时测试、`qwen-health.test.ts`、`live-qwen.test.ts`、`validate-evidence.test.ts`、`validate-evidence.ps1`、真实 E2E Runner、`rain-real-e2e-20260726-195652` | Strong + Evidence（限定已验证组合） | 三角色探针、角色门禁、导入门禁和文本助手门禁均复用生产接口。schema v2 已真实验证 `ggml-large-v3.bin` CUDA ASR + DashScope `qwen3-omni-flash` 结构化与文本助手：当前默认配置、设置连接测试、可选 live smoke 和 E2E 默认值已对齐，但 live smoke 没有 Key 时必须跳过，不能代替 Evidence。该结论只覆盖此配置指纹和文本助手，不推广到其他 OpenAI-compatible 模型或 vision；其他配置仍需各自探针和完整 E2E。旧 schema v1 证据继续按原固定运行时规则验证 |
 | AC-LV-13 | `video-list-deletion.test.tsx`、`database-video-deletion.test.ts`、M15/M20/M21、Rust `video_deletion` tests | Strong（生产页面 + 活动任务结算 + 公共接口 + Rust 事务） | 生产页面按需单飞读取真实段落/笔记数量，支持确认/取消；删除前以 per-Video stopping gate 阻止重复/新 start，取消并等待全部活动任务，防止迟到 checkpoint 复活；桌面取消失败立即可见且不删除；URL 发布交接的取消必须在 Pipeline 接管前释放旧 Owner，使删除失败保留的记录仍可重试。事务提交后立即发布卡片移除，读取失败不得谎报删除失败，无 Owner 时没有静默确认。数据库与 Rust 真实 SQLite 继续锁定全部归属数据清理、隔离、末步失败回滚和缺失 Video 幂等；当前没有把该 jsdom Judge 称为桌面 E2E |
 | AC-LV-14 | `runtime-settings-store.test.ts`、`runtime-settings-ui.test.tsx`、`settings-boundary.test.ts`、`database-settings.test.ts`、`model-pool.test.ts`、`run-runtime-settings-e2e.ps1`、M20、Rust `settings_persistence` tests | Strong（UI/Store 提交门禁 + 业务批次 + Rust 事务 + 真实桌面重启） | 添加、删除和角色选择只在快照落库后发布；失败保留两个内存副本并可见报错；Settings UI 不得绕过 Store hydration。模型快照保存与旧格式迁移均组装单批 mutation，Rust 锁定成功提交、无关 key 隔离和末步失败全回滚；短 E2E 证明无 Key 测试模型经真实 Tauri/SQL plugin/隔离 SQLite 添加后跨进程存在 |
@@ -106,7 +106,64 @@
 
 2026-07-26 经用户批准完成两轮 Harness Migration。旧的影子注册表、假导入队列、未接入树编辑、视觉令牌复制品、旧 ASR 标准化和恒真 Rust 测试已被真实接口行为测试替代或明确退役；详见 `harness-migration-2026-07-26.md`。
 
-## 7. 当前不设“已完成”门禁的能力
+## 7. Core Release 新确认 AC 的当前覆盖
+
+以下 50 条 AC 已于 2026-08-02 确认产品语义，但本次 Harness Migration 不修改测试或产品实现。`Partial`/`Gap` 是正式开发队列，不得因 AC 已 Confirmed 而升级为完成；达到 AC 中指定的 Required Evidence tier 后才可关闭。
+
+| AC | 当前裁判 | 等级 | 当前结论与缺口 |
+| --- | --- | --- | --- |
+| AC-RL-01 | 尚无可信发布 Judge | Gap | 未生成目标 `0.1.0` 单一公开 NSIS、commit manifest 或 GitHub Release 对账 |
+| AC-RL-02 | `build-whisper-cuda-worker.ps1`、GPU bundle/probe 脚本 | Partial | 已有 CPU-safe base + CUDA overlay 设计与本地构建入口；未证明目标安装器资源、主程序 import 和唯一公开 asset |
+| AC-RL-03 | 尚无干净安装 Judge | Gap | 缺无 Rain 数据的隔离 Windows 首装、首启、Runtime Settings 和退出 Evidence |
+| AC-RL-04 | 尚无重装 Judge | Gap | 缺同版本真实重装、程序 manifest 恢复和用户数据摘要 |
+| AC-RL-05 | 尚无安装升级 Judge | Gap | 缺同 identifier 的冻结 `c2eb4c4` fixture 安装场景与安装失败故障注入 |
+| AC-RL-06 | 尚无卸载 Judge | Gap | 缺卸载/重装、注册项、保留数据、源视频哈希和人工彻底清理文档闭环 |
+| AC-RL-07 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests | Partial | 生产选择和 CPU fallback 有行为覆盖；缺无 NVIDIA/CUDA 干净 Windows 上目标安装器启动和真实 CPU 短样本 Release Evidence |
+| AC-RL-08 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests、本机 GPU smoke | Partial | Auto/Forced/错误分类及单机 GPU 短样本存在；未绑定目标安装器/SHA，取消/崩溃/模型错误的 RC Evidence 未齐 |
+| AC-RL-09 | 尚无正式签名 Judge | Gap | 缺受信任证书、时间戳、目标 installer/主程序验证和人类 security 批准 |
+| AC-RL-10 | 尚无 release manifest/SBOM Judge | Gap | 缺同一目标 SHA 的 installer SHA、机器 manifest、SBOM 与 notices 对账 |
+| AC-RL-11 | 尚无人类 legal 批准 | Gap | CUDA runtime DLL/版本/来源/许可证清单尚未取得书面批准 |
+| AC-RL-12 | 普通/E2E 构建隔离扫描 | Partial | 已拒绝 E2E 标记进入普通前端产物；尚无解包 installer 的 secret/path/DLL/用户数据完整 hygiene scanner |
+| AC-RL-13 | Rust persistence tests、`database-architecture-policy.test.ts` | Partial | 当前专用事务与架构边界有覆盖；缺冻结旧 SQLite fixture 的生产启动迁移、备份、逐步故障和幂等重启 |
+| AC-RL-14 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Partial | 现有 Evidence schema 校验部分指纹；尚未把目标 installer hash、全部配置/硬件和影响边界的 commit 变化作为统一失效门 |
+| AC-RL-15 | 本迁移的缺陷政策文档 | Gap | 尚无可执行严重度 fixture、发布阻断器和人类签署例外记录 |
+| AC-RL-16 | 尚无公开下载复验 | Gap | 缺正式 tag/RC 对账、用户 URL 二次下载、签名/哈希和干净安装复验 |
+| AC-RL-17 | 尚无生产观察 Judge | Gap | 缺显式授权、脱敏诊断 schema、撤回路径和绑定版本/AC/严重度的首轮记录 |
+| AC-RL-18 | 尚无下载页/安装器 UI Judge | Gap | 缺真实安装前披露及与目标 manifest、GPU/runtime Evidence 的对账 |
+| AC-RL-19 | 尚无回滚演练 | Gap | 缺签名已知版本的安装回滚、数据库兼容拒绝和数据保留 Evidence |
+| AC-RL-20 | Active scope/AC/coverage 文档 | Partial | 控制面可提供 truth source；尚无目标 Release Notes 与 artifact、有效 Evidence、缺陷和回滚逐项发布对账 |
+| AC-VL-01 | `video-import-task-dialog.test.tsx`、`video-list-page-recovery.test.tsx`、M17 | Partial | 多持久状态、错误和动作已有生产 DOM 行为；规定信息层级与完整视觉 Evidence 未裁判 |
+| AC-VL-02 | `database-videos.test.ts` | Partial | SQLite 排序和稳定查询存在；生产 UI 三选项、默认最近学习和双 adapter 同义尚无纵切 Judge |
+| AC-VL-03 | `database-videos.test.ts` | Partial | 标题查询基础行为存在；生产搜索控件、排序组合、空白/无结果/数据库失败区分未形成完整 Judge |
+| AC-VL-04 | `video-list-local-import.test.tsx`、`video-import-task-dialog.test.tsx` | Partial | 导入与非 ready 详情入口存在；排序/搜索/空库/无结果/失败的完整页面组合和桌面 DOM 未闭合 |
+| AC-VL-05 | `video-list-deletion.test.tsx`、Rust `video_deletion` tests | Partial | 数据库级联与源视频保留已有 Judge；提交后 app-owned 缩略图删除、非法路径和可重试文件失败未实现 |
+| AC-VL-06 | 尚无缩略图 GC Judge | Gap | 缺真实 keep-set、路径逃逸、并发新建、幂等与部分失败覆盖 |
+| AC-VL-07 | M17、`video-thumbnail-ownership.test.tsx` | Partial | 卡片内容与真实缩略图桥接有局部覆盖；240px/16:9/窄宽主操作和多 viewport 独立视觉 Evidence 未签发 |
+| AC-SU-01 | M05、`study-navigation.test.tsx`、`study-playback.test.tsx` | Partial | 当前项、滚动和统一播放事实有局部行为；双行长目录、边缘渐隐、暂停手动控制的生产纵切未完整裁判 |
+| AC-SU-02 | M05、`study-playback.test.tsx` | Partial | 进度来自 `playPosition`；章节/小节约 200ms 横向滑动、DOM 和 reduced-motion Evidence 未闭合 |
+| AC-SU-03 | `study-layout.test.tsx`、助手/笔记生产测试 | Partial | 会话与学习事实已有相邻覆盖；Tab 隐藏区无重复副作用、未完成流/草稿恢复和桌面 Judge 未闭合 |
+| AC-SU-04 | `study-layout.test.tsx` | Partial | 三模式复用媒体事实已 Strong；比例拖拽、跨会话持久化与真实桌面重启仍是 Gap |
+| AC-SU-05 | `study-playback.test.tsx`、M07 | Partial | 真实当前句和媒体播放存在；原文字幕开关、半透明视觉、重开恢复和无译文控件未完整裁判 |
+| AC-SU-06 | `study-navigation.test.tsx`、M05 | Partial | 选择/双击导航与真实结构有覆盖；正交圆弧视觉、有界缩放/平移和完整桌面 Judge 未闭合 |
+| AC-SU-07 | M14、`study-playback.test.tsx`、`study-navigation.test.tsx` | Partial | 局部快捷键与基础副作用已有组件覆盖；完整生产焦点矩阵、精确布局映射、N/P/Tab 副作用和禁用删除未签发 |
+| AC-UX-01 | `m13-visual.test.ts`、`src/index.css` | Partial | 真实 CSS token 受锁定 Harness 读取；全部 Launch 页面 dark-only/无品牌强调色的独立 visual review 缺失 |
+| AC-UX-02 | `m13-visual.test.ts`、生产组件相邻测试 | Partial | 四类型 token 存在；跨目录/文本/导图/列表的选中、播放、状态与进度组合 Evidence 未闭合 |
+| AC-UX-03 | `m13-visual.test.ts` | Partial | 字体/字号 token 有局部裁判；全应用实际用途、行距、长文本多 viewport 与 accessibility review 缺失 |
+| AC-UX-04 | `m13-visual.test.ts` | Partial | 部分几何 token 已锁定；生产页面一次性尺寸扫描、DOM measurement 和例外白名单未建立 |
+| AC-UX-05 | `m13-visual.test.ts`、生产组件相邻测试 | Partial | 三时长 token 有局部事实；跨目录/面板/卡片的 reduced-motion 行为和桌面 accessibility Evidence 未闭合 |
+| AC-UX-06 | 尚无完整 accessibility Judge | Gap | 缺全部 Launch 主操作的键盘遍历、可见焦点、名称、非纯颜色状态、axe 与 AA 对比度复核 |
+| AC-PF-01 | 尚无冻结机器 performance runner | Gap | 缺正式候选包 10 次有效冷启动 p95 Evidence |
+| AC-PF-02 | 尚无冻结 500 视频 performance runner | Gap | 缺固定 SQLite fixture、10 次重启和列表可操作 p95 Evidence |
+| AC-PF-03 | 尚无学习页 performance runner | Gap | 缺固定 ready fixture/媒体、10 次重置打开和事实可见 p95 Evidence |
+| AC-PF-04 | 尚无进度反馈 performance runner | Gap | 缺至少 100 个生产 Controller→任务详情事件的端到端 p95 时间戳 |
+| AC-PF-05 | 尚无正式 soak runner | Gap | 缺预热基线、25 分钟固定循环、资源计数、working-set 斜率/末值和退出残留 Evidence |
+| AC-AR-02 | `m20-boundaries.test.ts`、LLM/Stage2/助手相邻测试 | Partial | 真实前端 `src/llm/` 禁止 Tauri invoke 且 command 集合不含 LLM；完整依赖 policy、合并路径和按角色真实请求 Evidence 尚未统一 |
+| AC-AR-03 | `video-thumbnail-ownership.test.tsx`、`study-playback.test.tsx` | Partial | 生产媒体 URL adapter 已用于缩略图/播放器；Tauri capability 的允许/拒绝真实路径、scope 负向 policy 和规范化桌面 Judge 缺失 |
+| AC-AR-04 | `database-architecture-policy.test.ts`、Store/数据库相邻测试 | Partial | SQLite 公共 Owner 与多项重启事实存在；完整 Zustand 仅会话态 dependency policy、双 adapter 与禁止页面持久化复制未统一 |
+| AC-AR-05 | `video-import-task-dialog.test.tsx`、`video-list-deletion.test.tsx` | Partial | 页面切换/后台继续和任务结算有相邻行为；显式唯一 App-scope Owner、真正卸载/重挂、迟到结果与无双 Owner policy 未闭合 |
+| AC-AR-06 | M20/M21、Rust events/commands tests、Pipeline/Stage2 tests | Partial | 当前事件字段和阶段各有局部裁判；五类判别联合、非法组合、单调性、terminal 后 mutation 与 checkpoint retry 的统一域合同未建立 |
+
+## 8. 当前不设“已完成”门禁的能力
 
 | 能力 | 状态 | 处理规则 |
 | --- | --- | --- |
@@ -114,7 +171,7 @@
 | 在线 URL 真实站点兼容与完整外网 Evidence | Gap | `AC-LV-17` 只确认无网络的受控本地交接；站点差异、登录态、播放列表、多小时/GB 级下载和完整模型链路仍需独立 Evidence |
 | Vision 解释当前画面 | Gap | 必须有截图、图像请求和模型能力验证后才能加入完成门禁 |
 
-## 8. 变更时如何查表
+## 9. 变更时如何查表
 
 例如修改取消逻辑：
 

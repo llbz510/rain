@@ -1,8 +1,8 @@
 # Rain 验收标准
 
 > 状态：Active
-> 更新日期：2026-07-30
-> 当前范围：本地视频导入主链路、在线 URL 到受控本地媒体的导入交接。其他产品模块会在后续受控梳理中逐步加入。
+> 更新日期：2026-08-02
+> 当前范围：本地视频与学习主链路、Core Release 产品/发布合同、Engineering Harness 和架构边界。Confirmed 表示产品语义生效，不代表当前覆盖已经达到所需 Evidence tier。
 
 ## 1. AC 怎么使用
 
@@ -511,14 +511,619 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 裁判：`database-architecture-policy.test.ts` 用独立违规源码和真实生产树执行同一 policy，拒绝 SQL plugin 扩散、数据库内部 module 逃逸和前端事务控制；`database-boundary.test.ts`、M20/M15 Harness 继续锁定公共入口、command 集合和生产 ASR interface；数据库公共接口测试与 Rust persistence tests 分别裁判参数/错误传播和真实 SQLite 成功、迟失败回滚。静态边界、内存 adapter 或 SQL 调用序列中的任一项都不能独自证明事务正确。
 
-## 7. 当前明确不在已验收范围
+## 7. Core Release 正式验收合同
+
+本节由用户于 2026-08-02 整体确认，并通过 `harness-migration-2026-08-02-release-ac-control.md` 从 M1-S2 提案迁入。每条 AC 的当前实现强度与缺口以 `harness-coverage.md` 为准；`Confirmed` 只冻结产品行为、Owner、Judge、Evidence tier 和范围外边界，不能被解释为实现或 Evidence 已完成。
+
+### AC-RL-01
+
+状态：`Confirmed`
+
+公开发布只有一个与目标 commit、`0.1.0`、`com.rain.app` 一致的 Windows x64 NSIS 安装器，GitHub Release 页面可定位其版本与 SHA
+
+实现归属：Tauri config、release build script、人类 release owner。
+
+裁判：干净 checkout 构建；安装器 metadata/文件名/版本/commit manifest 一致；公开页只有一个安装下载物。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：MSI、portable、自动更新、非 x64、非 Windows。
+
+### AC-RL-02
+
+状态：`Confirmed`
+
+单一安装器同时包含 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime；不存在第二个公开 CPU 包
+
+实现归属：GPU bundle script、Tauri GPU overlay。
+
+裁判：安装后主程序无 CUDA import；worker/runtime/manifest 齐全且不含 `nvcuda.dll`；公开 Release asset 只有该通用安装器。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：把 CUDA feature 加入主程序/默认 Harness；静默按需下载；驱动 DLL 再分发；发布文案由 AC-RL-18 控制。
+
+### AC-RL-03
+
+状态：`Confirmed`
+
+干净 Windows x64 可完成安装、首次启动、Runtime Settings 就绪和正常退出，不读取开发树或预装 Rain 数据
+
+实现归属：installer、Rain startup。
+
+裁判：独立 release-evidence runner 在无 Rain 缓存/数据库的隔离机器真实安装；进程、安装路径、首次 schema 和脱敏日志 Evidence。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：升级、模型/GPU 能力成功、业务长 E2E。
+
+### AC-RL-04
+
+状态：`Confirmed`
+
+同版本重装幂等：程序文件恢复到目标 manifest，已有设置/SQLite/模型不重复、不丢失，重装后可再次启动
+
+实现归属：installer lifecycle owner。
+
+裁判：`0.1.0 → 0.1.0` 真实重装；前后数据摘要、文件 manifest、启动日志。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：跨版本 schema 升级、手工覆盖程序目录。
+
+### AC-RL-05
+
+状态：`Confirmed`
+
+`0.1.0` 安装器在发现同 identifier 的冻结 `c2eb4c4` 数据/设置 fixture 时保留并交给版本化迁移；未来版本从上一公开安装版本升级；安装失败不得破坏原数据
+
+实现归属：installer upgrade owner、database migration entry。
+
+裁判：同 identifier 安装场景 + 冻结数据 fixture；安装失败故障注入；成功后交由 AC-RL-13 裁判迁移内容。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：假造旧正式 installer、任意更古老开发快照、跨主版本降级。
+
+### AC-RL-06
+
+状态：`Confirmed`
+
+默认卸载移除程序文件和注册项但保留用户数据/模型/设置/派生文件；重装恢复；用户源视频永不删除；彻底清理步骤在文档中显式列出
+
+实现归属：installer uninstall owner、app-data policy。
+
+裁判：卸载前后文件/注册/数据库摘要；重装恢复；源视频哈希不变；人工清理文档复核。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：首发卸载器内“删除全部数据”复选框、自动删除用户源媒体。
+
+### AC-RL-07
+
+状态：`Confirmed`
+
+无 NVIDIA GPU/驱动/CUDA runtime 的干净 Windows 安装同一候选包后可启动，`Auto` 显示原因并完成真实 CPU 短样本
+
+实现归属：`whisper_backend`、universal installer。
+
+裁判：隔离 Evidence runner 记录硬件/驱动清单、安装器哈希、主程序 CUDA import 检查、真实短媒体/模型非空单调句子、实际 backend=`cpu`。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：fake worker、开发 override、只做 DLL 字符串检查。
+
+### AC-RL-08
+
+状态：`Confirmed`
+
+受支持 NVIDIA Windows 安装同一候选包后，Auto/Forced CUDA/Forced CPU、取消与失败分类符合 `AC-LV-21` 并完成真实短样本
+
+实现归属：`whisper_backend`、CUDA worker、universal installer。
+
+裁判：独立 Evidence runner 记录 GPU/驱动、包/模型哈希；Auto 与 Forced CUDA 真实输出；Forced CPU 不启动 worker；取消/崩溃/模型错误 Evidence。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：把本机旧 smoke 自动继承给 RC、跨所有 NVIDIA 型号承诺。
+
+### AC-RL-09
+
+状态：`Confirmed`
+
+公开 installer 和主可执行文件使用受信任 Windows 代码签名；私钥不进入仓库、日志或 artifact
+
+实现归属：人类 release/security owner、签名流水线。
+
+裁判：目标下载物离线/在线签名验证、证书链/时间戳记录、secret scan。Required Evidence tier：Strong + Human approval + Release Evidence。
+
+明确范围外：AI 自批证书、仓库保存私钥、自签名证书作为正式证明。
+
+### AC-RL-10
+
+状态：`Confirmed`
+
+每个 RC/正式下载物同时发布 SHA-256、机器可读 artifact manifest、SBOM 和第三方 notices，且全部来自同一目标 SHA
+
+实现归属：release manifest generator。
+
+裁判：从安装器反算哈希；依赖/资源与 SBOM/notices 对账；目标 SHA/构建环境可定位。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：法律批准、运行时能力 Evidence。
+
+### AC-RL-11
+
+状态：`Confirmed`
+
+CUDA runtime 再分发在公开发布前取得人类 release/legal owner 的书面批准，批准范围与实际 DLL/版本一致
+
+实现归属：人类 release/legal owner。
+
+裁判：签署记录、DLL 清单/版本/来源/许可证逐项对账。Required Evidence tier：Human approval + Release Evidence。
+
+明确范围外：AI 或测试代替法律判断；分发 `nvcuda.dll`。
+
+### AC-RL-12
+
+状态：`Confirmed`
+
+发布产物不含 live key、调试 override、开发绝对路径、SQLite/用户数据、日志、旧 Evidence、source map 秘密或未批准 DLL
+
+实现归属：artifact hygiene scanner、release owner。
+
+裁判：解包 installer 扫描；secret/path/denylist；允许资源 manifest 精确白名单。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：证明业务行为、替代代码审查。
+
+### AC-RL-13
+
+状态：`Confirmed`
+
+数据库从冻结旧 fixture 通过版本化事务迁移到当前 schema；失败回滚或保留可恢复备份，重复启动幂等
+
+实现归属：Database deep module、Rust migration command。
+
+裁判：真实旧 SQLite fixture；生产初始化路径；成功数据/约束检查；逐步故障注入、备份和第二次启动。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：只测空库；前端发送事务控制 SQL；支持未冻结任意 schema。
+
+### AC-RL-14
+
+状态：`Confirmed`
+
+RC Evidence 只对精确 commit、installer hash、配置/模型/硬件指纹有效；影响对应边界的代码或产物变化使其失效
+
+实现归属：Evidence manifest/validator、release evidence owner。
+
+裁判：freshness policy 自动比较 target SHA/hash/config；过期 Evidence 必须被拒绝而非警告放行。Required Evidence tier：Strong。
+
+明确范围外：自动删除历史 Evidence；把单元测试升级成真实 Evidence。
+
+### AC-RL-15
+
+状态：`Confirmed`
+
+P0/P1 和影响 Launch AC、数据/秘密安全或 Evidence 真实性的 P2 阻断发布；非阻断 P2 必须进入 Release Notes 或已拥有 Owner/Judge 的后续队列
+
+实现归属：human release owner、defect policy。
+
+裁判：缺陷/审查 fixture 逐级触发阻断或允许；发布决策与例外有签署记录。Required Evidence tier：Strong + Human approval。
+
+明确范围外：用 skip/ignore 降低严重度、在本 AC 执行回滚。
+
+### AC-RL-16
+
+状态：`Confirmed`
+
+正式 tag 只引用已验收 RC；从用户可见 URL 重新下载的安装器与 RC 的签名、SHA-256 和 manifest 完全一致并可干净安装
+
+实现归属：release publication owner。
+
+裁判：独立 download verifier 完成 tag/commit/RC 对账、公开 URL 二次下载和签名/哈希/安装复验。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：发布后重新构建不同二进制；只核对文件名。
+
+### AC-RL-17
+
+状态：`Confirmed`
+
+首轮生产观察只收集用户明确授权的脱敏诊断，不上传视频、转录、API Key 或 SQLite；缺陷绑定版本、AC、Judge 和严重度
+
+实现归属：support/privacy owner、diagnostic exporter。
+
+裁判：同意流程、诊断 schema/secret scan、撤回/不上传路径、首轮缺陷记录。Required Evidence tier：Strong + Production observation。
+
+明确范围外：默认遥测、远程采集用户内容、把观察当成 AC Evidence。
+
+### AC-RL-18
+
+状态：`Confirmed`
+
+下载页与安装器在安装前披露单一安装包、约 804 MB、NVIDIA/模型要求、无兼容环境的 Auto 可见 CPU fallback、Forced CPU/GPU、失败/重试和数据保留
+
+实现归属：release/download disclosure owner、installer UI。
+
+裁判：下载页 + 安装器真实 UI/文本 Judge，并与 installer manifest、GPU/runtime 行为 Evidence 对账；不得把受控 URL 写成真实站点保证。Required Evidence tier：Strong + Desktop/Visual + Release Evidence。
+
+明确范围外：Release Notes、营销性扩大承诺、未验证硬件/模型兼容性。
+
+### AC-RL-19
+
+状态：`Confirmed`
+
+回滚只能到签名、哈希已知且与当前用户数据兼容的已验收版本；不兼容时停止分发并提供备份/恢复指引，不静默降级 schema
+
+实现归属：human release owner、rollback runbook、database compatibility owner。
+
+裁判：已安装 RC 回滚演练；签名/哈希/数据库兼容检查；不兼容 fixture 必须拒绝并保留数据。Required Evidence tier：Strong + Human approval + Release Evidence。
+
+明确范围外：缺陷严重度判定、自动跨主版本降级。
+
+### AC-RL-20
+
+状态：`Confirmed`
+
+Release Notes 精确列出 Launch、Post-release 与不承诺能力、已验证配置、已知限制、非阻断 P2 和回滚方式，且不得把候选或局部 Evidence 写成已交付事实
+
+实现归属：release notes owner、scope contract。
+
+裁判：Release Notes 与 Active scope、Confirmed AC/coverage、目标 artifact、有效 Evidence、缺陷队列和回滚 runbook 逐项对账。Required Evidence tier：Strong + Release Evidence。
+
+明确范围外：下载页/安装器 UI、营销性扩大承诺、未验证硬件/模型兼容性。
+
+### AC-VL-01
+
+状态：`Confirmed`
+
+ready/non-ready 卡片按持久状态展示规定的信息层级，状态、错误、进度和可用动作不互相伪装
+
+实现归属：VideoListPage 查询层、VideoCard。
+
+裁判：生产页面 + 公共数据库双 adapter；各状态 DOM/视觉 Judge；错误动作可恢复。Required Evidence tier：Strong + Visual Evidence。
+
+明确范围外：排序、搜索、网格尺寸、真实桌面 Evidence。
+
+### AC-VL-02
+
+状态：`Confirmed`
+
+列表默认最近学习，并支持最近学习/导入时间/名称三种确定排序；SQLite 与内存 adapter 同义
+
+实现归属：Database query interface、VideoListPage controls。
+
+裁判：同一 fixture 在双 adapter 和生产 UI 中顺序一致；稳定 tie-breaker。Required Evidence tier：Strong。
+
+明确范围外：标签、筛选、正文搜索。
+
+### AC-VL-03
+
+状态：`Confirmed`
+
+标题关键词搜索只作用于视频标题，可清空并与当前排序组合；没有结果与数据库失败可区分
+
+实现归属：Database query interface、VideoListPage controls。
+
+裁判：双 adapter 大小写/空白/无结果 fixture + 生产 UI。Required Evidence tier：Strong。
+
+明确范围外：标签、笔记/字幕全文、模糊语义扩展。
+
+### AC-VL-04
+
+状态：`Confirmed`
+
+生产列表页把导入入口、排序、搜索、空库、无搜索结果和非 ready 详情入口组合为完整可用页面，不出现空动作
+
+实现归属：VideoListPage composition。
+
+裁判：生产页面行为 Judge；空库/过滤空/失败/任务详情；必要桌面 DOM。Required Evidence tier：Strong + Desktop Evidence。
+
+明确范围外：卡片精确视觉、真实站点兼容。
+
+### AC-VL-05
+
+状态：`Confirmed`
+
+删除已知 Video 在数据库提交后删除其合法 app-owned 缩略图；失败语义可见且绝不删除用户源视频或任意路径
+
+实现归属：Rust thumbnail lifecycle module、database deletion workflow。
+
+裁判：隔离真实文件系统 + 真实 SQLite；非法 ID/path、删除失败、源视频哈希、重试。Required Evidence tier：Strong。
+
+明确范围外：孤儿扫描、安装器卸载数据策略。
+
+### AC-VL-06
+
+状态：`Confirmed`
+
+孤儿 GC 只删除 app-data `thumbnails/` 中不在数据库 keep-set 的合法缩略图，幂等、有界且失败可诊断
+
+实现归属：Rust thumbnail lifecycle module。
+
+裁判：隔离真实目录/SQLite keep-set；路径逃逸、并发新建、重复运行、部分失败。Required Evidence tier：Strong。
+
+明确范围外：用户媒体、模型、任意 app-data 清理、启动时无界阻塞。
+
+### AC-VL-07
+
+状态：`Confirmed`
+
+视频页使用 240px 下限响应式网格、16:9 缩略图和已确认的信息布局；窄宽度不裁掉主操作
+
+实现归属：VideoCard + list layout。
+
+裁判：生产桌面多 viewport DOM/截图 + 独立 visual reviewer。Required Evidence tier：Strong + Desktop/Visual Evidence。
+
+明确范围外：移动端、亮色主题、列表虚拟化性能。
+
+### AC-SU-01
+
+状态：`Confirmed`
+
+顶部目录以章节/小节顶行和段落底行横向展示，可滚动、自动定位当前项，以边缘渐隐提示可继续滚动，并在暂停后停止强制跟随
+
+实现归属：Study catalog view、Study Navigation。
+
+裁判：生产 StudyInterface + 真实播放位置；长目录、边缘渐隐、手动滚动、播放/暂停行为 Judge。Required Evidence tier：Strong + Desktop Evidence。
+
+明确范围外：目录结构编辑、折叠、scrub。
+
+### AC-SU-02
+
+状态：`Confirmed`
+
+目录进度只由统一播放事实推导，章节/小节切换使用受控约 200ms 横向滑动反馈且不制造第二份时间状态
+
+实现归属：Study catalog view、playPosition interface。
+
+裁判：时间推进/跳转/暂停 fixture；横向滑动 DOM 样式、时长与 reduced-motion 状态；复用 `AC-ST-03`。Required Evidence tier：Strong + Desktop/Visual Evidence。
+
+明确范围外：任意动画系统、持久化新的当前位置。
+
+### AC-SU-03
+
+状态：`Confirmed`
+
+右侧面板以 AI/随记 Tab 切换，切换不丢助手会话、笔记草稿或当前学习事实，隐藏区不重复发起副作用
+
+实现归属：Study Page Composition、assistant/notes owners。
+
+裁判：生产页面切换、未完成流/编辑状态、重新显示 Judge。Required Evidence tier：Strong + Desktop Evidence。
+
+明确范围外：Vision、AI 笔记自动生成、多窗口。
+
+### AC-SU-04
+
+状态：`Confirmed`
+
+三种布局的区域比例可调并跨会话恢复，布局变化不卸载媒体会话或改变选择/播放/笔记事实
+
+实现归属：Study Page Composition、layout persistence。
+
+裁判：生产页面拖拽/重启；Store/SQLite 设置；真实 media 实例稳定。Required Evidence tier：Strong + Desktop Evidence。
+
+明确范围外：任意窗口管理、无限布局、自定义主题。
+
+### AC-SU-05
+
+状态：`Confirmed`
+
+Core Release 只提供原文字幕开关；字幕来自真实当前句，位于视频底部半透明容器，关闭后不影响转录文本；不显示译文开关
+
+实现归属：VideoZone、Study Session。
+
+裁判：真实 media 时间推进 + 生产 DOM/截图；开关/重开；无翻译控件。Required Evidence tier：Strong + Desktop/Visual Evidence。
+
+明确范围外：翻译、外部字幕优先、字幕编辑。
+
+### AC-SU-06
+
+状态：`Confirmed`
+
+导图以已持久结构显示类型色节点、正交圆弧连线，并支持有界缩放/平移/选择和既有双击导航
+
+实现归属：mind-map view、Study Navigation。
+
+裁判：生产数据/页面；缩放边界、平移、选择/播放区分、双击跳转、视觉 Judge。Required Evidence tier：Strong + Desktop/Visual Evidence。
+
+明确范围外：折叠、scrub、reparent、多选结构编辑。
+
+### AC-SU-07
+
+状态：`Confirmed`
+
+非输入态精确支持：`1/2/3` 分别切换随播/文本展开/目录展开布局；反引号摘注当前播放段；`Space` 播放/暂停；`←/→` ±5s；`Shift+←/→` ±10s；`↑/↓` 音量；`N/P` 选择下一/上一段、seek 到该段并同步更新预览；`Tab` 在 AI/随记面板间切换并把焦点送入目标面板输入框。输入态只保留 `Enter` 发送与 `Alt+Enter` 换行并屏蔽全局键。Core Release 的 `Del/Backspace` 必须禁用，因为高级树删除为 Post-release
+
+实现归属：Study shortcut controller、focus policy。
+
+裁判：生产页面逐键、首/末段 no-op、各输入/编辑焦点、三布局映射、seek/选中/预览/面板焦点副作用 Judge。Required Evidence tier：Strong。
+
+明确范围外：树/导图键盘导航、AI 快捷操作、用户自定义键位、节点删除/编辑。
+
+### AC-UX-01
+
+状态：`Confirmed`
+
+首发只提供暗色主题；背景/面板/分隔/文字使用冻结中性色阶，通用控件不用品牌强调色
+
+实现归属：design tokens、production components。
+
+裁判：全部首发页面生产截图/token 使用扫描 + visual reviewer。Required Evidence tier：Strong + Visual Evidence。
+
+明确范围外：亮色/系统主题、品牌色系统。
+
+### AC-UX-02
+
+状态：`Confirmed`
+
+段落类型、选中、播放、失败/处理/排队、进度、容器和类型胶囊使用唯一且跨组件一致的语义映射
+
+实现归属：semantic visual tokens、catalog/text/list/mind-map components。
+
+裁判：多状态生产 fixture + 截图/DOM；禁止组件私建冲突颜色。Required Evidence tier：Strong + Visual Evidence。
+
+明确范围外：新段落类型、用户自定义配色。
+
+### AC-UX-03
+
+状态：`Confirmed`
+
+全应用使用系统无衬线、规定字重与 18/16/14/13/12 字号；阅读正文/标题/次正文采用已确认行距并在长文本保持可读
+
+实现归属：typography tokens、production text components。
+
+裁判：token policy + 生产长文本多 viewport visual/accessibility review。Required Evidence tier：Strong + Visual/Accessibility Evidence。
+
+明确范围外：富文本编辑器、用户字体选择。
+
+### AC-UX-04
+
+状态：`Confirmed`
+
+间距、圆角、阴影、控件和关键区域高度只使用冻结令牌；真实页面不存在偶然的一次性几何系统
+
+实现归属：geometry tokens、production layout/components。
+
+裁判：token policy + 生产页面截图/DOM measurement；例外白名单。Required Evidence tier：Strong + Visual Evidence。
+
+明确范围外：像素级适配所有 DPI、用户自定义密度。
+
+### AC-UX-05
+
+状态：`Confirmed`
+
+交互动效只使用 120/200/320ms 档位；系统减少动效时取消位移/缩放并保留即时状态反馈
+
+实现归属：motion tokens、production components。
+
+裁判：浏览器/桌面 reduced-motion 模式；目录/面板/卡片真实状态 Judge。Required Evidence tier：Strong + Desktop/Accessibility Evidence。
+
+明确范围外：视频播放动画、操作系统窗口动画。
+
+### AC-UX-06
+
+状态：`Confirmed`
+
+所有 Launch 主操作可用键盘到达并有可见焦点、可访问名称和非纯颜色状态；文本/控件达到 AA 对比度阈值
+
+实现归属：UI composition、accessibility policy。
+
+裁判：生产页面 axe/DOM/键盘遍历 + 对比度检查 + 独立 accessibility review。Required Evidence tier：Strong + Desktop/Accessibility Evidence。
+
+明确范围外：完整 WCAG 认证、读屏器全语言矩阵。
+
+### AC-PF-01
+
+状态：`Confirmed`
+
+在冻结的 Windows x64 release-reference 机器上，冷启动至可交互的 10 次有效测量 p95 ≤5s
+
+实现归属：app startup owner。
+
+裁判：performance runner 记录正式候选包、空/典型数据 fixture、机器指纹和一次不计入的预备运行；每次杀净进程后执行真实冷启动，10 次有效样本以 p95 阻断。Required Evidence tier：Strong + Performance Evidence。
+
+明确范围外：模型加载/推理、所有硬件保证。
+
+### AC-PF-02
+
+状态：`Confirmed`
+
+500 视频固定 fixture 的列表首屏达到可操作状态的 10 次有效测量 p95 ≤2s
+
+实现归属：Database/List owner。
+
+裁判：performance runner 在正式候选包和固定 SQLite fixture 上每次重启，记录 10 次有效时间戳并以 p95 阻断。Required Evidence tier：Strong + Performance Evidence。
+
+明确范围外：搜索全库基准、无限列表、所有硬件保证。
+
+### AC-PF-03
+
+状态：`Confirmed`
+
+ready 视频从用户打开到学习页骨架和已持久学习事实可见的 10 次有效测量 p95 ≤3s
+
+实现归属：Study Session owner。
+
+裁判：performance runner 使用正式候选包、固定 ready fixture/本地媒体，重置到同一列表状态后打开 10 次并以 p95 阻断。Required Evidence tier：Strong + Performance Evidence。
+
+明确范围外：视频首帧解码、模型调用。
+
+### AC-PF-04
+
+状态：`Confirmed`
+
+已被生产 Controller 接收的合法导入进度到任务详情可见反馈 p95 ≤500ms
+
+实现归属：progress contract/Controller/UI owners。
+
+裁判：performance runner 对固定事件序列和生产页面记录至少 100 次端到端时间戳并以 p95 阻断。Required Evidence tier：Strong + Performance Evidence。
+
+明确范围外：外部下载/ASR/LLM 本身速度。
+
+### AC-PF-05
+
+状态：`Confirmed`
+
+正式候选包先预热 5 分钟，再连续 25 分钟重复列表/学习/导入取消：每轮结束 listener/worker/子进程计数不得高于预热基线，working set 线性回归斜率 ≤1 MiB/min 且末值 ≤预热基线 +50 MiB；退出后无 Rain 子进程残留
+
+实现归属：App lifecycle、Import/Whisper owners。
+
+裁判：reliability runner 执行固定操作循环，记录进程/句柄/listener/working-set 时间序列、基线、回归计算和退出后进程检查；独立 reliability review。Required Evidence tier：Strong + Soak Evidence。
+
+明确范围外：模型自身固定内存、跨日 soak、所有第三方驱动泄漏保证。
+
+### AC-AR-02
+
+状态：`Confirmed`
+
+Stage2、合并和文本助手的 OpenAI-compatible 请求只由前端 LLM adapter 发起；Rust/Tauri 不新增 LLM HTTP command
+
+实现归属：`src/llm/`、capability/request workflows。
+
+裁判：生产请求接口测试 + 负向 dependency/command policy；真实模型按角色 Evidence。Required Evidence tier：Strong。
+
+明确范围外：本地 Whisper、代理服务器、Vision。
+
+### AC-AR-03
+
+状态：`Confirmed`
+
+本地媒体/缩略图只通过限定 app-owned/用户明确选择路径的 asset protocol 能力暴露；生产 scope 不允许通配任意文件系统
+
+实现归属：Tauri capability/asset scope、localMediaUrl adapter。
+
+裁判：capability config 负向 policy + 允许/拒绝真实路径桌面 Judge；路径规范化。Required Evidence tier：Strong + Desktop Evidence。
+
+明确范围外：通用文件浏览器、任意 `convertFileSrc`、网络 URL policy。
+
+### AC-AR-04
+
+状态：`Confirmed`
+
+SQLite 是跨会话业务事实源，Zustand 只保存当前会话选择/播放/UI 草稿；重启不得从 Store 恢复伪业务事实，页面不得复制持久化
+
+实现归属：Database interfaces、Store/session owners。
+
+裁判：重启/重新加载行为 Judge + dependency policy + 双 adapter。Required Evidence tier：Strong。
+
+明确范围外：替换 Zustand、通用 Rust DAL、云同步。
+
+### AC-AR-05
+
+状态：`Confirmed`
+
+`VideoImportController` 由显式 App-scope Owner 持有；页面真正卸载/重挂仍保持同一任务、取消、single-flight 和同记录更新
+
+实现归属：App import owner、VideoImportController。
+
+裁判：生产 App 路由卸载/重挂 Judge；后台任务与迟到结果；无双 Owner。Required Evidence tier：Strong。
+
+明确范围外：跨进程队列、启动自动扫描、新导入行为。
+
+### AC-AR-06
+
+状态：`Confirmed`
+
+导入进度只允许五类判别：`download`（percent，可选 bytes）、`asr`（`extraction/transcription/finalization`、percent、backend/fallback）、`stage2`（percent、blockCurrent/blockTotal、retrying）、`merging`（percent）、`terminal`（`ready/failed/cancelled`，失败才有 error）。公共字段为 videoId；percent 必须 0..100 且同阶段不倒退，blockCurrent 必须在 1..blockTotal，terminal 后拒绝任何更新；本地导入可跳过 download，重试只可从持久 checkpoint 对应阶段重新开始
+
+实现归属：progress domain contract、Pipeline/Controller/event adapters。
+
+裁判：compile-time exhaustive handling + 非法字段组合/未知阶段/倒退百分比/非法 block/终态后 mutation Judge + 全部真实阶段回归。Required Evidence tier：Strong。
+
+明确范围外：新进度阶段、改变现有可见阶段顺序、重写整个 Pipeline。
+
+
+## 8. 当前明确不在已验收范围
 
 - “解释当前画面”的视觉助手尚未实现完整验收。
-- `product-decision-coverage.md` 中 54 条 `Proposed` 决策尚未形成覆盖其完整当前行为的 Confirmed AC；不能把局部实现或组件 Harness 当作完成。
+- `product-decision-coverage.md` 中 23 条 Post-release `Proposed` 决策尚未形成覆盖其完整当前行为的 Confirmed AC；不能把局部实现或组件 Harness 当作完成。
 
 UI 中未完成的能力应隐藏、禁用并明确标记，不能用无响应按钮表示“已实现”。
 
-## 8. 完成定义
+## 9. 完成定义
 
 一个改动只有同时满足以下条件才算完成：
 
