@@ -79,11 +79,12 @@ Read in this order:
 5. `docs/development/product-decision-coverage.md` — current disposition of historical PRD decisions 001–099; not a completion score.
 6. `docs/development/harness-coverage.md` — AC-to-test/evidence coverage and gaps.
 7. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
-8. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
-9. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
-10. `package.json` — runnable frontend/test/E2E commands.
-11. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-12. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+8. `docs/development/agent-first-development-plan.md` — Active one-Slice cross-session execution order and mandatory independent-review gate; it does not define product behavior.
+9. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
+10. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
+11. `package.json` — runnable frontend/test/E2E commands.
+12. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+13. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -105,6 +106,7 @@ Do not infer real progress from PRD wording, old screenshots, or old evidence di
 | `scripts/` | Project automation scripts. | `run-real-e2e.ps1` runs real workflow; `validate-evidence.ps1` validates evidence. |
 | `evidence/` | Curated proof artifacts only. | Failed/partial E2E runs are ignored by `.gitignore`; force-add only intentionally curated evidence. |
 | `docs/` | Long-lived project docs, plans, specs, and this state document. | `docs/PROJECT_STATE.md` must be updated after every session that changes the project. |
+| `docs/research/` | Primary-source research notes that separate cited source facts from Rain-specific inferences. | Research notes default to Proposed and cannot override Active AC, control documents or current repository evidence. |
 | `docs/superpowers/` | Superpowers specs/plans used by prior agent work. | Historical plans/construction docs, not automatically current truth; plan checkboxes and old test counts are not progress evidence. |
 | `prototype/` | Mockups and early prototypes. | Do not treat as runtime source. |
 | `test-fixtures/` | Small test and capability-probe media fixtures. | `sample.mp4` supports media tests; `asr-capability.mp4` is bundled into Rain and contains a short English speech sample for the real Whisper capability check. |
@@ -1738,6 +1740,25 @@ This is the authoritative handoff for the GPU-default product slice. Repository 
 A future AI must not revert to `cargo --features cuda-whisper` for the Rain main executable or claim that the old full-pipeline CUDA Evidence proves runtime fallback. It must not mark `AC-LV-21` `Strong + Evidence` until the clean no-NVIDIA and formal target-install evidence above exists.
 
 The next session must start from repository takeover, not from an assumed next feature. It should expect a clean `master` whose history contains product merge `83670e7` plus a later docs-only handoff merge, then rerun `npm run harness:control`. The highest-value unresolved AC-LV-21 gate is a clean Windows machine without NVIDIA/CUDA completing install, app start and a CPU short sample; formal MSI/NSIS lifecycle, signing, CUDA redistribution review and the 804 MB delivery UX remain separate release-owner decisions. Do not start any of those external or product-changing steps without fresh user direction.
+
+
+## 2026-08-02 agent-first status review and development plan
+
+The user requested a repository-state review and a cross-session development plan aligned with agent-first Harness Engineering. This is a control/documentation slice only; it does not authorize or implement new product behavior.
+
+- Repository takeover and current verification were repeated rather than inferred from prior prose. Local `master` and `origin/master` both resolve to `7e278a68a300018be42c7488d9be4473d9d0ff2e`; the worktree was clean before this documentation slice; `npm run harness:control` and the complete local `npm run harness:check` passed. The current HEAD's independent `Clean Windows Harness` push run `30739528593` also passed.
+- The review confirms 40 Confirmed ACs and the mechanically controlled historical disposition of 41 Confirmed AC mappings, 54 Proposed decisions and 4 Out-of-scope decisions. These remain governance counts, not a completion score. No AC status, product-decision disposition, coverage level or locked Judge changed.
+- External primary-source findings are recorded in `docs/research/2026-08-02-agent-first-harness-principles.md`. The note separates source facts F1–F8 from Rain-specific inferences R1–R9 and cites OpenAI Harness Engineering, Anthropic's long-running application Harness article and the pinned `mewamew/huaizi-de-cows` repository practice. Its governance status is Proposed research, so it cannot override Rain's Active control plane.
+- `docs/development/agent-first-development-plan.md` is now the Active cross-session execution plan. It makes one AC/one independently judged gap the default Slice, requires a Slice Contract before code, preserves the existing locked Harness Migration rule, and makes a fresh-context, read-only independent AI review a hard gate after every implemented Slice. The reviewer must examine Spec/AC first and Standards second; actionable current-slice P0/P1/P2 findings require repair, re-verification and re-review.
+- The prioritized queue starts with evidence truth rather than broad feature expansion. P0 is a target-commit Hosted Runtime Settings replay because the last successful manual run is still `9251962`/`30341065896`, while `AC-LV-20` later expanded the same desktop script and current HEAD has no Hosted replay. P1 is the already-recorded `AC-LV-21` clean no-NVIDIA/CUDA install + CPU short-sample Evidence Gap. P2 proposes a user decision for app-owned thumbnail deletion/GC; P3 separates the two risk-22 architecture debts; P4 proposes completing list sort/search/empty-state behavior; P5 requires the user to choose one larger product line rather than spreading work across all 54 Proposed rows.
+- No workflow was dispatched, no live key/model/external-site call was made, no Evidence was generated or rewritten, and no cache or ignored runtime artifact was deleted. P0 still requires explicit authorization before creating external workflow state; Proposed P2–P5 behavior still requires user confirmation before RED or implementation.
+- The status review also observed minor non-blocking documentation drift not currently checked by `harness:control`: `acceptance-standard.md`, `harness-coverage.md` and `module-map.md` headers still show July update dates, and some module-map hotspot line counts are older than the current tree. The plan records doc-gardening as a low-cost Harness improvement, but this slice does not rewrite those facts or treat line count as an architecture defect.
+
+Verification for this documentation slice before independent review: the pre-edit complete `npm run harness:check` passed control-plane validation, all frontend tests, complementary E2E/ordinary builds and Rust tests; the final `dist` is the ordinary production artifact. After documentation changes, `npm run harness:control` and `git diff --check` must pass. The mandatory independent read-only review result and any resulting corrections are recorded before handoff.
+
+The first independent read-only review used a fresh context and baseline `7e278a68a300018be42c7488d9be4473d9d0ff2e`, then checked Spec and Standards separately. Its initial verdict was `FAIL`. It found no P0 and no product-semantic overreach, but found one substantive P1: P0 and the recommended next action called `7e278a6` the continuing “current HEAD”, so a later session could replay an obsolete commit or try to dispatch an unusable SHA instead of proving the execution-time target. It also found the expected delivery P1 that this state file had not yet persisted the review result, and earlier identified non-blocking discoverability debt because the new Active plan was absent from the control map/new-session list. The plan now requires resolving the full execution-time target SHA, verifying a dispatchable ref points to it, and checking the run `headSha`; the control map and new-session source list now include the Active plan, and `docs/research/` has an explicit Proposed-only responsibility. These corrections must pass control-plane/whitespace checks and the same independent reviewer must re-review the final diff before this slice can claim PASS.
+
+The same independent reviewer then re-ran `npm run harness:control` and `git diff --check 7e278a68a300018be42c7488d9be4473d9d0ff2e` against the corrected files and returned final verdict `PASS`: all reported items were closed, no P0/P1/P2 remained, and no product-semantic overreach or locked Harness change was found. This docs-only review did not dispatch P0, create the missing `AC-LV-21` Release Evidence, run live models or rerun the full Harness after documentation edits; those boundaries remain explicit. The complete Harness GREEN recorded above occurred before the documentation edits, while the post-edit control-plane and whitespace checks passed.
 
 
 ## Maintenance checklist for every future session
