@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const validateScript = join(repoRoot, 'scripts', 'validate-evidence.ps1')
+const externalEvidenceJudgeTimeoutMs = 30_000
 const videoBytes = Buffer.from('rain evidence validator unit-test video fixture')
 const testVideoHash = createHash('sha256').update(videoBytes).digest('hex').toUpperCase()
 
@@ -161,7 +162,7 @@ function createEvidence(overrides: Record<string, unknown> = {}, cleanTranscript
   return manifestPath
 }
 
-describe('evidence validator', () => {
+describe('evidence validator', { timeout: externalEvidenceJudgeTimeoutMs }, () => {
   it('accepts clean evidence shaped like real Stage2BlockOutput artifacts', () => {
     const manifestPath = createEvidence({}, true)
 
