@@ -85,7 +85,7 @@ CUDA runtime 体积和许可必须在正式发布前单独复核。构建成功�
 
 ## 当前实现与发布证据边界
 
-实现位于 `codex/whisper-gpu-auto-fallback`，基线为 `master@c7436c4`。普通 Rain 主程序继续用无 CUDA feature 的 CPU `whisper-rs`；`rain-whisper-cuda.exe` 由 `npm run build:whisper-gpu-worker` 单独构建，`npm run bundle:gpu` 通过 `src-tauri/tauri.gpu.conf.json` 将 worker、`cublas64_12.dll`、`cublasLt64_12.dll` 和 `cudart64_12.dll` 放入 `whisper-backends/`。`nvcuda.dll` 不打包。
+实现已由 PR #23 合并到 `master@83670e7`（产品提交 `d8f2292`，源分支 `codex/whisper-gpu-auto-fallback`）。普通 Rain 主程序继续用无 CUDA feature 的 CPU `whisper-rs`；`rain-whisper-cuda.exe` 由 `npm run build:whisper-gpu-worker` 单独构建，`npm run bundle:gpu` 通过 `src-tauri/tauri.gpu.conf.json` 将 worker、`cublas64_12.dll`、`cublasLt64_12.dll` 和 `cudart64_12.dll` 放入 `whisper-backends/`。`nvcuda.dll` 不打包。
 
 本机 2026-07-31/2026-08-02 验证事实：
 
