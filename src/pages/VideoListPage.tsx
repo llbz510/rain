@@ -324,6 +324,7 @@ export function VideoListPage() {
           models: configured.modelPool.map((model) => ({ ...model })),
           roles: { ...configured.roleAssignment },
           capabilities: configured.capabilityRecords.map((record) => ({ ...record })),
+          whisperBackendPreference: configured.whisperBackendPreference,
         }
       },
       onChanged: () => refreshVideosRef.current(),

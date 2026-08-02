@@ -2,6 +2,8 @@ use crate::asr_transcript::{build_asr_transcript, AsrSentence};
 use crate::events::{self, ProgressPayload};
 use crate::scheduler::{CancellationToken, ImportScheduler, TaskFinish};
 use crate::whisper;
+use crate::whisper_backend::{self, ProcessCudaWorker, WhisperBackendPreference, WhisperExecution};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::AppHandle;
 
@@ -11,6 +13,8 @@ pub struct AsrExecutionRequest {
     pub tier: String,
     pub model_path: Option<String>,
     pub language: Option<String>,
+    pub backend_preference: WhisperBackendPreference,
+    pub cuda_worker_path: PathBuf,
 }
 
 trait AsrBackend: Send + Sync + 'static {
@@ -27,10 +31,14 @@ trait AsrBackend: Send + Sync + 'static {
         wav_path: &str,
         language: Option<&str>,
         cancellation: &CancellationToken,
-    ) -> Result<whisper::WhisperResult, String>;
+        on_selected: &(dyn Fn(&str, Option<&str>) + Send + Sync),
+    ) -> Result<WhisperExecution, String>;
 }
 
-struct WhisperAsrBackend;
+struct WhisperAsrBackend {
+    preference: WhisperBackendPreference,
+    cuda_worker: ProcessCudaWorker,
+}
 
 impl AsrBackend for WhisperAsrBackend {
     fn validate_request(&self, file_path: &str, model_path: &str) -> Result<(), String> {
@@ -53,19 +61,23 @@ impl AsrBackend for WhisperAsrBackend {
         wav_path: &str,
         language: Option<&str>,
         cancellation: &CancellationToken,
-    ) -> Result<whisper::WhisperResult, String> {
-        whisper::transcribe_wav_with_language(
+        on_selected: &(dyn Fn(&str, Option<&str>) + Send + Sync),
+    ) -> Result<WhisperExecution, String> {
+        whisper_backend::transcribe_with_preference_observed(
+            self.preference,
+            &self.cuda_worker,
             model_path,
             wav_path,
             language,
-            Some(cancellation.clone()),
+            cancellation,
+            on_selected,
         )
-        .map_err(|error| error.to_string())
     }
 }
 
 trait AsrReporter {
     fn progress(&self, video_id: &str, stage: &str, percent: u32);
+    fn backend_selected(&self, video_id: &str, backend: &str, fallback_reason: Option<&str>);
     fn failed(&self, video_id: String, error: String);
     fn cancelled(&self, video_id: String);
 }
@@ -77,6 +89,14 @@ struct TauriAsrReporter<'a> {
 impl AsrReporter for TauriAsrReporter<'_> {
     fn progress(&self, video_id: &str, stage: &str, percent: u32) {
         let _ = events::emit_progress(self.app, ProgressPayload::new(video_id, stage, percent));
+    }
+
+    fn backend_selected(&self, video_id: &str, backend: &str, fallback_reason: Option<&str>) {
+        let _ = events::emit_progress(
+            self.app,
+            ProgressPayload::new(video_id, "asr_transcription", 35)
+                .with_backend(backend, fallback_reason),
+        );
     }
 
     fn failed(&self, video_id: String, error: String) {
@@ -93,10 +113,14 @@ pub async fn execute_asr(
     scheduler: &ImportScheduler,
     request: AsrExecutionRequest,
 ) -> Result<Vec<AsrSentence>, String> {
+    let backend = WhisperAsrBackend {
+        preference: request.backend_preference,
+        cuda_worker: ProcessCudaWorker::new(request.cuda_worker_path.clone()),
+    };
     execute_asr_with_adapters(
         scheduler,
         request,
-        Arc::new(WhisperAsrBackend),
+        Arc::new(backend),
         &TauriAsrReporter { app },
     )
     .await
@@ -229,21 +253,58 @@ async fn run_whisper_asr<B: AsrBackend, R: AsrReporter>(
         Some(language.to_string())
     };
     let inference_backend = Arc::clone(&backend);
-    let whisper_result = tokio::task::spawn_blocking(move || {
+    let (selection_sender, mut selection_receiver) =
+        tokio::sync::mpsc::unbounded_channel::<(String, Option<String>)>();
+    let mut inference_task = tokio::task::spawn_blocking(move || {
+        let on_selected = |backend: &str, fallback_reason: Option<&str>| {
+            let _ =
+                selection_sender.send((backend.to_string(), fallback_reason.map(str::to_string)));
+        };
         inference_backend.transcribe_wav(
             &model,
             &wav,
             whisper_language.as_deref(),
             &inference_token,
+            &on_selected,
         )
-    })
-    .await
-    .map_err(|error| format!("Whisper task failed: {error}"))??;
+    });
+    let mut last_reported_selection: Option<(String, Option<String>)> = None;
+    let execution = loop {
+        tokio::select! {
+            selected = selection_receiver.recv() => {
+                if let Some((backend, fallback_reason)) = selected {
+                    reporter.backend_selected(
+                        video_id,
+                        &backend,
+                        fallback_reason.as_deref(),
+                    );
+                    last_reported_selection = Some((backend, fallback_reason));
+                }
+            }
+            result = &mut inference_task => {
+                break result
+                    .map_err(|error| format!("Whisper task failed: {error}"))??;
+            }
+        }
+    };
+    if last_reported_selection
+        .as_ref()
+        .is_none_or(|(backend, fallback_reason)| {
+            backend != execution.backend
+                || fallback_reason.as_deref() != execution.fallback_reason.as_deref()
+        })
+    {
+        reporter.backend_selected(
+            video_id,
+            execution.backend,
+            execution.fallback_reason.as_deref(),
+        );
+    }
 
     ensure_asr_not_cancelled(&token)?;
     reporter.progress(video_id, "asr_finalization", 90);
 
-    build_asr_transcript(&whisper_result)
+    build_asr_transcript(&execution.result)
 }
 
 fn ensure_asr_not_cancelled(token: &CancellationToken) -> Result<(), String> {
@@ -274,6 +335,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingReporter {
         progress: Mutex<Vec<(String, u32)>>,
+        backends: Mutex<Vec<(String, Option<String>)>>,
         failures: Mutex<Vec<String>>,
         cancelled: AtomicUsize,
     }
@@ -284,6 +346,13 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((stage.to_string(), percent));
+        }
+
+        fn backend_selected(&self, _video_id: &str, backend: &str, fallback_reason: Option<&str>) {
+            self.backends
+                .lock()
+                .unwrap()
+                .push((backend.to_string(), fallback_reason.map(str::to_string)));
         }
 
         fn failed(&self, _video_id: String, error: String) {
@@ -320,18 +389,24 @@ mod tests {
             _wav_path: &str,
             _language: Option<&str>,
             _cancellation: &CancellationToken,
-        ) -> Result<whisper::WhisperResult, String> {
+            on_selected: &(dyn Fn(&str, Option<&str>) + Send + Sync),
+        ) -> Result<WhisperExecution, String> {
             if matches!(self.mode, FakeMode::Failure) {
                 return Err("fake transcription failed".to_string());
             }
-            Ok(whisper::WhisperResult {
-                segments: vec![whisper::WhisperSegment {
-                    text: "hello.".to_string(),
-                    start_time: 0.0,
-                    end_time: 1.0,
-                    word_level: Vec::new(),
-                }],
-                detected_language: "en".to_string(),
+            on_selected("cuda", None);
+            Ok(WhisperExecution {
+                result: whisper::WhisperResult {
+                    segments: vec![whisper::WhisperSegment {
+                        text: "hello.".to_string(),
+                        start_time: 0.0,
+                        end_time: 1.0,
+                        word_level: Vec::new(),
+                    }],
+                    detected_language: "en".to_string(),
+                },
+                backend: "cuda",
+                fallback_reason: None,
             })
         }
     }
@@ -343,6 +418,8 @@ mod tests {
             tier: "whisper".to_string(),
             model_path: Some("fake-model.bin".to_string()),
             language: Some("en".to_string()),
+            backend_preference: WhisperBackendPreference::Auto,
+            cuda_worker_path: PathBuf::from("fake-worker.exe"),
         }
     }
 
@@ -404,6 +481,10 @@ mod tests {
                 ("asr_finalization".to_string(), 90),
                 ("asr".to_string(), 100),
             ]
+        );
+        assert_eq!(
+            *reporter.backends.lock().unwrap(),
+            vec![("cuda".to_string(), None)]
         );
     }
 

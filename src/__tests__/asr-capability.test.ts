@@ -47,6 +47,7 @@ describe('AC-LV-12 ASR capability check', () => {
       tier: 'whisper',
       modelPath: 'C:\\models\\ggml-medium.bin',
       language: 'en',
+      backendPreference: 'auto',
     })
   })
 

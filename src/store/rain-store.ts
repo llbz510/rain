@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { Node, Sentence, Note } from '@/models/types'
-import { applyRuntimeSettings, createModelPoolEntry, createRuntimeSettingsInitializer, loadRuntimeSettings as loadPersistedRuntimeSettings, replaceModelPool, runtimeModelFromPoolEntry, runtimeSettingsFromEntries, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry } from '@/settings/model-pool'
+import { applyRuntimeSettings, createModelPoolEntry, createRuntimeSettingsInitializer, loadRuntimeSettings as loadPersistedRuntimeSettings, normalizeWhisperBackendPreference, replaceModelPool, runtimeModelFromPoolEntry, runtimeSettingsFromEntries, runtimeSettingsFromPool, saveRuntimeSettings, type AddModelInput, type ModelPoolEntry, type WhisperBackendPreference } from '@/settings/model-pool'
 import { decideModelRoleAssignment, mergeCapabilityRecords, type ModelCapabilityRecord } from '@/settings/model-capabilities'
 import { requireInstalledWhisperModel } from '@/settings/whisper-model-download'
 
@@ -44,6 +44,7 @@ interface RainState {
   capabilityRecords: ModelCapabilityRecord[]
   settingsReady: boolean
   settingsError: string | null
+  whisperBackendPreference: WhisperBackendPreference
 
   // 当前视频缓存
   nodeTree: Node[]
@@ -68,6 +69,9 @@ interface RainState {
   removeModel: (id: string) => Promise<SettingsMutationResult>
   setRoleModel: (role: 'asr' | 'structuring' | 'assistant', modelId: string | null) => Promise<RoleAssignmentResult>
   setCapabilityRecords: (records: ModelCapabilityRecord[]) => Promise<void>
+  setWhisperBackendPreference: (
+    preference: WhisperBackendPreference,
+  ) => Promise<SettingsMutationResult>
 }
 
 export type RoleAssignmentResult =
@@ -101,6 +105,7 @@ const initialState = {
   capabilityRecords: [] as ModelCapabilityRecord[],
   settingsReady: false,
   settingsError: null as string | null,
+  whisperBackendPreference: 'auto' as WhisperBackendPreference,
   nodeTree: [] as Node[],
   sentences: [] as Sentence[],
   notes: [] as Note[],
@@ -223,6 +228,9 @@ export const useRainStore = create<RainState>((set, get) => ({
         modelPool: applyRuntimeSettings(result.settings),
         roleAssignment: result.settings.roles,
         capabilityRecords: result.settings.capabilities ?? [],
+        whisperBackendPreference: normalizeWhisperBackendPreference(
+          result.settings.whisperBackendPreference,
+        ),
         settingsReady: true,
         settingsError: null,
       })
@@ -241,6 +249,9 @@ export const useRainStore = create<RainState>((set, get) => ({
         modelPool: applyRuntimeSettings(result.settings),
         roleAssignment: result.settings.roles,
         capabilityRecords: result.settings.capabilities ?? [],
+        whisperBackendPreference: normalizeWhisperBackendPreference(
+          result.settings.whisperBackendPreference,
+        ),
         settingsReady: true,
         settingsError: null,
       })
@@ -262,6 +273,7 @@ export const useRainStore = create<RainState>((set, get) => ({
           modelPool,
           get().roleAssignment,
           get().capabilityRecords,
+          get().whisperBackendPreference,
         ))
         runtimeSettingsRevision++
         replaceModelPool(modelPool)
@@ -291,6 +303,7 @@ export const useRainStore = create<RainState>((set, get) => ({
           modelPool,
           roleAssignment,
           capabilityRecords,
+          get().whisperBackendPreference,
         ))
         runtimeSettingsRevision++
         replaceModelPool(modelPool)
@@ -327,6 +340,7 @@ export const useRainStore = create<RainState>((set, get) => ({
           get().modelPool,
           roleAssignment,
           get().capabilityRecords,
+          get().whisperBackendPreference,
         ))
         runtimeSettingsRevision++
         set({ roleAssignment })
@@ -343,9 +357,37 @@ export const useRainStore = create<RainState>((set, get) => ({
     await enqueueRuntimeSettingsMutation(async () => {
       if (!get().settingsReady) throw new Error(settingsNotReadyResult().error)
       const capabilityRecords = mergeCapabilityRecords(get().capabilityRecords, records)
-      await saveRuntimeSettings(runtimeSettingsFromPool(get().roleAssignment, capabilityRecords))
+      await saveRuntimeSettings(runtimeSettingsFromPool(
+        get().roleAssignment,
+        capabilityRecords,
+        get().whisperBackendPreference,
+      ))
       runtimeSettingsRevision++
       set({ capabilityRecords })
+    })
+  },
+
+  setWhisperBackendPreference: async (preference) => {
+    if (!get().settingsReady) return settingsNotReadyResult()
+    return enqueueRuntimeSettingsMutation(async () => {
+      if (!get().settingsReady) return settingsNotReadyResult()
+      const whisperBackendPreference = normalizeWhisperBackendPreference(preference)
+      const capabilityRecords = get().capabilityRecords.filter(
+        (record) => record.role !== 'asr',
+      )
+      try {
+        await saveRuntimeSettings(runtimeSettingsFromPool(
+          get().roleAssignment,
+          capabilityRecords,
+          whisperBackendPreference,
+        ))
+        runtimeSettingsRevision++
+        set({ whisperBackendPreference, capabilityRecords })
+        return { ok: true }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        return { ok: false, error: `保存 Whisper 后端失败：${reason}` }
+      }
     })
   },
 }))

@@ -23,4 +23,6 @@ export interface ProgressPayload {
   blockTotal: number
   percent: number
   retrying: boolean
+  backend?: 'cuda' | 'cpu'
+  fallbackReason?: string
 }

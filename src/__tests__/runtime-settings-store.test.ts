@@ -57,6 +57,7 @@ beforeEach(() => {
     capabilityRecords: [],
     settingsReady: true,
     settingsError: null,
+    whisperBackendPreference: 'auto',
   })
 })
 
@@ -175,6 +176,7 @@ describe('AC-LV-14 Store runtime settings commit', () => {
       models: [],
       roles: { asr: 'whisper-other', structuring: null, assistant: null },
       capabilities: [],
+      whisperBackendPreference: 'auto',
     })
     expect(useRainStore.getState()).toMatchObject({
       modelPool: [],
@@ -275,5 +277,73 @@ describe('AC-LV-16 Store runtime settings ordering', () => {
       'Committed Model',
     ])
     expect(listModels().map((entry) => entry.alias)).toEqual(['Committed Model'])
+  })
+})
+
+describe('AC-LV-21 Whisper backend persistence', () => {
+  it('publishes a backend change only after persistence and invalidates ASR evidence', async () => {
+    let finishSave!: () => void
+    persistence.save.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishSave = resolve
+    }))
+    const asrCapability = recordCapabilityCheck({
+      model: {
+        id: 'whisper',
+        alias: 'Whisper',
+        type: 'whisper-local',
+        provider: 'local',
+        model: 'medium',
+        supportsVision: false,
+      },
+      role: 'asr',
+      ok: true,
+      message: 'compatible',
+      checkedAt: 100,
+    })
+    useRainStore.setState({ capabilityRecords: [asrCapability] })
+
+    const pending = useRainStore.getState().setWhisperBackendPreference('cuda')
+
+    expect(useRainStore.getState().whisperBackendPreference).toBe('auto')
+    await vi.waitFor(() => expect(persistence.save).toHaveBeenCalledTimes(1))
+    expect(persistence.save).toHaveBeenCalledWith(expect.objectContaining({
+      whisperBackendPreference: 'cuda',
+      capabilities: [],
+    }))
+
+    finishSave()
+    await expect(pending).resolves.toEqual({ ok: true })
+    expect(useRainStore.getState()).toMatchObject({
+      whisperBackendPreference: 'cuda',
+      capabilityRecords: [],
+    })
+  })
+
+  it('preserves the selected backend and evidence when persistence fails', async () => {
+    const asrCapability = recordCapabilityCheck({
+      model: {
+        id: 'whisper',
+        alias: 'Whisper',
+        type: 'whisper-local',
+        provider: 'local',
+        model: 'medium',
+        supportsVision: false,
+      },
+      role: 'asr',
+      ok: true,
+      message: 'compatible',
+      checkedAt: 100,
+    })
+    useRainStore.setState({ capabilityRecords: [asrCapability] })
+    persistence.save.mockRejectedValueOnce(new Error('read only'))
+
+    await expect(useRainStore.getState().setWhisperBackendPreference('cuda')).resolves.toEqual({
+      ok: false,
+      error: '保存 Whisper 后端失败：read only',
+    })
+    expect(useRainStore.getState()).toMatchObject({
+      whisperBackendPreference: 'auto',
+      capabilityRecords: [asrCapability],
+    })
   })
 })

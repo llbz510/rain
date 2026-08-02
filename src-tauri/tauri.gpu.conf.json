@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "resources": {
+      "target/whisper-gpu-bundle/whisper-backends/rain-whisper-cuda.exe": "whisper-backends/rain-whisper-cuda.exe",
+      "target/whisper-gpu-bundle/whisper-backends/cublas64_12.dll": "whisper-backends/cublas64_12.dll",
+      "target/whisper-gpu-bundle/whisper-backends/cublasLt64_12.dll": "whisper-backends/cublasLt64_12.dll",
+      "target/whisper-gpu-bundle/whisper-backends/cudart64_12.dll": "whisper-backends/cudart64_12.dll",
+      "target/whisper-gpu-bundle/whisper-backends/payload-manifest.json": "whisper-backends/payload-manifest.json"
+    }
+  }
+}

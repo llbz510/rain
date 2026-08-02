@@ -32,6 +32,9 @@
 - 模型大小可选：tiny / base / small / medium / large-v3
 - 首次使用需下载模型
 - 在 Tauri Rust 后端运行
+- 运行后端偏好可选：`自动（推荐）` / `NVIDIA GPU` / `CPU`
+- 默认 `自动`：CUDA worker 可用且资源满足时优先 GPU，否则显示原因并回退 CPU
+- 显式 `NVIDIA GPU` 不静默回退；无 NVIDIA/CUDA 时应用仍可启动并允许切回 CPU
 
 ## 结构化 LLM 配置
 

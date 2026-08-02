@@ -275,6 +275,20 @@ Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝
 
 裁判：`src/__tests__/video-import-task-dialog.test.tsx` 必须通过新挂载的生产页面、公开 Controller 和真实内存数据库证明重启遗留的 `pending/null` 记录保持空闲、打开/关闭无副作用、显式继续启动同一记录、重复点击 single-flight、关闭后后台继续且终态刷新原记录。`scripts/run-runtime-settings-e2e.ps1` 还必须在无 Key、无模型调用和无公网的真实 Windows/Tauri/隔离 SQLite 三次启动流程中写入 `pending/null`，重启证明没有自动启动，点击显式动作并证明同一行离开 `pending`、结果可见且再次重启后仍存在；运行时预检允许确定性失败关闭。默认 Harness 不运行该桌面 Judge。本 AC 不包含 stale `processing` 语义、自动启动、跨进程队列、缩略图删除/GC、risk 22 架构重构、`DEC-PRD-092` 或 `DEC-PRD-099`。
 
+### AC-LV-21 本地 Whisper 默认优先 GPU 且必须安全回退
+
+状态：`Confirmed`
+
+本地 Whisper 的运行偏好必须支持 `auto`、`cuda` 和 `cpu`，旧设置缺失时默认 `auto`。偏好必须作为 Runtime Settings 快照的一部分通过既有单队列和 SQLite 原子事务保存；每次导入和 ASR 能力检查使用启动时的偏好快照。偏好变化后，旧 ASR capability 必须失效。
+
+Rain 主程序和 CPU adapter 不得在装载时依赖 CUDA DLL。CUDA 推理由独立 worker adapter 承担。`auto` 在 CUDA 探针通过且显存没有明显不足时使用 CUDA；CUDA worker 不存在、驱动/runtime 不兼容、显存不足或 worker 启动/协议/崩溃失败时，必须保留可见回退原因并改用 CPU。显式 `cuda` 遇到同类问题必须失败关闭，不得静默回退；显式 `cpu` 不得启动 CUDA worker。确定的模型文件错误和用户取消均不得触发另一后端重跑。
+
+运行时自检和设置页必须显示用户偏好、实际选择的后端、CUDA 设备或不可用原因。导入详情必须能观察实际 ASR 后端以及 Auto 回退原因。缺少 NVIDIA GPU、驱动或 CUDA runtime 时，Rain 仍必须能启动并完成 CPU 能力检查。
+
+实现归属：`src-tauri/src/whisper_backend.rs` 拥有选择、探针、worker 协议、错误分类、取消和回退；`src-tauri/src/bin/rain-whisper-cuda.rs` 是 CUDA adapter；既有 `whisper.rs` 是 CPU adapter；`asr_execution.rs`、Runtime Settings、预检和设置/导入 UI 只调用该深 module 的 interface。GPU 产品构建由 `scripts/build-whisper-cuda-worker.ps1` 和独立 Tauri GPU 配置拥有，不得把 CUDA feature 设为默认 Rust/Harness feature。
+
+裁判：Rust `whisper_backend` module tests 通过 fake worker adapter 证明选择、回退、强制 GPU 失败、强制 CPU、显存门禁和取消；`src/__tests__/whisper-backend-preference.test.ts`、`runtime-settings-store.test.ts`、`preflight.test.ts`、`pipeline-asr.test.ts` 和设置/导入生产 UI 测试证明偏好持久化、能力失效、命令快照和可见状态。构建 Judge 必须检查 CPU Rain 二进制没有 CUDA DLL import，CUDA worker 具备精确协议和 runtime 依赖。`Strong + Evidence` 还要求目标提交在真实 NVIDIA Windows 上完成 CUDA 短样本/主链路，并在无 CUDA 环境完成干净启动和 CPU 短样本；旧 CUDA Evidence 不自动签发本 AC。
+
 ## 3. Whisper 模型下载
 
 本节来自 2026-07-27 对当前设置页、Rust command 和历史模型管理规格的核对，并于同日经用户确认。三条 AC 均为当前生效的 `Confirmed` 产品事实。
@@ -500,7 +514,7 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 ## 7. 当前明确不在已验收范围
 
 - “解释当前画面”的视觉助手尚未实现完整验收。
-- `product-decision-coverage.md` 中 53 条 `Proposed` 决策尚未形成覆盖其完整当前行为的 Confirmed AC；不能把局部实现或组件 Harness 当作完成。
+- `product-decision-coverage.md` 中 54 条 `Proposed` 决策尚未形成覆盖其完整当前行为的 Confirmed AC；不能把局部实现或组件 Harness 当作完成。
 
 UI 中未完成的能力应隐藏、禁用并明确标记，不能用无响应按钮表示“已实现”。
 

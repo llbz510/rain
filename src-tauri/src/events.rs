@@ -20,6 +20,10 @@ pub struct ProgressPayload {
     pub block_total: u32,
     pub percent: u32,
     pub retrying: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
 }
 
 impl ProgressPayload {
@@ -31,7 +35,15 @@ impl ProgressPayload {
             block_total: 0,
             percent,
             retrying: false,
+            backend: None,
+            fallback_reason: None,
         }
+    }
+
+    pub fn with_backend(mut self, backend: &str, fallback_reason: Option<&str>) -> Self {
+        self.backend = Some(backend.to_string());
+        self.fallback_reason = fallback_reason.map(str::to_string);
+        self
     }
 
     pub fn with_block(
@@ -49,6 +61,8 @@ impl ProgressPayload {
             block_total,
             percent,
             retrying,
+            backend: None,
+            fallback_reason: None,
         }
     }
 }

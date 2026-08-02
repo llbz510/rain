@@ -11,6 +11,14 @@ import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from '@/settings/default-runt
 
 export type ModelType = 'llm' | 'asr-api' | 'whisper-local' | 'subtitle'
 export type ModelRole = 'asr' | 'structuring' | 'assistant'
+export type WhisperBackendPreference = 'auto' | 'cuda' | 'cpu'
+
+export function normalizeWhisperBackendPreference(
+  value: unknown,
+): WhisperBackendPreference {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return normalized === 'cuda' || normalized === 'cpu' ? normalized : 'auto'
+}
 
 export interface ModelPoolEntry {
   id: string
@@ -42,12 +50,14 @@ export interface RuntimeModel {
   type?: ModelType
   provider?: string
   supportsVision?: boolean
+  whisperBackendPreference?: WhisperBackendPreference
 }
 
 export interface RuntimeSettings {
   models: RuntimeModel[]
   roles: Record<ModelRole, string | null>
   capabilities?: ModelCapabilityRecord[]
+  whisperBackendPreference?: WhisperBackendPreference
 }
 
 export type RuntimeSettingsInitialization =
@@ -86,6 +96,7 @@ const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
   ],
   roles: { asr: 'whisper-large-v3', structuring: 'qwen-main', assistant: 'qwen-main' },
   capabilities: [],
+  whisperBackendPreference: 'auto',
 }
 
 const pool: Map<string, ModelPoolEntry> = new Map()
@@ -109,7 +120,10 @@ function toPoolEntry(model: RuntimeModel): ModelPoolEntry {
   }
 }
 
-export function runtimeModelFromPoolEntry(model: ModelPoolEntry): RuntimeModel {
+export function runtimeModelFromPoolEntry(
+  model: ModelPoolEntry,
+  whisperBackendPreference: WhisperBackendPreference = 'auto',
+): RuntimeModel {
   return {
     id: model.id,
     alias: model.alias,
@@ -119,6 +133,7 @@ export function runtimeModelFromPoolEntry(model: ModelPoolEntry): RuntimeModel {
     type: model.type,
     provider: model.provider,
     supportsVision: model.supportsVision,
+    ...(model.type === 'whisper-local' ? { whisperBackendPreference } : {}),
   }
 }
 
@@ -127,6 +142,9 @@ function cloneRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
     models: settings.models.map((model) => ({ ...model })),
     roles: { ...settings.roles },
     capabilities: settings.capabilities?.map((record) => ({ ...record })),
+    whisperBackendPreference: normalizeWhisperBackendPreference(
+      settings.whisperBackendPreference,
+    ),
   }
 }
 
@@ -182,7 +200,11 @@ export async function saveRuntimeSettings(settings: RuntimeSettings): Promise<vo
       return []
     }
   })() : []
-  const models = settings.models.map(({ apiKey: _apiKey, ...model }) => model)
+  const models = settings.models.map(({
+    apiKey: _apiKey,
+    whisperBackendPreference: _whisperBackendPreference,
+    ...model
+  }) => model)
   const modelIds = new Set(settings.models.map(model => model.id))
   const mutations: SettingMutation[] = [
     { op: 'set', key: 'model_pool', value: JSON.stringify(models) },
@@ -201,6 +223,11 @@ export async function saveRuntimeSettings(settings: RuntimeSettings): Promise<vo
       op: 'set',
       key: 'model_capabilities',
       value: JSON.stringify(settings.capabilities ?? []),
+    },
+    {
+      op: 'set',
+      key: 'whisper_backend_preference',
+      value: normalizeWhisperBackendPreference(settings.whisperBackendPreference),
     },
   ]
   await applySettingMutationsAtomically(db, mutations)
@@ -318,7 +345,15 @@ export async function loadRuntimeSettings(): Promise<RuntimeSettings> {
     roles[role] = savedRole === null ? DEFAULT_RUNTIME_SETTINGS.roles[role] : savedRole || null
   }
   const capabilities = parseCapabilityRecords(await getSetting(db, 'model_capabilities'))
-  return { models: models.map(({ model }) => model), roles, capabilities }
+  const whisperBackendPreference = normalizeWhisperBackendPreference(
+    await getSetting(db, 'whisper_backend_preference'),
+  )
+  return {
+    models: models.map(({ model }) => model),
+    roles,
+    capabilities,
+    whisperBackendPreference,
+  }
 }
 export function applyRuntimeSettings(settings: RuntimeSettings): ModelPoolEntry[] {
   replaceModelPool(settings.models.map(toPoolEntry))
@@ -328,19 +363,30 @@ export function applyRuntimeSettings(settings: RuntimeSettings): ModelPoolEntry[
 export function runtimeSettingsFromPool(
   roles: RuntimeSettings['roles'],
   capabilities: ModelCapabilityRecord[] = [],
+  whisperBackendPreference: WhisperBackendPreference = 'auto',
 ): RuntimeSettings {
-  return runtimeSettingsFromEntries(listModels(), roles, capabilities)
+  return runtimeSettingsFromEntries(
+    listModels(),
+    roles,
+    capabilities,
+    whisperBackendPreference,
+  )
 }
 
 export function runtimeSettingsFromEntries(
   entries: ModelPoolEntry[],
   roles: RuntimeSettings['roles'],
   capabilities: ModelCapabilityRecord[] = [],
+  whisperBackendPreference: WhisperBackendPreference = 'auto',
 ): RuntimeSettings {
   return {
-    models: entries.map(runtimeModelFromPoolEntry),
+    models: entries.map((entry) => runtimeModelFromPoolEntry(
+      entry,
+      whisperBackendPreference,
+    )),
     roles: { ...roles },
     capabilities: capabilities.map((record) => ({ ...record })),
+    whisperBackendPreference,
   }
 }
 

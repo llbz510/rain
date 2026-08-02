@@ -4,11 +4,13 @@ import type { Sentence, Video } from '@/models/types'
 import { detectLanguageFromSentences } from '@/pipeline/language-detection'
 import { assertTransition, type ImportStage } from '@/pipeline/import-state'
 import { tauriInvoke } from '@/lib/tauri-env'
+import type { WhisperBackendPreference } from '@/settings/model-pool'
 
 export interface AsrModelConfig {
   type: string
   modelName: string
   language?: string
+  backendPreference?: WhisperBackendPreference
 }
 
 export type PipelineInvoke = (
@@ -180,6 +182,9 @@ export async function transcribeWithWhisper(
     tier: 'whisper',
     modelPath,
     language: asrModel.language ?? 'zh',
+    ...(asrModel.backendPreference
+      ? { backendPreference: asrModel.backendPreference }
+      : {}),
   })
   throwIfAborted(signal)
   return validateWhisperResult(result)

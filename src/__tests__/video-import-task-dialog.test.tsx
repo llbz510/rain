@@ -636,6 +636,22 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     })
 
     expect(dialog).toHaveTextContent('提取音频 · 15%')
+
+    act(() => {
+      mocks.progressCallback?.({
+        videoId: 'asr-detail-task',
+        stage: 'asr_transcription',
+        blockCurrent: 0,
+        blockTotal: 0,
+        percent: 35,
+        retrying: false,
+        backend: 'cpu',
+        fallbackReason: 'CUDA worker is not installed',
+      })
+    })
+
+    expect(dialog).toHaveTextContent('Whisper 后端：CPU')
+    expect(dialog).toHaveTextContent('GPU 回退说明：CUDA worker is not installed')
   })
 
   it('refreshes the same task record to a visible completed state', async () => {

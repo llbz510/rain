@@ -110,6 +110,14 @@ export function ImportTaskDialog({
             <div>分块 {progress.blockCurrent ?? 0} / {progress.blockTotal}</div>
           )}
           {progress?.retrying && <div>正在重试</div>}
+          {progress?.backend && (
+            <div data-testid="whisper-active-backend">
+              Whisper 后端：{progress.backend === 'cuda' ? 'NVIDIA GPU' : 'CPU'}
+            </div>
+          )}
+          {progress?.fallbackReason && (
+            <div role="status">GPU 回退说明：{progress.fallbackReason}</div>
+          )}
           {visibleVideo.errorMessage && <div role="alert">{visibleVideo.errorMessage}</div>}
         </div>
         <div style={actionsStyle}>

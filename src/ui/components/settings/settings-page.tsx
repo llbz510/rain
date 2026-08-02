@@ -2,7 +2,11 @@ import { useState } from 'react'
 import { getChunkThreshold, setChunkThreshold } from '@/settings/advanced'
 import { checkAssistantModelCapability } from '@/settings/assistant-capability'
 import { checkAsrModelCapability } from '@/settings/asr-capability'
-import { runtimeModelFromPoolEntry, type RuntimeSettings } from '@/settings/model-pool'
+import {
+  runtimeModelFromPoolEntry,
+  type RuntimeSettings,
+  type WhisperBackendPreference,
+} from '@/settings/model-pool'
 import { checkStructuringModelCapability } from '@/settings/structuring-capability'
 import { useRainStore } from '@/store/rain-store'
 import { AddModelForm } from './add-model-form'
@@ -19,11 +23,18 @@ export function SettingsPage() {
   const capabilityRecords = useRainStore((state) => state.capabilityRecords)
   const settingsReady = useRainStore((state) => state.settingsReady)
   const settingsError = useRainStore((state) => state.settingsError)
+  const whisperBackendPreference = useRainStore(
+    (state) => state.whisperBackendPreference,
+  )
   const setCapabilityRecords = useRainStore((state) => state.setCapabilityRecords)
+  const setWhisperBackendPreference = useRainStore(
+    (state) => state.setWhisperBackendPreference,
+  )
   const setPage = useRainStore((state) => state.setPage)
   const [modalOpen, setModalOpen] = useState(false)
   const [activeNav, setActiveNav] = useState<string>('模型管理')
   const [chunkThreshold, setChunkThresholdState] = useState<number>(getChunkThreshold)
+  const [backendSaveError, setBackendSaveError] = useState('')
 
   const models: ModelEntry[] = modelPool.map((model) => ({
     id: model.id,
@@ -46,9 +57,11 @@ export function SettingsPage() {
       type: model.type,
       provider: model.provider,
       supportsVision: model.supportsVision,
+      ...(model.type === 'whisper-local' ? { whisperBackendPreference } : {}),
     })),
     roles: { ...roleAssignment },
     capabilities: capabilityRecords,
+    whisperBackendPreference,
   }
 
   const handleTestConnection = async (modelId: string): Promise<ConnectionTestResult> => {
@@ -71,7 +84,10 @@ export function SettingsPage() {
   const handleAsrCheck = async (modelId: string): Promise<ConnectionTestResult> => {
     const model = modelPool.find((entry) => entry.id === modelId)
     if (!model) return { ok: false, message: '未找到已保存的 ASR 模型配置。' }
-    const record = await checkAsrModelCapability(runtimeModelFromPoolEntry(model))
+    const record = await checkAsrModelCapability(
+      runtimeModelFromPoolEntry(model, whisperBackendPreference),
+      { backendPreference: whisperBackendPreference },
+    )
     await setCapabilityRecords([record])
     return {
       ok: record.status === 'Compatible' || record.status === 'Verified',
@@ -238,6 +254,47 @@ export function SettingsPage() {
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 16 }}>高级设置</div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <label htmlFor="whisper-backend-preference" style={{ fontSize: 13, flex: 1 }}>
+                    Whisper 运行后端
+                    <span style={{ fontSize: 12, color: COLORS.dimmer, marginLeft: 6 }}>
+                      （自动优先 NVIDIA GPU，不可用时回退 CPU）
+                    </span>
+                  </label>
+                  <select
+                    id="whisper-backend-preference"
+                    data-testid="whisper-backend-preference"
+                    value={whisperBackendPreference}
+                    disabled={!settingsReady}
+                    onChange={async (event) => {
+                      setBackendSaveError('')
+                      const result = await setWhisperBackendPreference(
+                        event.target.value as WhisperBackendPreference,
+                      )
+                      if (!result.ok) setBackendSaveError(result.error)
+                    }}
+                    style={{
+                      minWidth: 160,
+                      padding: '6px 8px',
+                      color: COLORS.fg,
+                      background: COLORS.bg,
+                      border: `1px solid ${COLORS.border}`,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <option value="auto">自动（推荐）</option>
+                    <option value="cuda">NVIDIA GPU</option>
+                    <option value="cpu">CPU</option>
+                  </select>
+                </div>
+                {backendSaveError && (
+                  <div role="alert" style={{ fontSize: 12, color: COLORS.fail }}>
+                    {backendSaveError}
+                  </div>
+                )}
+
+                <div style={{ height: 1, background: COLORS.border, margin: '8px 0' }} />
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <label style={{ fontSize: 13, flex: 1 }}>
                     分块阈值

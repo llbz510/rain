@@ -54,10 +54,12 @@
 - 内存 adapter 只提供快速行为反馈，真实 SQLite 原子性由 Rust transaction tests 或真实桌面 Evidence 裁判
 
 ### 决策94 本地 Whisper = whisper-rs Rust binding
-- 用 `whisper-rs` crate（whisper.cpp 的 Rust binding），纯 Rust 编译、无外部运行时
+- 用 `whisper-rs` crate（whisper.cpp 的 Rust binding）；模型与 Sentence 契约保持统一
 - 模型文件存 `whisper-models/`（决策84），大小可切（M19）
-- CPU/GPU 调度由 binding 处理；词级时间戳+按标点分组为句级（决策32）
-- 不用 Python sidecar（体积大依赖多）、不用 CLI 子进程（多一层进程管理）
+- 2026-07-31 的 `DEC-007 / AC-LV-21` 更新执行架构：CPU adapter 留在不链接 CUDA 的 Rain 主进程，NVIDIA CUDA 由独立 `rain-whisper-cuda` worker adapter 承担；两者位于同一个 `whisper_backend` seam 后
+- 默认 `Auto` 先探针 CUDA worker，失败可见并回退 CPU；显式 GPU 失败关闭，显式 CPU 不启动 worker
+- worker 不是 Python 或第三方 CLI，而是 Rain 自有、版本化 JSON 协议的推理进程；它隔离 CUDA DLL 装载、GPU 崩溃和取消，避免无 CUDA 机器无法启动主程序
+- 词级时间戳+按标点分组为句级（决策32）保持不变
 
 ### 决策95 yt-dlp = 用户自装加 PATH
 - 应用不打包 yt-dlp，用户自行安装并加入 PATH

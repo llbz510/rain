@@ -14,6 +14,7 @@ pub mod structure_persistence;
 pub mod thumbnail_storage;
 pub mod video_deletion;
 pub mod whisper;
+pub mod whisper_backend;
 pub mod whisper_model_download;
 pub mod ytdlp;
 

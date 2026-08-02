@@ -368,7 +368,9 @@ describe('real E2E runner GPU preference', () => {
     expect(runner).toContain("$npmCmd = (Get-Command 'npm.cmd'")
     expect(runner).toContain('Invoke-BuildCommand $npmCmd $tauriBuildArgs')
     expect(runner).not.toContain('$buildExitCode = Invoke-BuildCommand')
-    expect(runner).toMatch(/--features['\"]?,?\s*['\"]cuda-whisper/s)
+    expect(runner).toContain('scripts/build-whisper-cuda-worker.ps1')
+    expect(runner).toContain('$env:RAIN_WHISPER_CUDA_WORKER')
+    expect(runner).not.toMatch(/\$tauriBuildArgs\s*\+=\s*@\('--features',\s*'cuda-whisper'\)/)
     expect(runner).toContain('-ExpectedWhisperBackend $selectedWhisperBackend')
   })
 

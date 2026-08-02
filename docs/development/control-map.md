@@ -142,3 +142,11 @@ Rain 正式支持模型池中的多种配置。模型是否可用于某个角色
 状态：`Confirmed`（用户于 2026-07-28 确认）
 
 短桌面 Judge 失败时，在系统临时目录保留单份 `rain-runtime-settings-e2e-latest-failure`，包含结构化阶段、主错误和脱敏 driver logs；新失败替换旧失败，成功清除 stale 诊断。诊断逻辑不得保存隔离 SQLite，不得泄露已知 LLM Key，也不得掩盖主错误。
+
+### DEC-007 本地 Whisper 默认 GPU 优先并保留 CPU 安全回退
+
+状态：`Confirmed`（用户于 2026-07-31 确认）
+
+Rain 的本地 Whisper 默认偏好为 `Auto`。受支持的 NVIDIA CUDA 后端通过运行时探针时优先使用 GPU；CUDA worker 缺失、驱动不兼容、显存明显不足或后端工作进程失败时，`Auto` 必须给出可见原因并安全回退 CPU。用户可以显式选择 `Auto`、`NVIDIA GPU` 或 `CPU`；显式 GPU 不得静默回退。
+
+Rain 主程序必须保持 CPU 安全且不得在装载时依赖 CUDA DLL。CUDA 推理由独立、版本化协议的 worker adapter 承担，CPU adapter 留在主进程；用户取消必须终止当前 adapter 的工作且不得触发另一个后端重跑。该决定以 `AC-LV-21` 和 `docs/superpowers/specs/2026-07-31-whisper-gpu-auto-fallback-design.md` 为准，覆盖 M20 决策94中“CPU/GPU 完全交给 binding”以及“不使用 CLI 子进程”的旧实现取舍，但不改变 `whisper-rs`、模型文件、Sentence 输出或 Stage2 合同。
