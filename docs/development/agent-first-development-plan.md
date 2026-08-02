@@ -2,11 +2,14 @@
 
 > 状态：`Active`（会话与交付流程）
 > 更新日期：2026-08-02
+
 > 产品语义边界：本文件不新增或修改 Active AC。下文标为 `Proposed` 的产品切片必须先由用户确认，才能进入 RED 或实现。
 > 方法依据：[`docs/research/2026-08-02-agent-first-harness-principles.md`](../research/2026-08-02-agent-first-harness-principles.md)
 > 项目总路线：[`docs/development/rain-project-delivery-plan.md`](rain-project-delivery-plan.md)
 
 ## 1. 当前基线
+
+This opening snapshot is a historical plan-creation baseline, not the current project status. Use docs/PROJECT_STATE.md and the explicit status fields below for current facts.
 
 本计划以 2026-08-02 的可验证事实为起点：
 
@@ -121,10 +124,10 @@ npm run harness:control
 
 ### P0 — 重放执行时目标提交的 Hosted Runtime Settings Judge
 
-状态：`Next — M1-S2 complete; explicit dispatch required`；不改变产品代码。
+状态：`Complete` — workflow_dispatch run `30756311932` 已对 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 签发 GREEN；不改变产品代码。
 
 - **控制范围**：`AC-HE-05`，并核对后续加入同一脚本的 `AC-LV-20` 重启恢复路径。
-- **原因**：最后一次 Hosted GREEN 是 `9251962`；此后的桌面脚本和 E2E adapter 已有实质扩展。截至本次审查，尚无覆盖这些扩展的 Hosted replay。
+- **结果**：执行前本地 `master`、`origin/master` 和 GitHub `master` 完整 SHA 一致；run `headSha` 精确匹配。公开命令无 `-SkipBuild`、无 Rain secrets，真实 SQLite schema、设置 add/restart/delete/restart 和 pending-import restart recovery 全部通过。
 - **动作**：执行时先解析并记录完整目标 SHA，确认远端可调度 ref（通常为受保护的 `master`）正指向该 SHA，再通过该 ref 人工触发既有 `Runtime Settings Desktop E2E` workflow。不得把本文件记录的历史 HEAD 当作持续有效目标，不复制断言、不使用 `-SkipBuild`、不注入 Rain secrets。
 - **通过 Judge**：目标 SHA 的 workflow_dispatch run 成功；真实 SQLite schema、设置 add/restart/delete/restart 和 pending-import restart recovery 全部由现有公开命令裁判。
 - **失败处理**：保留既有单份脱敏诊断；下一 Slice 只修一个确定的环境或产品 RED，不放宽断言或用延长超时掩盖未知错误。
@@ -226,4 +229,4 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ## 7. 下一会话唯一推荐动作
 
-只执行 M2-S1 Hosted Runtime Settings replay：从执行时目标提交显式触发并验证 `Runtime Settings Desktop E2E` workflow，保持无 live key、无模型、无完整视频和不改写 Evidence。该 Slice 只处理 `AC-HE-05` 的目标提交 freshness，不同时开始安装器、GPU 双环境或产品 Gap 实现。
+只执行 M2-S2 当前 canonical Evidence freshness 审计：核对 schema v2 Evidence 的目标提交、配置指纹和从该提交到当前 `master` 的代码差异，逐条标记仍可引用、仅属历史和 RC 前必须重跑的结论。该 Slice 不运行收费模型、不改写 Evidence，也不同时开始安装器、GPU 双环境或产品 Gap 实现。

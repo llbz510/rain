@@ -63,7 +63,7 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 - M1-S2 正式迁移后的历史决策覆盖为 72 条 Confirmed AC 映射、23 条 Post-release Proposed、4 条 Out-of-scope。
 - 本地视频导入、Stage2、学习页、模型管理、Runtime Settings、数据库原子边界和默认 Windows Harness 已形成强控制。
 - `AC-LV-21` 只有 Strong 行为和本机 NVIDIA 短样本，尚无双环境 Release Evidence。
-- Hosted Runtime Settings Judge 的最后一次成功属于旧目标提交；扩展后的当前桌面 Judge需要在执行时目标提交上重新运行。
+- Hosted Runtime Settings Judge 已在 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 上由 workflow_dispatch run `30756311932` 重放通过；该结论只属于此目标提交，后续相关桌面边界变化仍需重新签发。
 - 应用所有缩略图的删除和孤儿 GC 已由 `AC-VL-05/06` 冻结语义，但实现与真实文件 Judge 仍是 Gap。
 - risk 22 的 App-scope Controller Owner 与判别式 progress contract 已由 `AC-AR-05/06` 冻结，仍是非阻断实现债。
 - schema 升级兼容、正式安装生命周期、签名和发布许可已有 `AC-RL-*` 合同，但实现、外部 Evidence 与人类批准仍缺失。
@@ -125,7 +125,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 | --- | --- | ---: | --- | --- |
 | M0 | 控制面与 agent-first 会话协议 | 2 | Complete | Active 计划、控制地图、独立审查规则可发现 |
 | M1 | 发布范围冻结与 Release AC | 2–4 | Complete — M1-S1 + M1-S2 confirmed and reviewed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
-| M2 | 当前目标提交证据重放 | 1–3 | Ready with authorization | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
+| M2 | 当前目标提交证据重放 | 1–3 | In progress — M2-S1 Complete; M2-S2 Next | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
 | M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | Gap | 双环境安装证据、生命周期、签名和许可全部完成 |
 | M4 | 数据、派生文件、schema 与架构边界 | 5–8 | Partial | 升级兼容、缩略图生命周期、risk 22 和架构政策完成 |
 | M5 | 视频列表与导入任务产品闭环 | 6–9 | Partial | 排序/搜索/空状态/卡片/删除交互达到 Strong + 必要桌面证据；受控 URL 接口不被误写为真实站点承诺 |
@@ -188,12 +188,16 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M2-S1 Hosted Runtime Settings replay
 
+状态：`Complete` — run `30756311932` 对精确 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` GREEN，且日志证明公开命令无 `-SkipBuild`、无 Rain secrets、真实 schema、add/restart/delete/restart 与 pending recovery。
+
 - 执行时解析 `origin/master` 和 GitHub `master` 的完整 SHA并确认一致。
 - 通过可调度 `master` ref 运行现有 workflow_dispatch。
 - 核对 run `headSha`、无 `-SkipBuild`、无 secrets、真实 schema 和三进程重启行为。
 - 失败只修一个真实 RED，不放宽产品断言。
 
 ### M2-S2 当前 canonical Evidence 审计
+
+状态：`Next`。
 
 - 检查 schema v2 Evidence 的目标提交、配置指纹和当前代码差异。
 - 逐条标记哪些结论仍可引用、哪些只属历史、哪些 RC 前必须重跑。
@@ -677,8 +681,8 @@ Next single action:
 
 1. M1-S1：`Complete` — 用户已确认 Core Release 范围、post-release 能力簇和单一 GPU 增强通用安装包边界。
 2. M1-S2：`Complete` — 用户已确认 50 条 AC，正式 acceptance/coverage/disposition 已迁移并通过独立 Spec + Standards 双轴审查。
-3. M2-S1：`Next — explicit dispatch required`；对执行时目标提交重放 Hosted Runtime Settings desktop Judge。
-4. M2-S2：审计 canonical Evidence freshness。
+3. M2-S1：`Complete` — workflow_dispatch run `30756311932` 已对精确 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 重放通过。
+4. M2-S2：`Next` — 审计 canonical Evidence freshness。
 5. M3-S1：确认正式 release artifact contract。
 6. M3-S2：建立无 NVIDIA/CUDA 干净 Windows CPU Evidence。
 
