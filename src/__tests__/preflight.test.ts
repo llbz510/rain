@@ -30,6 +30,7 @@ function withGenericStructuringModel(
         : model),
     roles: { ...settings.roles },
     capabilities: settings.capabilities?.map((record) => ({ ...record })),
+    whisperBackendPreference: settings.whisperBackendPreference,
   }
 }
 
@@ -146,12 +147,15 @@ describe('Rain preflight check', () => {
       }),
     ]))
     expect(report.checks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'runtime', status: 'ok', message: expect.stringContaining('cuda') }),
+      expect.objectContaining({ id: 'runtime', status: 'ok', message: expect.stringContaining('NVIDIA GPU') }),
       expect.objectContaining({ id: 'whisper', status: 'ok', message: 'ASR 能力检查通过。' }),
       expect.objectContaining({ id: 'structuring', status: 'ok' }),
       expect.objectContaining({ id: 'database', status: 'ok' }),
       expect.objectContaining({ id: 'ytdlp', status: 'warning' }),
     ]))
+    expect(invoke).toHaveBeenCalledWith('get_runtime_capability', {
+      backendPreference: 'auto',
+    })
     expect(checkStructuring).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'custom',
       baseUrl: 'https://models.example.test/v1',
@@ -159,6 +163,84 @@ describe('Rain preflight check', () => {
     }))
     expect(invoke).toHaveBeenCalledWith('list_whisper_models')
     expect(JSON.stringify(report)).not.toContain('sk-test-secret')
+  })
+
+  it('keeps Auto ready and exposes the reason when CUDA falls back to CPU', async () => {
+    const settings = withGenericStructuringModel(getDefaultRuntimeSettings())
+    const invoke = desktopInvoke()
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'get_runtime_capability') {
+        return {
+          whisperBackend: 'cpu',
+          cpuFallbackAvailable: true,
+          fallbackReason: 'CUDA worker is not installed',
+        }
+      }
+      if (command === 'list_whisper_models') return ['D:\\models\\ggml-large-v3.bin']
+      if (command === 'check_ytdlp_command') return { available: true, version: '2026.01.01' }
+      throw new Error(`unexpected command ${command}`)
+    })
+
+    const report = await runPreflightCheck({
+      runtimeSettings: settings,
+      isTauri: () => true,
+      invoke,
+      checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
+      checkAsr: successfulAsrCheck(),
+      checkStructuring: successfulStructuringCheck(),
+    })
+
+    expect(report.ready).toBe(true)
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'runtime',
+        status: 'warning',
+        message: expect.stringContaining('CUDA worker is not installed'),
+      }),
+    ]))
+  })
+
+  it('blocks readiness when the user forces an unavailable CUDA backend', async () => {
+    const settings = {
+      ...withGenericStructuringModel(getDefaultRuntimeSettings()),
+      whisperBackendPreference: 'cuda' as const,
+    }
+    const invoke = desktopInvoke()
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'get_runtime_capability') {
+        return {
+          whisperBackend: 'unavailable',
+          cpuFallbackAvailable: true,
+          fallbackReason: 'No compatible NVIDIA CUDA device was found',
+        }
+      }
+      if (command === 'list_whisper_models') return ['D:\\models\\ggml-large-v3.bin']
+      if (command === 'check_ytdlp_command') return { available: true, version: '2026.01.01' }
+      throw new Error(`unexpected command ${command}`)
+    })
+
+    const report = await runPreflightCheck({
+      runtimeSettings: settings,
+      isTauri: () => true,
+      invoke,
+      checkDatabaseWrite: vi.fn().mockResolvedValue(undefined),
+      checkAssistant: successfulAssistantCheck(),
+      checkAsr: successfulAsrCheck(),
+      checkStructuring: successfulStructuringCheck(),
+    })
+
+    expect(report.ready).toBe(false)
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'runtime',
+        status: 'error',
+        message: expect.stringContaining('No compatible NVIDIA CUDA device was found'),
+      }),
+    ]))
+    expect(invoke).toHaveBeenCalledWith('get_runtime_capability', {
+      backendPreference: 'cuda',
+    })
   })
 
   it('does not downgrade current Verified evidence after a successful ordinary probe', async () => {

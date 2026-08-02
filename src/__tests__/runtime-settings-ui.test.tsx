@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { recordCapabilityCheck } from '@/settings/model-capabilities'
 import type { ModelPoolEntry } from '@/settings/model-pool'
 import { useRainStore } from '@/store/rain-store'
-import { AddModelForm, ModelPoolList, RoleSelector } from '@/ui/components/settings'
+import { AddModelForm, ModelPoolList, RoleSelector, SettingsPage } from '@/ui/components/settings'
 
 const model: ModelPoolEntry = {
   id: 'llm-main',
@@ -21,6 +21,7 @@ const originalActions = {
   addModel: useRainStore.getState().addModel,
   removeModel: useRainStore.getState().removeModel,
   setRoleModel: useRainStore.getState().setRoleModel,
+  setWhisperBackendPreference: useRainStore.getState().setWhisperBackendPreference,
 }
 
 afterEach(() => {
@@ -29,8 +30,36 @@ afterEach(() => {
       modelPool: [],
       roleAssignment: { asr: null, structuring: null, assistant: null },
       capabilityRecords: [],
+      whisperBackendPreference: 'auto',
       ...originalActions,
     })
+  })
+})
+
+describe('AC-LV-21 Whisper backend settings UI', () => {
+  it('offers Auto, NVIDIA GPU, and CPU and reports persistence failures', async () => {
+    const setWhisperBackendPreference = vi.fn(async () => ({
+      ok: false as const,
+      error: '保存 Whisper 后端失败：read only',
+    }))
+    useRainStore.setState({
+      settingsReady: true,
+      setWhisperBackendPreference,
+    })
+    render(<SettingsPage />)
+
+    await userEvent.click(screen.getByText('高级'))
+    const select = screen.getByTestId('whisper-backend-preference')
+    expect(select).toHaveTextContent('自动（推荐）')
+    expect(select).toHaveTextContent('NVIDIA GPU')
+    expect(select).toHaveTextContent('CPU')
+
+    await userEvent.selectOptions(select, 'cuda')
+
+    expect(setWhisperBackendPreference).toHaveBeenCalledWith('cuda')
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '保存 Whisper 后端失败：read only',
+    )
   })
 })
 

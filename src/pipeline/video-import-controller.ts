@@ -11,6 +11,7 @@ import {
 import type { Video } from '@/models/types'
 import type { ProgressPayload } from '@/architecture/events'
 import {
+  normalizeWhisperBackendPreference,
   runtimeModelFromPoolEntry,
   type ModelPoolEntry,
   type ModelRole,
@@ -30,6 +31,8 @@ export interface ImportProgress {
   blockCurrent?: number
   blockTotal?: number
   retrying?: boolean
+  backend?: 'cuda' | 'cpu'
+  fallbackReason?: string
 }
 
 export interface ImportRuntimeSettings {
@@ -42,6 +45,7 @@ export interface ImportRuntimeSettings {
    * Production callers must include this field, including an empty array.
    */
   capabilities?: ModelCapabilityRecord[]
+  whisperBackendPreference?: 'auto' | 'cuda' | 'cpu'
 }
 
 export interface VideoImportController {
@@ -111,9 +115,10 @@ function assertRoleCapability(
   model: ModelPoolEntry,
   role: 'asr' | 'structuring',
   capabilities: ModelCapabilityRecord[],
+  whisperBackendPreference: 'auto' | 'cuda' | 'cpu' = 'auto',
 ): void {
   const decision = decideModelRoleAssignment(
-    runtimeModelFromPoolEntry(model),
+    runtimeModelFromPoolEntry(model, whisperBackendPreference),
     role,
     capabilities,
   )
@@ -210,8 +215,21 @@ export function createVideoImportController(
       }
 
       if (settings.capabilities) {
-        assertRoleCapability(asrModel, 'asr', settings.capabilities)
-        assertRoleCapability(structuringModel, 'structuring', settings.capabilities)
+        const whisperBackendPreference = normalizeWhisperBackendPreference(
+          settings.whisperBackendPreference,
+        )
+        assertRoleCapability(
+          asrModel,
+          'asr',
+          settings.capabilities,
+          whisperBackendPreference,
+        )
+        assertRoleCapability(
+          structuringModel,
+          'structuring',
+          settings.capabilities,
+          whisperBackendPreference,
+        )
       }
 
       options.onProgress(videoId, { stage: video.stage ?? 'asr', percent: 0 })
@@ -241,7 +259,13 @@ export function createVideoImportController(
           onError: () => undefined,
         },
         options.db,
-        { type: asrModel.type, modelName: asrModel.modelName },
+        {
+          type: asrModel.type,
+          modelName: asrModel.modelName,
+          backendPreference: normalizeWhisperBackendPreference(
+            settings.whisperBackendPreference,
+          ),
+        },
         { signal: controller.signal },
       )
     } catch (cause) {
@@ -583,6 +607,8 @@ export function createVideoImportController(
         blockCurrent: payload.blockCurrent,
         blockTotal: payload.blockTotal,
         retrying: payload.retrying,
+        backend: payload.backend,
+        fallbackReason: payload.fallbackReason,
       })
     },
   }

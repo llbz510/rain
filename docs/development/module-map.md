@@ -39,6 +39,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Database Architecture Policy | 拒绝 SQL plugin 装载点扩散、业务层导入内部数据库 module 和前端事务控制 SQL | 证明业务结果、替代 Rust SQLite 事务测试、决定 schema 迁移 | `scripts/database-architecture-policy.mjs`；裁判 `database-architecture-policy.test.ts` |
 | Runtime Settings | 构造和原子保存模型池、角色选择、能力记录快照 | 发布 UI 状态、直接实现模型请求 | `src/settings/model-pool.ts`；Store 是提交门禁 |
 | Whisper Download Workflow | 建立一次下载会话、过滤生产进度事件、调用下载/取消并复核安装列表、释放 listener | 下载字节、文件完整性、持有后台任务 | `src/settings/whisper-model-download.ts` |
+| Whisper Backend Selection | 根据 Runtime Settings 偏好探针并选择 CPU/CUDA adapter，分类 CUDA worker 错误、控制回退、取消和实际后端报告 | 模型池管理、ASR 结果持久化、Stage2、页面自行探测 CUDA | `src-tauri/src/whisper_backend.rs`；CUDA adapter `src-tauri/src/bin/rain-whisper-cuda.rs`；CPU adapter `src-tauri/src/whisper.rs` |
 | Settings UI | 编排设置页面并分别展示自检、模型池、添加模型和角色选择；展示 Store 提交结果 | 定义能力裁决、直接实现模型请求、读取数据库或承担设置持久化规则 | `src/ui/components/settings/`；公共入口 `src/ui/components/settings.tsx` |
 | Control Plane Validator | 解析 AC/覆盖结构，检查 Owner/Judge、裁判文件和当前事实冲突 | 判断产品是否真的通过、替代业务测试或修改文档 | `scripts/control-plane-validator.mjs`；命令 `npm run harness:control` |
 | Study Session | 原子加载一个 ready 视频、统一播放位置、协调跳转、进度保存和学习页错误 | SQLite 细节、具体面板渲染、模型 HTTP 请求 | `src/store/rain-store.ts` 负责原子加载和成功打开时间；`src/study/session.ts` 负责把媒体进度持久化为单调递增的跨会话事实 |

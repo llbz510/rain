@@ -62,8 +62,20 @@ pub async fn import_online_video(
 
 /// 读取当前桌面运行能力（用于前端运行前自检）
 #[tauri::command]
-pub async fn get_runtime_capability() -> Result<crate::runtime::RuntimeCapability, String> {
-    Ok(crate::runtime::runtime_capability())
+pub async fn get_runtime_capability(
+    app: AppHandle,
+    backend_preference: Option<String>,
+) -> Result<crate::whisper_backend::RuntimeCapability, String> {
+    let preference =
+        crate::whisper_backend::WhisperBackendPreference::parse(backend_preference.as_deref())?;
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("Cannot resolve app resource dir: {error}"))?;
+    Ok(crate::runtime::runtime_capability_for(
+        preference,
+        Some(&resource_dir),
+    ))
 }
 
 /// 探测视频信息（时长/缩略图等，决策96）
@@ -129,7 +141,14 @@ pub async fn start_asr(
     tier: String,
     model_path: Option<String>,
     language: Option<String>,
+    backend_preference: Option<String>,
 ) -> Result<Vec<AsrSentence>, String> {
+    let backend_preference =
+        crate::whisper_backend::WhisperBackendPreference::parse(backend_preference.as_deref())?;
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("Cannot resolve app resource dir: {error}"))?;
     asr_execution::execute_asr(
         &app,
         scheduler.inner().as_ref(),
@@ -139,6 +158,8 @@ pub async fn start_asr(
             tier,
             model_path,
             language,
+            backend_preference,
+            cuda_worker_path: crate::whisper_backend::resolve_cuda_worker_path(Some(&resource_dir)),
         },
     )
     .await

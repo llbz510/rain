@@ -45,7 +45,7 @@ impl WhisperModelSize {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WhisperSegment {
     pub text: String,
     pub start_time: f64,
@@ -53,14 +53,14 @@ pub struct WhisperSegment {
     pub word_level: Vec<WordTimestamp>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WordTimestamp {
     pub word: String,
     pub start: f64,
     pub end: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WhisperResult {
     pub segments: Vec<WhisperSegment>,
     pub detected_language: String,
@@ -260,11 +260,15 @@ pub(crate) fn transcribe_wav(
     auto_detect_language: bool,
     cancellation: Option<CancellationToken>,
 ) -> Result<WhisperResult, WhisperError> {
-    let language = if auto_detect_language { None } else { Some("zh") };
+    let language = if auto_detect_language {
+        None
+    } else {
+        Some("zh")
+    };
     transcribe_wav_with_language(model_path, wav_path, language, cancellation)
 }
 
-pub(crate) fn transcribe_wav_with_language(
+pub fn transcribe_wav_with_language(
     model_path: &str,
     wav_path: &str,
     language: Option<&str>,

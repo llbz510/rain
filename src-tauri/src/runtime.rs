@@ -1,36 +1,18 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WhisperBackend {
-    Cuda,
-    Cpu,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeCapability {
-    pub whisper_backend: &'static str,
-    pub cpu_fallback_available: bool,
-}
-
-pub fn selected_backend() -> WhisperBackend {
-    #[cfg(feature = "cuda-whisper")]
-    {
-        WhisperBackend::Cuda
-    }
-    #[cfg(not(feature = "cuda-whisper"))]
-    {
-        WhisperBackend::Cpu
-    }
-}
+use crate::whisper_backend::{
+    self, ProcessCudaWorker, RuntimeCapability, WhisperBackendPreference,
+};
+use std::path::Path;
 
 pub fn runtime_capability() -> RuntimeCapability {
-    let whisper_backend = match selected_backend() {
-        WhisperBackend::Cuda => "cuda",
-        WhisperBackend::Cpu => "cpu",
-    };
-    RuntimeCapability {
-        whisper_backend,
-        cpu_fallback_available: false,
-    }
+    runtime_capability_for(WhisperBackendPreference::Auto, None)
+}
+
+pub fn runtime_capability_for(
+    preference: WhisperBackendPreference,
+    resource_dir: Option<&Path>,
+) -> RuntimeCapability {
+    let worker = ProcessCudaWorker::new(whisper_backend::resolve_cuda_worker_path(resource_dir));
+    whisper_backend::runtime_capability(preference, &worker)
 }
 
 #[cfg(test)]
@@ -38,15 +20,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capability_reports_compiled_backend_without_claiming_runtime_fallback() {
-        let capability = runtime_capability();
+    fn explicit_cpu_is_always_available_without_a_cuda_probe() {
+        let capability = runtime_capability_for(WhisperBackendPreference::Cpu, None);
 
-        #[cfg(feature = "cuda-whisper")]
-        assert_eq!(capability.whisper_backend, "cuda");
-
-        #[cfg(not(feature = "cuda-whisper"))]
         assert_eq!(capability.whisper_backend, "cpu");
-
-        assert!(!capability.cpu_fallback_available);
+        assert!(capability.cpu_fallback_available);
+        assert_eq!(capability.preference, "cpu");
     }
 }

@@ -91,6 +91,9 @@ function normalizedBaseUrl(value: string | undefined): string {
 }
 
 export function capabilityFingerprint(model: RuntimeModel, role: ModelRole): string {
+  const whisperBackendPreference = role === 'asr' && model.type === 'whisper-local'
+    ? (model.whisperBackendPreference ?? 'auto')
+    : undefined
   const material = JSON.stringify({
     role,
     type: model.type ?? '',
@@ -99,6 +102,7 @@ export function capabilityFingerprint(model: RuntimeModel, role: ModelRole): str
     model: model.model.trim(),
     apiKey: model.apiKey ?? '',
     supportsVision: model.supportsVision ?? false,
+    whisperBackendPreference,
   })
   return `cap-v1-${stableHash(material)}`
 }

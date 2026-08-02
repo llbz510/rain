@@ -2,10 +2,16 @@
 name = "rain"
 version = "0.1.0"
 edition = "2021"
+default-run = "rain"
 
 [lib]
 name = "rain_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "rain-whisper-cuda"
+path = "src/bin/rain-whisper-cuda.rs"
+required-features = ["cuda-whisper"]
 
 [features]
 default = []

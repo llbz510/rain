@@ -41,6 +41,8 @@
 | FFmpeg / ffprobe | 媒体探测、音频提取、缩略图和真实媒体 Harness | https://ffmpeg.org/download.html | `ffmpeg -version`; `ffprobe -version` |
 | yt-dlp | 在线视频导入（运行时依赖，非编译依赖） | 用户自装加 PATH | `yt-dlp --version` |
 
+正式 GPU 产品包还需要 CUDA Toolkit 12.x 和 Ninja 来构建隔离的 `rain-whisper-cuda.exe`；普通开发、CPU 安全包和默认 Harness 不需要 CUDA Toolkit。终端用户不需要安装 Toolkit，但 GPU 路径需要受支持的 NVIDIA 显卡和驱动。无兼容 NVIDIA 环境时默认 `Auto` 会显示原因并回退 CPU。
+
 ## 必须设置的环境变量（用户级，永久）
 
 以下环境变量必须设置，否则 whisper-rs 编译失败：
@@ -80,6 +82,8 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 | `npm run e2e:runtime-settings` | 真实 Tauri + 隔离 SQLite 的短设置重启 E2E；不需要 API Key，不调用模型 |
 | `npm run tauri dev` | 开发模式启动 Tauri 应用 |
 | `npm run tauri build` | 打包发布版 |
+| `npm run build:whisper-gpu-worker` | 构建并暂存隔离 CUDA worker 与所需 CUDA runtime（不包含驱动提供的 `nvcuda.dll`） |
+| `npm run bundle:gpu` | 构建默认 `Auto` 的 GPU 产品包；Rain 主程序仍为 CPU-safe，CUDA 仅在资源 worker 中 |
 | `cargo check --manifest-path src-tauri/Cargo.toml` | 仅检查 Rust 编译 |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | 跑 Rust 测试 |
 

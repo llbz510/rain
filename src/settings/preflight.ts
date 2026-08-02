@@ -1,7 +1,12 @@
 import { tauriInvoke, isTauri as detectTauri } from '@/lib/tauri-env'
 import { checkAssistantModelCapability } from '@/settings/assistant-capability'
 import { checkAsrModelCapability } from '@/settings/asr-capability'
-import type { RuntimeModel, RuntimeSettings } from '@/settings/model-pool'
+import {
+  normalizeWhisperBackendPreference,
+  type RuntimeModel,
+  type RuntimeSettings,
+  type WhisperBackendPreference,
+} from '@/settings/model-pool'
 import {
   assessModelCapability,
   recordCapabilityCheck,
@@ -32,7 +37,10 @@ export interface RunPreflightCheckInput {
   isTauri?: () => boolean
   invoke?: PreflightInvoke
   checkAssistant?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
-  checkAsr?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
+  checkAsr?: (
+    model: RuntimeModel,
+    backendPreference?: WhisperBackendPreference,
+  ) => Promise<ModelCapabilityRecord>
   checkStructuring?: (model: RuntimeModel) => Promise<ModelCapabilityRecord>
   checkDatabaseWrite?: () => Promise<void>
 }
@@ -110,10 +118,14 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
   const invoke = input.invoke ?? tauriInvoke
   const checkDatabaseWrite = input.checkDatabaseWrite ?? defaultDatabaseWriteCheck
   const checkAssistant = input.checkAssistant ?? checkAssistantModelCapability
-  const checkAsr = input.checkAsr ?? checkAsrModelCapability
+  const checkAsr = input.checkAsr ?? ((model, backendPreference) =>
+    checkAsrModelCapability(model, { backendPreference }))
   const checkStructuring = input.checkStructuring ?? checkStructuringModelCapability
   const checks: PreflightCheck[] = []
   const existingCapabilities = input.runtimeSettings.capabilities ?? []
+  const whisperBackendPreference = normalizeWhisperBackendPreference(
+    input.runtimeSettings.whisperBackendPreference,
+  )
 
   const desktopAvailable = isTauri()
   if (!desktopAvailable) {
@@ -125,15 +137,33 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
     })
   } else {
     try {
-      const capability = await invoke('get_runtime_capability')
+      const capability = await invoke('get_runtime_capability', {
+        backendPreference: whisperBackendPreference,
+      })
       const backend = typeof (capability as { whisperBackend?: unknown })?.whisperBackend === 'string'
         ? (capability as { whisperBackend: string }).whisperBackend
         : 'unknown'
+      const fallbackReason = typeof (capability as { fallbackReason?: unknown })?.fallbackReason === 'string'
+        ? (capability as { fallbackReason: string }).fallbackReason
+        : ''
+      const cudaDevice = typeof (capability as { cudaDevice?: unknown })?.cudaDevice === 'string'
+        ? (capability as { cudaDevice: string }).cudaDevice
+        : ''
+      const runtimeStatus: PreflightStatus = backend === 'cuda' || backend === 'cpu'
+        ? (whisperBackendPreference === 'auto' && backend === 'cpu' && fallbackReason
+            ? 'warning'
+            : 'ok')
+        : 'error'
+      const backendLabel = backend === 'cuda'
+        ? `NVIDIA GPU${cudaDevice ? `（${cudaDevice}）` : ''}`
+        : backend.toUpperCase()
       checks.push({
         id: 'runtime',
         label: '桌面运行环境',
-        status: backend === 'cuda' || backend === 'cpu' ? 'ok' : 'warning',
-        message: `桌面应用可用；Whisper 后端：${backend}`,
+        status: runtimeStatus,
+        message: runtimeStatus === 'error'
+          ? `Whisper 后端不可用：${fallbackReason || '无法选择可运行后端'}`
+          : `桌面应用可用；Whisper 后端：${backendLabel}${fallbackReason ? `；${fallbackReason}` : ''}`,
       })
     } catch (error) {
       checks.push({
@@ -145,7 +175,10 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
     }
   }
 
-  const asrModel = roleModel(input.runtimeSettings, 'asr')
+  const configuredAsrModel = roleModel(input.runtimeSettings, 'asr')
+  const asrModel = configuredAsrModel
+    ? { ...configuredAsrModel, whisperBackendPreference }
+    : null
   const structuringModel = roleModel(input.runtimeSettings, 'structuring')
   const assistantModel = roleModel(input.runtimeSettings, 'assistant')
   const missingRoles = [
@@ -226,7 +259,7 @@ export async function runPreflightCheck(input: RunPreflightCheckInput): Promise<
   let asrCapability: ModelCapabilityRecord | null = null
   const whisperCheck = checks.find((check) => check.id === 'whisper')
   if (asrModel && whisperCheck?.status === 'ok') {
-    const result = await checkAsr(asrModel)
+    const result = await checkAsr(asrModel, whisperBackendPreference)
     asrCapability = preserveVerifiedRecord(asrModel, result, existingCapabilities)
     whisperCheck.status = result.status === 'Compatible' || result.status === 'Verified'
       ? 'ok'

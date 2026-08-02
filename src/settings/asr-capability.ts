@@ -8,6 +8,7 @@ import {
   type ModelCapabilityRecord,
 } from '@/settings/model-capabilities'
 import type { RuntimeModel } from '@/settings/model-pool'
+import type { WhisperBackendPreference } from '@/settings/model-pool'
 
 const ASR_PROBE_RESOURCE = 'asr-capability/sample.mp4'
 const ASR_PROBE_VIDEO_ID = 'rain-asr-capability'
@@ -17,6 +18,7 @@ export interface CheckAsrModelCapabilityOptions {
   resolveProbeFile?: () => Promise<string>
   checkedAt?: number
   signal?: AbortSignal
+  backendPreference?: WhisperBackendPreference
 }
 
 async function resolveBundledProbeFile(): Promise<string> {
@@ -37,6 +39,9 @@ export async function checkAsrModelCapability(
         type: model.type ?? '',
         modelName: model.model,
         language: 'en',
+        backendPreference: options.backendPreference
+          ?? model.whisperBackendPreference
+          ?? 'auto',
       },
       invoke: options.invoke,
       signal: options.signal,

@@ -254,7 +254,7 @@ $env:RAIN_E2E_LLM_API_KEY = $llmApiKey
 $env:LIBCLANG_PATH = if ($env:LIBCLANG_PATH) { $env:LIBCLANG_PATH } else { 'C:\Program Files\LLVM\bin' }
 $env:CMAKE_CXX_FLAGS = '/utf-8'
 $env:CMAKE_C_FLAGS = '/utf-8'
-$env:CARGO_TARGET_DIR = if ($selectedWhisperBackend -eq 'cuda') { 'D:\gongju\shengcan\rain\.worktrees\.cargo-target-rain-real-e2e-cuda' } else { 'D:\gongju\shengcan\rain\.worktrees\.cargo-target-rain-real-e2e' }
+$env:CARGO_TARGET_DIR = 'D:\gongju\shengcan\rain\.worktrees\.cargo-target-rain-real-e2e'
 
 $probePath = Join-Path $root.FullName 'probe.json'
 $probeRaw = & $ffprobe -v error -print_format json -show_format -show_streams $video
@@ -263,8 +263,14 @@ $probeRaw = & $ffprobe -v error -print_format json -show_format -show_streams $v
 $npmCmd = (Get-Command 'npm.cmd' -ErrorAction Stop).Source
 & $npmCmd run build
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+if ($selectedWhisperBackend -eq 'cuda') {
+  & powershell.exe -ExecutionPolicy Bypass -File scripts/build-whisper-cuda-worker.ps1 -Configuration debug
+  if ($LASTEXITCODE -ne 0) { throw 'CUDA worker build failed' }
+  $env:RAIN_WHISPER_CUDA_WORKER = (Resolve-Path -LiteralPath 'src-tauri\target\whisper-gpu-bundle\whisper-backends\rain-whisper-cuda.exe').Path
+} else {
+  Remove-Item Env:RAIN_WHISPER_CUDA_WORKER -ErrorAction SilentlyContinue
+}
 $tauriBuildArgs = @('run', 'tauri', '--', 'build', '--debug', '--no-bundle')
-if ($selectedWhisperBackend -eq 'cuda') { $tauriBuildArgs += @('--features', 'cuda-whisper') }
 Invoke-BuildCommand $npmCmd $tauriBuildArgs $vcVarsForBuild
 if ($LASTEXITCODE -ne 0) { throw 'Tauri debug build failed' }
 $appBinary = Join-Path $env:CARGO_TARGET_DIR 'debug\rain.exe'
