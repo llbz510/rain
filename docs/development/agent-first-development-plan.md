@@ -4,6 +4,7 @@
 > 更新日期：2026-08-02
 > 产品语义边界：本文件不新增或修改 Active AC。下文标为 `Proposed` 的产品切片必须先由用户确认，才能进入 RED 或实现。
 > 方法依据：[`docs/research/2026-08-02-agent-first-harness-principles.md`](../research/2026-08-02-agent-first-harness-principles.md)
+> 项目总路线：[`docs/development/rain-project-delivery-plan.md`](rain-project-delivery-plan.md)
 
 ## 1. 当前基线
 
@@ -114,11 +115,13 @@ npm run harness:control
 
 下一会话不应依赖聊天记录才能恢复这些事实。
 
-## 4. 接下来按顺序执行的开发队列
+## 4. 候选工作队列（实际顺序以总交付计划为准）
+
+本节的 P0–P5 是候选优先级标签，不是独立于总交付路线图的执行顺序。唯一权威顺序见 `docs/development/rain-project-delivery-plan.md`：先完成 M1 发布范围冻结和 Release AC，再执行 M2 的 Hosted replay 与 Evidence freshness，之后才进入 M3 和产品实现。
 
 ### P0 — 重放执行时目标提交的 Hosted Runtime Settings Judge
 
-状态：`Ready for explicit dispatch`；不改变产品代码。
+状态：`Ready after M1 confirmation and explicit dispatch`；不改变产品代码。
 
 - **控制范围**：`AC-HE-05`，并核对后续加入同一脚本的 `AC-LV-20` 重启恢复路径。
 - **原因**：最后一次 Hosted GREEN 是 `9251962`；此后的桌面脚本和 E2E adapter 已有实质扩展。截至本次审查，尚无覆盖这些扩展的 Hosted replay。
@@ -224,4 +227,4 @@ npm run harness:control
 
 ## 7. 下一会话唯一推荐动作
 
-取得用户对外部 workflow_dispatch 的执行授权后，只执行 P0：解析 `origin/master` 与 GitHub `master` 当前指向的完整 SHA，确认二者一致，通过 `master` ref 重放 `Runtime Settings Desktop E2E`，并核对最终 run 的 `headSha` 与记录目标完全一致。等待终态后，由全新上下文的只读 reviewer 核对目标、日志、秘密/诊断边界与 AC 结论。该 Slice 完成前不开始 P1 或产品实现。
+只执行总交付计划的 M1-S1 工作包：由用户确认 Core Release 候选簇分别属于 `Launch`、`Post-release` 或 `Out-of-scope`，并把未决项记录为明确选择，不写产品代码。M1-S1 经独立只读审查后，再执行 M1-S2 确认 Release AC；两者完成后，才按总交付计划进入 M2 Hosted replay。未经 M1 确认，不提前触发外部 workflow、开始 P1 或实施产品行为。

@@ -80,11 +80,12 @@ Read in this order:
 6. `docs/development/harness-coverage.md` — AC-to-test/evidence coverage and gaps.
 7. `docs/development/module-map.md` — module responsibilities, interfaces, and migration rules.
 8. `docs/development/agent-first-development-plan.md` — Active one-Slice cross-session execution order and mandatory independent-review gate; it does not define product behavior.
-9. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
-10. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
-11. `package.json` — runnable frontend/test/E2E commands.
-12. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-13. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+9. `docs/development/rain-project-delivery-plan.md` — Active milestone roadmap from scope freeze through RC, formal release and post-release verification; Proposed product slices still require user confirmation.
+10. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
+11. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
+12. `package.json` — runnable frontend/test/E2E commands.
+13. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+14. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -1759,6 +1760,24 @@ Verification for this documentation slice before independent review: the pre-edi
 The first independent read-only review used a fresh context and baseline `7e278a68a300018be42c7488d9be4473d9d0ff2e`, then checked Spec and Standards separately. Its initial verdict was `FAIL`. It found no P0 and no product-semantic overreach, but found one substantive P1: P0 and the recommended next action called `7e278a6` the continuing “current HEAD”, so a later session could replay an obsolete commit or try to dispatch an unusable SHA instead of proving the execution-time target. It also found the expected delivery P1 that this state file had not yet persisted the review result, and earlier identified non-blocking discoverability debt because the new Active plan was absent from the control map/new-session list. The plan now requires resolving the full execution-time target SHA, verifying a dispatchable ref points to it, and checking the run `headSha`; the control map and new-session source list now include the Active plan, and `docs/research/` has an explicit Proposed-only responsibility. These corrections must pass control-plane/whitespace checks and the same independent reviewer must re-review the final diff before this slice can claim PASS.
 
 The same independent reviewer then re-ran `npm run harness:control` and `git diff --check 7e278a68a300018be42c7488d9be4473d9d0ff2e` against the corrected files and returned final verdict `PASS`: all reported items were closed, no P0/P1/P2 remained, and no product-semantic overreach or locked Harness change was found. This docs-only review did not dispatch P0, create the missing `AC-LV-21` Release Evidence, run live models or rerun the full Harness after documentation edits; those boundaries remain explicit. The complete Harness GREEN recorded above occurred before the documentation edits, while the post-edit control-plane and whitespace checks passed.
+
+
+## 2026-08-02 complete project delivery roadmap
+
+After the reviewed agent-first control slice was committed as `495b5e5` on `codex/agent-first-development-plan`, the user clarified that the required artifact is a complete plan through actual product landing, not only a next-priority queue. `docs/development/rain-project-delivery-plan.md` now provides that program-level roadmap while the existing agent-first plan remains the per-session execution protocol.
+
+- “Landing” is defined as confirmed release scope, Strong launch ACs, current real Evidence, formal CPU/GPU installation proof, schema/data/file lifecycle, signed and hashed artifacts, license review, Release Candidate gates, public download verification, rollback and first production observation. Code completion alone is explicitly insufficient.
+- The roadmap separates a recommended Core Release from high-risk post-release candidates, but does not make the product decision. M1 requires the user to mark each candidate cluster Launch, Post-release or Out-of-scope and confirm Release ACs before implementation.
+- M0–M11 cover control baseline, scope freeze, evidence replay, release engineering, data/file and architecture boundaries, list UX, study UX, model/language/translation, assistant/Vision/tree editing, visual/accessibility/performance, RC and formal release/post-release handling.
+- All 54 currently Proposed historical decisions are routed exactly once across seven work clusters: advanced tree editing 13, assistant/Vision 3, catalog/layout/subtitle/shortcuts 12, ASR/language/translation 4, list/derived files 6, visual system 13 and architecture boundaries 3. The routing is a completeness check, not an AC promotion.
+- The critical path puts M1 scope/Release AC before current target-commit desktop replay and `AC-LV-21` dual-environment release evidence, with feature expansion later. Translation, Vision and advanced tree editing cannot start until Release Scope is confirmed; the recommended first six work packages are M1 scope, Release AC, M2 Hosted replay, Evidence freshness, release artifact contract and clean no-NVIDIA CPU Evidence. Each work package must still be decomposed into one-AC/one-gap Slices before execution.
+- No product source, AC, coverage level, locked `harness/`, locked `src-tauri/tests/`, workflow, Evidence or runtime code changed in this roadmap slice. No external workflow, model, video run or installer action was started.
+
+The complete roadmap must pass `npm run harness:control`, `git diff --check` and an independent fresh-context read-only Spec/Standards review before its second commit. The independent review result, findings and closure are appended here before handoff.
+
+The first independent read-only roadmap review used baseline `495b5e56dab61b3eb4694471347406592868579d` and returned `FAIL` with three P1 findings and one P2. First, the Active per-session plan said Hosted replay was the next unique action while the complete roadmap correctly put M1 scope/Release AC first. Second, a launch choice for real-site URL import had no executable Owner/Judge/Evidence work package. Third, `M#-S#` labels could be mistaken for executable one-AC Slices even when they combined installation lifecycle, signing, SBOM, licensing and artifact hygiene. Fourth, the sample RC Evidence command used a PowerShell-invalid angle-bracket placeholder. The correction makes the complete roadmap the only ordering authority, sets M1-S1 as the next unique action, defines all `M#-S#` entries as work packages that must be decomposed through the Slice Contract, explicitly splits the M3-S5 governance candidates, adds conditional M5-S6 real-site Evidence and replaces the RC command with an executable variable form. The 54-decision routing itself passed the reviewer’s mechanical completeness check; no product decision was promoted.
+
+The same independent reviewer then examined the corrected working tree read-only and returned final verdict `PASS`: P0/P1/P2 were all empty; all four initial findings were closed; the Proposed source and route table both contained 54 unique IDs with no missing, extra or duplicate entry; and no AC, coverage level, locked Harness or product decision changed. The reviewer independently ran `npm run harness:control` and `git diff --check`; both passed, with only normal line-ending warnings. It did not rerun the complete Harness, Hosted desktop, dual-environment installation, signing/licensing, real-video or external-site Evidence, and the roadmap continues to treat those as future gates rather than completed facts. This final PASS is the required independent review for the roadmap documentation slice.
 
 
 ## Maintenance checklist for every future session
