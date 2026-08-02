@@ -208,7 +208,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 - 在线 URL 的受控本地媒体交接已进入 `AC-LV-17`：Controller 拥有可追踪记录、失败/取消/重试和 Pipeline 交接，Rust `ytdlp` module 拥有可取消探测/下载、进度、临时目录和最终提交，页面只保留输入适配。真实站点差异与完整外网 Evidence 仍是独立 Gap。
 - 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。`ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash`（结构化、文本助手）已有 schema v2 Evidence；下一个模型配置仍须独立探针和完整 E2E，不得继承这个 `Verified` 结论。
-- 本地缩略图创建、持久化和卡片渲染现由 `AC-LV-18` 控制；应用所有缩略图随 Video 删除及孤儿 GC 仍无 Active AC，并使 `DEC-PRD-060` 保持 Proposed。
+- 本地缩略图创建、持久化和卡片渲染由 `AC-LV-18` 控制；应用所有缩略图随 Video 删除及孤儿 GC 已由 `AC-VL-05/06` 冻结语义，但对应 Rust lifecycle module、生产接线和真实文件/SQLite Judge 仍为 Gap。
 
 ## 8. Harness Migration 结果
 
@@ -235,3 +235,21 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 - 设置 UI 继续调用 `src/settings/` 中的能力契约和探针，没有复制领域规则。
 - M19 和现有 `src/__tests__/settings-*.test.tsx` 继续验收相同公共组件；锁定 Harness 未修改。
 - 这是行为保持重构，不改变 AC 状态，也不声称完成 `AC-LV-12`。
+
+## 10. Core Release 新 AC 的模块归属
+
+状态：`Confirmed contracts / implementation varies`（2026-08-02）。本节把 M1-S2 的 AC group 定位到深 module 或治理 Owner；它不要求一次性创建所有文件，也不能覆盖 `harness-coverage.md` 的 Partial/Gap 事实。
+
+| AC group | 生产 Owner / 推荐 seam | 关键边界 |
+| --- | --- | --- |
+| `AC-RL-01..20` | Tauri release config、GPU overlay/bundle、installer lifecycle、数据库 migration deep command、artifact/Evidence validator、人类 release/legal/security owner | 主程序保持 CPU-safe；CUDA 只在隔离 worker；安装/升级/卸载/签名/发布/回滚各自独立裁判，页面或 AI 不拥有私钥和法律批准 |
+| `AC-VL-01..04/07` | `VideoListPage` composition、`VideoCard`、公共 Database video query interface | 页面组合查询与动作，不复制排序/搜索/持久化规则；视觉与业务行为分层裁判 |
+| `AC-VL-05/06` | 新的 Rust thumbnail lifecycle deep module + 现有数据库删除 workflow | 只处理 app-owned `thumbnails/`；数据库 commit、keep-set 和真实文件副作用由深 module 协调，永不接受任意用户路径 |
+| `AC-SU-01..07` | `StudyInterface` composition、`src/study/` navigation/session、catalog、VideoZone、shortcut/focus policy、layout persistence | 页面保持组合入口；播放/选择/预览/面板焦点使用共享事实，不在组件间复制快捷键或持久状态 |
+| `AC-UX-01..06` | `src/index.css` token system、生产组件、visual/accessibility policy | CSS token 是唯一视觉事实源；完整页面 visual/keyboard/axe/contrast Judge 不由 token 存在自证 |
+| `AC-PF-01..05` | 独立 performance/soak runners + 对应 startup/List/Study/progress/App lifecycle Owner | runner 只测量，不成为生产 Owner；冻结机器、fixture、样本数、p95、资源斜率和退出残留必须写入 Evidence |
+| `AC-AR-02` | `src/llm/` 和角色 request workflows | 所有 OpenAI-compatible LLM 请求留在前端 adapter；Rust command 精确集合不得出现 LLM HTTP 边界 |
+| `AC-AR-03` | Tauri asset capability + 共享 `localMediaUrl` adapter | 只允许 app-owned 或用户明确选择的规范化本地路径；禁止任意文件系统通配 scope |
+| `AC-AR-04` | 公共 Database interfaces + Zustand session Store | SQLite 是跨会话业务事实源；Store 只拥有当前会话选择/播放/UI 草稿，不恢复或复制持久业务事实 |
+| `AC-AR-05` | App-scope import Owner + `VideoImportController` | Controller 生命周期高于页面；页面卸载/重挂不能制造第二 Owner、取消路径或迟到提交 |
+| `AC-AR-06` | 单一 progress domain contract + Pipeline/Controller/event adapters | 五类判别联合、字段合法性、单调性、终态和 checkpoint retry 在域边界统一；UI 不推断或发明阶段 |

@@ -1,28 +1,28 @@
 # Rain Core Release Acceptance Contract
 
-> 状态：`Proposed — awaiting user confirmation`
+> 状态：`Active — user confirmed; formal control migration complete`
 > 更新日期：2026-08-02
 > 路线图位置：M1-S2 Confirm Release AC
 > 上游范围：Active [`release-scope-contract.md`](release-scope-contract.md)
-> 授权边界：本文件只提出首发 AC、Owner、Judge、Evidence 和范围外行为。用户整体确认前，不得把这些 Proposed AC 写成 Confirmed、开始产品实现、修改锁定 Harness、触发外部 workflow 或签发 Evidence。
+> 授权边界：用户已于 2026-08-02 整体确认本文件。正式语义迁入 `acceptance-standard.md`、当前强度迁入 `harness-coverage.md`；本次确认仍不授权产品实现、外部 workflow、签名或 Evidence。
 
 ## 1. Slice Contract
 
 | 字段 | 本轮合同 |
 | --- | --- |
-| Slice | M1-S2：建立完整 Release AC matrix 并等待用户确认 |
+| Slice | M1-S2：确认并迁移完整 Release AC matrix |
 | Observable result | 用户可一次审阅首发下载物、生命周期、发布门禁和 31 条 Launch 决策的逐行 AC 去向 |
-| In scope | 20 条发布/生命周期 Proposed AC；7 条视频列表 AC；7 条学习页 AC；6 条视觉/可访问性 AC；5 条性能/长运行 AC；5 条架构 AC；31 条 Launch 决策逐行 traceability；risk 22 两项独立路由 |
-| Out of scope | 修改 `acceptance-standard.md`、`product-decision-coverage.md` 或 `harness-coverage.md`；产品代码；锁定 Harness；安装器运行；模型/GPU/视频/外网 Evidence；workflow；签名或法律批准 |
-| Owner | 本文件拥有 Proposed Release AC；用户确认后由 `acceptance-standard.md` 和 `harness-coverage.md` 接管正式 AC/覆盖语义 |
-| Judge | AC ID 唯一；每条 AC 只有一个可独立裁判的结果；31 条 Launch 决策逐行至少映射一个 Proposed AC；发布队列 13 类缺口全部映射；Post-release/Out-of-scope 不泄漏；独立只读 Spec + Standards 审查；最终由用户确认 |
+| In scope | 20 条发布/生命周期 Confirmed AC；7 条视频列表 AC；7 条学习页 AC；6 条视觉/可访问性 AC；5 条性能/长运行 AC；5 条架构 AC；31 条 Launch 决策逐行 traceability；risk 22 两项独立路由 |
+| Out of scope | 产品代码；锁定 Harness 测试；安装器运行；模型/GPU/视频/外网 Evidence；workflow；签名或法律批准 |
+| Owner | 本文件保存确认与 traceability；`acceptance-standard.md` 和 `harness-coverage.md` 接管正式 AC/覆盖语义 |
+| Judge | AC ID 唯一；每条 AC 只有一个可独立裁判的结果；31 条 Launch 决策逐行映射 Confirmed AC；发布队列 13 类缺口全部映射；Post-release/Out-of-scope 不泄漏；独立只读 Spec + Standards 审查 |
 | Evidence tier | 文档控制面 + 独立审查；本轮不产生运行时 Evidence |
-| Allowed writes | 本文件、`control-map.md`、`rain-project-delivery-plan.md`、`agent-first-development-plan.md`、`PROJECT_STATE.md` |
-| Locked files | `acceptance-standard.md`、`product-decision-coverage.md`、`harness-coverage.md`、`harness/`、`src-tauri/tests/`、产品源码、workflow 和 Evidence |
+| Allowed writes | 本文件、`acceptance-standard.md`、`harness-coverage.md`、`product-decision-coverage.md`、`module-map.md`、`release-scope-contract.md`、`control-map.md`、两份 Active 计划、Harness Migration 记录和 `PROJECT_STATE.md` |
+| Locked files | `harness/`、`src-tauri/tests/`、产品源码、workflow 和 Evidence |
 
-## 2. 首发产品建议
+## 2. 已确认首发产品细节
 
-除 M1-S1 已确认的范围外，本轮提出以下需要用户确认的 Release 细节：
+除 M1-S1 已确认的范围外，用户于 2026-08-02 进一步确认以下 Release 细节：
 
 1. 首个公开版本为 `Rain 0.1.0`，只发布 Windows x64。
 2. 用户可见下载物只有一个 NSIS `.exe` 安装器，建议命名 `Rain_0.1.0_x64-setup.exe`，通过 GitHub Releases 发布；不同时发布 MSI、portable、CPU-only 或其他平台安装包。
@@ -31,11 +31,11 @@
 5. 首次正式发布必须在已有同 identifier 的安装场景中读取并原子迁移一个冻结的 `c2eb4c4` 数据库/设置 fixture；该 fixture 不冒充不存在的旧正式安装器。后续版本还必须覆盖“上一公开版本 → 当前版本”。升级失败保留可恢复备份并拒绝进入半迁移应用。
 6. P0、P1 和影响 Launch AC/数据/安全/Evidence 真实性的 P2 阻断 RC；普通非阻断 P2 必须进入 Release Notes 或后续队列。
 
-以上六项是建议，不是已确认事实。用户可按 AC ID 修改；未明确确认前保持 Proposed。
+以上六项已经整体确认；后续改变任一项必须按对应 AC 重新走产品确认与 Harness Migration。
 
-## 3. Proposed Release AC registry — 20 条
+## 3. Confirmed Release AC registry — 20 条
 
-| Proposed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
+| Confirmed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
 | --- | --- | --- | --- | --- |
 | AC-RL-01 | 公开发布只有一个与目标 commit、`0.1.0`、`com.rain.app` 一致的 Windows x64 NSIS 安装器，GitHub Release 页面可定位其版本与 SHA | Tauri config、release build script、人类 release owner | 干净 checkout 构建；安装器 metadata/文件名/版本/commit manifest 一致；公开页只有一个安装下载物 | MSI、portable、自动更新、非 x64、非 Windows |
 | AC-RL-02 | 单一安装器同时包含 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime；不存在第二个公开 CPU 包 | GPU bundle script、Tauri GPU overlay | 安装后主程序无 CUDA import；worker/runtime/manifest 齐全且不含 `nvcuda.dll`；公开 Release asset 只有该通用安装器 | 把 CUDA feature 加入主程序/默认 Harness；静默按需下载；驱动 DLL 再分发；发布文案由 AC-RL-18 控制 |
@@ -58,11 +58,11 @@
 | AC-RL-19 | 回滚只能到签名、哈希已知且与当前用户数据兼容的已验收版本；不兼容时停止分发并提供备份/恢复指引，不静默降级 schema | human release owner、rollback runbook、database compatibility owner | 已安装 RC 回滚演练；签名/哈希/数据库兼容检查；不兼容 fixture 必须拒绝并保留数据 | 缺陷严重度判定、自动跨主版本降级 |
 | AC-RL-20 | Release Notes 精确列出 Launch、Post-release 与不承诺能力、已验证配置、已知限制、非阻断 P2 和回滚方式，且不得把候选或局部 Evidence 写成已交付事实 | release notes owner、scope contract | Release Notes 与 Active scope、Confirmed AC/coverage、目标 artifact、有效 Evidence、缺陷队列和回滚 runbook 逐项对账 | 下载页/安装器 UI、营销性扩大承诺、未验证硬件/模型兼容性 |
 
-## 4. Proposed product and architecture AC registry — 30 条
+## 4. Confirmed product and architecture AC registry — 30 条
 
 ### 4.1 视频列表与派生文件 — 7 条
 
-| Proposed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
+| Confirmed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
 | --- | --- | --- | --- | --- |
 | AC-VL-01 | ready/non-ready 卡片按持久状态展示规定的信息层级，状态、错误、进度和可用动作不互相伪装 | VideoListPage 查询层、VideoCard | 生产页面 + 公共数据库双 adapter；各状态 DOM/视觉 Judge；错误动作可恢复 | 排序、搜索、网格尺寸、真实桌面 Evidence |
 | AC-VL-02 | 列表默认最近学习，并支持最近学习/导入时间/名称三种确定排序；SQLite 与内存 adapter 同义 | Database query interface、VideoListPage controls | 同一 fixture 在双 adapter 和生产 UI 中顺序一致；稳定 tie-breaker | 标签、筛选、正文搜索 |
@@ -74,10 +74,10 @@
 
 ### 4.2 学习页基础交互 — 7 条
 
-| Proposed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
+| Confirmed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
 | --- | --- | --- | --- | --- |
-| AC-SU-01 | 顶部目录以章节/小节顶行和段落底行横向展示，可滚动、自动定位当前项并在暂停后停止强制跟随 | Study catalog view、Study Navigation | 生产 StudyInterface + 真实播放位置；长目录、手动滚动、播放/暂停行为 Judge | 目录结构编辑、折叠、scrub |
-| AC-SU-02 | 目录进度只由统一播放事实推导，章节/小节切换使用受控约 200ms 反馈且不制造第二份时间状态 | Study catalog view、playPosition interface | 时间推进/跳转/暂停 fixture；DOM 样式与状态；复用 `AC-ST-03` | 任意动画系统、持久化新的当前位置 |
+| AC-SU-01 | 顶部目录以章节/小节顶行和段落底行横向展示，可滚动、自动定位当前项，以边缘渐隐提示可继续滚动，并在暂停后停止强制跟随 | Study catalog view、Study Navigation | 生产 StudyInterface + 真实播放位置；长目录、边缘渐隐、手动滚动、播放/暂停行为 Judge | 目录结构编辑、折叠、scrub |
+| AC-SU-02 | 目录进度只由统一播放事实推导，章节/小节切换使用受控约 200ms 横向滑动反馈且不制造第二份时间状态 | Study catalog view、playPosition interface | 时间推进/跳转/暂停 fixture；横向滑动 DOM 样式、时长与 reduced-motion 状态；复用 `AC-ST-03` | 任意动画系统、持久化新的当前位置 |
 | AC-SU-03 | 右侧面板以 AI/随记 Tab 切换，切换不丢助手会话、笔记草稿或当前学习事实，隐藏区不重复发起副作用 | Study Page Composition、assistant/notes owners | 生产页面切换、未完成流/编辑状态、重新显示 Judge | Vision、AI 笔记自动生成、多窗口 |
 | AC-SU-04 | 三种布局的区域比例可调并跨会话恢复，布局变化不卸载媒体会话或改变选择/播放/笔记事实 | Study Page Composition、layout persistence | 生产页面拖拽/重启；Store/SQLite 设置；真实 media 实例稳定 | 任意窗口管理、无限布局、自定义主题 |
 | AC-SU-05 | Core Release 只提供原文字幕开关；字幕来自真实当前句，位于视频底部半透明容器，关闭后不影响转录文本；不显示译文开关 | VideoZone、Study Session | 真实 media 时间推进 + 生产 DOM/截图；开关/重开；无翻译控件 | 翻译、外部字幕优先、字幕编辑 |
@@ -86,7 +86,7 @@
 
 ### 4.3 视觉、可访问性和性能 — 11 条
 
-| Proposed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
+| Confirmed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
 | --- | --- | --- | --- | --- |
 | AC-UX-01 | 首发只提供暗色主题；背景/面板/分隔/文字使用冻结中性色阶，通用控件不用品牌强调色 | design tokens、production components | 全部首发页面生产截图/token 使用扫描 + visual reviewer | 亮色/系统主题、品牌色系统 |
 | AC-UX-02 | 段落类型、选中、播放、失败/处理/排队、进度、容器和类型胶囊使用唯一且跨组件一致的语义映射 | semantic visual tokens、catalog/text/list/mind-map components | 多状态生产 fixture + 截图/DOM；禁止组件私建冲突颜色 | 新段落类型、用户自定义配色 |
@@ -102,7 +102,7 @@
 
 ### 4.4 架构边界与 risk 22 — 5 条
 
-| Proposed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
+| Confirmed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
 | --- | --- | --- | --- | --- |
 | AC-AR-02 | Stage2、合并和文本助手的 OpenAI-compatible 请求只由前端 LLM adapter 发起；Rust/Tauri 不新增 LLM HTTP command | `src/llm/`、capability/request workflows | 生产请求接口测试 + 负向 dependency/command policy；真实模型按角色 Evidence | 本地 Whisper、代理服务器、Vision |
 | AC-AR-03 | 本地媒体/缩略图只通过限定 app-owned/用户明确选择路径的 asset protocol 能力暴露；生产 scope 不允许通配任意文件系统 | Tauri capability/asset scope、localMediaUrl adapter | capability config 负向 policy + 允许/拒绝真实路径桌面 Judge；路径规范化 | 通用文件浏览器、任意 `convertFileSrc`、网络 URL policy |
@@ -143,8 +143,8 @@
 | `AC-VL-05` | Strong | 真实 SQLite + 隔离文件系统删除 Judge |
 | `AC-VL-06` | Strong | 真实 keep-set + 隔离目录 GC Judge |
 | `AC-VL-07` | Strong + Desktop/Visual Evidence | 多 viewport 生产卡片截图/DOM |
-| `AC-SU-01` | Strong + Desktop Evidence | 生产长目录与真实 playPosition |
-| `AC-SU-02` | Strong + Desktop/Visual Evidence | 真实目录进度、转场和 reduced-motion |
+| `AC-SU-01` | Strong + Desktop Evidence | 生产长目录、边缘渐隐与真实 playPosition |
+| `AC-SU-02` | Strong + Desktop/Visual Evidence | 真实目录进度、约 200ms 横向转场和 reduced-motion |
 | `AC-SU-03` | Strong + Desktop Evidence | AI/随记真实会话切换 |
 | `AC-SU-04` | Strong + Desktop Evidence | 布局拖拽、重启与同一 media session |
 | `AC-SU-05` | Strong + Desktop/Visual Evidence | 真实媒体原文字幕/开关/无译文控件 |
@@ -169,16 +169,16 @@
 
 ## 5. 31 条 Launch decision traceability
 
-现有 Confirmed AC 只保护表中“Existing control”列的局部边界；它不能替代 Proposed AC。每条 Launch decision 在用户确认后必须按“Target Proposed AC”列进入正式 acceptance matrix。
+既有 Confirmed AC 继续保护“Existing control”列的局部边界；本轮新 Confirmed AC 按“Target Confirmed AC”列接管完整 Launch 行为。
 
-| Decision | Target Proposed AC | Existing control retained | Owner | Required Judge / Evidence | Out-of-scope preserved |
+| Decision | Target Confirmed AC | Existing control retained | Owner | Required Judge / Evidence | Out-of-scope preserved |
 | --- | --- | --- | --- | --- | --- |
 | DEC-PRD-011 | AC-SU-01 | AC-ST-03/04 | Study catalog view | 生产长目录 + 真实 playPosition 行为 | 编辑/折叠/scrub |
-| DEC-PRD-012 | AC-SU-02、AC-UX-05 | AC-ST-03 | Catalog + motion tokens | 播放/跳转状态与 reduced-motion Judge | 新时间事实、任意动画系统 |
+| DEC-PRD-012 | AC-SU-02、AC-UX-05 | AC-ST-03 | Catalog + motion tokens | 约 200ms 横向滑动、播放/跳转状态与 reduced-motion Judge | 新时间事实、任意动画系统 |
 | DEC-PRD-013 | AC-SU-01 | — | Study catalog view | 滚动/居中/渐隐/暂停手动控制 | 折叠缩略 |
 | DEC-PRD-022 | AC-SU-03 | AC-ST-06/07/08 | Study Page Composition | AI/随记真实会话切换与副作用 | Vision、AI 自动笔记 |
 | DEC-PRD-023 | AC-SU-04、AC-SU-05 | AC-ST-08 | Layout + VideoZone | 拖拽/重启/同 media；原文字幕独立 | 翻译/译文开关、自定义布局 |
-| DEC-PRD-053 | AC-SU-07、AC-UX-06 | AC-ST-02/04/06 | Shortcut/focus policy | 生产页面全焦点矩阵与副作用 | 全局/自定义快捷键 |
+| DEC-PRD-053 | AC-SU-07、AC-UX-06 | AC-ST-02/04/06 | Shortcut/focus policy | 生产页面全焦点矩阵与副作用；Core 禁用 `Del/Backspace` | 全局/自定义快捷键、节点删除/编辑 |
 | DEC-PRD-057 | AC-VL-01、AC-VL-07 | AC-LV-10/19 | VideoCard/List | 多状态 DOM/视觉 + 公共数据 | 排序/搜索 |
 | DEC-PRD-058 | AC-VL-02 | AC-ST-05（最近学习事实） | Database query/List controls | 双 adapter + 生产 UI 排序 | 标签/筛选 |
 | DEC-PRD-059 | AC-VL-03 | — | Database query/List controls | 双 adapter + 生产 UI 搜索 | 正文/笔记/标签检索 |
@@ -207,7 +207,7 @@
 
 ## 6. 非 Decision 行的必需路由
 
-| M1-S1 obligation | Proposed AC | Why independent | Required Judge |
+| M1-S1 obligation | Confirmed AC | Why independent | Required Judge |
 | --- | --- | --- | --- |
 | risk 22a App-scope import Owner | AC-AR-05 | 生命周期 Owner 迁移与 progress 类型无同一 Judge | 页面真正卸载/重挂、后台继续、取消、single-flight、同记录更新 |
 | risk 22b discriminated progress contract | AC-AR-06 | payload 合法性与 Controller 生命周期无同一 Judge | 非法 mutation/event 必须失败，全部 producer/consumer exhaustive |
@@ -216,7 +216,7 @@
 
 ## 7. Release queue completeness
 
-| M1-S1 第 5.2 节缺口 | Proposed AC coverage |
+| M1-S1 第 5.2 节缺口 | Confirmed AC coverage |
 | --- | --- |
 | 安装包身份、版本、渠道 | AC-RL-01 |
 | 单一 GPU 增强通用安装包与披露 | AC-RL-02、AC-RL-18 |
@@ -232,29 +232,23 @@
 | risk 22b discriminated progress | AC-AR-06 |
 | Evidence freshness、阻断、回滚、发布后观察与 Release Notes | AC-RL-14、AC-RL-15、AC-RL-16、AC-RL-17、AC-RL-18、AC-RL-19、AC-RL-20 |
 
-## 8. 用户确认门
+## 8. 用户确认与正式迁移记录
 
-请用户整体确认或按 AC ID 修改以下合同：
+用户于 2026-08-02 明确回复“确认”，整体接受第 2 节六项首发细节、50 条 AC、31 条 Launch 映射以及 risk 22a/22b 分开实施。该回复只授权后续控制面迁移；不授权同时修改产品代码、锁定测试、外部 workflow 或签发 Evidence。
 
-1. 接受第 2 节六项首发产品建议；
-2. 接受 20 条 `AC-RL-*` 发布/生命周期合同；
-3. 接受 7 条 `AC-VL-*`、7 条 `AC-SU-*`、6 条 `AC-UX-*` 和 5 条 `AC-PF-*` 产品合同；
-4. 接受 `AC-AR-02..06` 五条架构合同，且 risk 22a/22b 分开实施；
-5. 接受第 5 节 31 条 Launch 决策逐行映射；
-6. 接受确认后的下一控制面 Slice 才把这些 AC 写入 `acceptance-standard.md`/`harness-coverage.md` 并更新 disposition；本轮不直接实现；
-7. 接受 M1 只有在正式 AC 控制面更新并经独立审查后才退出，之后才进入 M2 Hosted replay。
+该确认同时形成一项明确的首发产品修订：`DEC-PRD-053` 在旧 `M14-keyboard-shortcuts.md` 中包含删除快捷键，但更具体的 `AC-SU-07` 将高级树删除保留到 Post-release，并要求 Core 禁用 `Del/Backspace`。因此 decision coverage 的当前意图必须记录这一 supersede，不能宣称旧删除快捷键已由首发 AC 覆盖。`DEC-PRD-012/013` 的约 200ms 横向滑动和边缘渐隐仍属于 Launch，并由 `AC-SU-02/01` 明文接管。
 
-用户未明确回复的 AC 不得视为 Confirmed。若用户整体回复“确认”，下一 Slice 只迁移正式 AC 控制面，不同时写产品代码。
+正式迁移记录：[`harness-migration-2026-08-02-release-ac-control.md`](harness-migration-2026-08-02-release-ac-control.md)。迁移完成后，`acceptance-standard.md` 是正式语义源，`harness-coverage.md` 是当前实现/证据强度源，本文件保留确认与 traceability。
 
-## 9. 本轮完成条件
+## 9. M1-S2 迁移完成条件
 
-- Proposed AC ID 恰好为 20 `AC-RL` + 7 `AC-VL` + 7 `AC-SU` + 6 `AC-UX` + 5 `AC-PF` + 5 `AC-AR`，共 50 条，无重复；
-- 50 条候选 AC 在第 4.5 节各有一个明确 Required Evidence tier；
-- 当前 31 条 Launch decision 在第 5 节各出现一次，无 Post-release/Out-of-scope ID；
-- M1-S1 第 5.2 节 13 类缺口全部有 Proposed AC 去向；
-- 每条 Proposed AC 指定 Owner、Judge/Evidence 和明确范围外；
-- 不修改现有 AC、coverage、product-decision disposition、锁定 Harness、产品源码、workflow 或 Evidence；
+- Confirmed AC ID 恰好为 20 `AC-RL` + 7 `AC-VL` + 7 `AC-SU` + 6 `AC-UX` + 5 `AC-PF` + 5 `AC-AR`，共 50 条，无重复；
+- 50 条 AC 在第 4.5 节各有一个明确 Required Evidence tier，并在正式 acceptance/coverage 中各出现一次；
+- 当前 31 条 Launch decision 在第 5 节和 decision coverage 中各出现一次，无 Post-release/Out-of-scope 泄漏；
+- M1-S1 第 5.2 节 13 类缺口全部有 Confirmed AC 去向；
+- 每条 Confirmed AC 指定 Owner、Judge/Evidence 和明确范围外，当前 `Partial`/`Gap` 不被伪装成完成；
+- 不修改锁定 Harness、产品源码、workflow 或 Evidence；
 - `npm run harness:control`、机械矩阵检查和 `git diff --check` 通过；
-- 独立只读 reviewer 按 Spec 后 Standards 检查范围、原子性、可裁判性、越权和假完成；
+- 独立只读 reviewer 按 Spec 和 Standards 检查范围、原子性、可裁判性、越权和假完成；
 - 审查发现与关闭方式写入 `PROJECT_STATE.md`；
-- 用户确认前不进入正式 AC migration 或 M2。
+- 正式迁移独立审查通过后 M1 才退出，下一动作才进入 M2 Hosted replay。

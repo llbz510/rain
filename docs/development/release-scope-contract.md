@@ -3,26 +3,26 @@
 > 状态：`Active — user-confirmed`
 > 更新日期：2026-08-02
 > 路线图位置：M1-S1 Release Scope Contract
-> 产品授权边界：用户已确认本文件的首发范围，并把公开分发形态修订为单一 GPU 增强通用安装包。本文件仍不修改 AC、产品决策处置或覆盖等级；Launch 行必须在 M1-S2 或后续原子 Slice 中获得 Confirmed AC 后才能实施或宣称完成。
+> 产品授权边界：用户已确认本文件的首发范围，并把公开分发形态修订为单一 GPU 增强通用安装包。M1-S2 的 50 条 AC 已于 2026-08-02 确认并进入正式迁移；Launch 行仍必须按各自 coverage Gap 实现和验收后才能宣称完成。
 
 ## 1. Slice Contract
 
 | 字段 | 本轮合同 |
 | --- | --- |
 | Slice | M1-S1：建立 Core Release Scope Contract |
-| AC / Proposed AC | 产品范围治理缺口；不新增产品行为 AC |
+| AC / Proposed AC | M1-S1 当时的产品范围治理缺口；正式 AC 现由 M1-S2 控制面接管 |
 | User-visible result | 用户得到一份逐条、无遗漏的首发/后续版本范围，并能一次确认或指出要调整的行 |
-| In scope | 当前全部 Confirmed AC 的首发归属；54 条 Proposed 决策逐条归入 Launch 或 Post-release；既有 4 条 Out-of-scope 的首发边界；首发外部能力承诺 |
+| In scope | M1-S1 时全部 Confirmed AC 的首发归属；当时 54 条 Proposed 决策逐条归入 Launch 或 Post-release；既有 4 条 Out-of-scope 的首发边界；首发外部能力承诺 |
 | Out of scope | 新增/确认 Release AC、产品代码、锁定 Harness、外部 workflow、模型/视频调用、安装器和 Evidence |
 | Owner | 本文件拥有已确认的 Release Scope；M1-S2 release acceptance 与后续 `product-decision-coverage.md` 更新拥有正式产品行为语义 |
-| Judge | 54 条当前 Proposed ID 完整、唯一且每条只有一个去向；Launch 行必须进入 M1-S2 AC 队列；用户确认记录；独立只读 Spec/Standards 审查 |
+| Judge | M1-S1 的 54 个源 ID 完整、唯一且每条只有一个去向；31 条 Launch 已进入 M1-S2 Confirmed AC；用户确认记录；独立只读 Spec/Standards 审查 |
 | Evidence tier | 文档控制面 + 独立审查；不产生运行时 Evidence |
 | Allowed writes | 本文件、`control-map.md`、`rain-project-delivery-plan.md`、`agent-first-development-plan.md`、`PROJECT_STATE.md` |
 | Locked files | `harness/`、`src-tauri/tests/`、现有 AC/coverage/product-decision dispositions 和全部产品源码 |
 
 ## 2. 范围状态的精确定义
 
-- **Launch**：进入本次 Core Release。现有 Confirmed AC 继续按原文验收；当前仍为 Proposed 的行必须先在 M1-S2 或后续原子 Slice 中获得 Confirmed AC、Owner、Judge 和所需 Evidence，才能宣称完成。
+- **Launch**：进入本次 Core Release。31 条 Launch 已由 M1-S2 Confirmed AC 冻结产品语义；仍须按 `harness-coverage.md` 中的 Partial/Gap 和 Required Evidence tier 逐条实现，不能从 Confirmed 推断完成。
 - **Post-release**：不阻断本次 Core Release，继续保持 Proposed。首发 UI 不得展示依赖该能力的空按钮、假成功或暗示性承诺。
 - **Out-of-scope**：本次和当前 post-release 队列都不计划实现，但并非永久删除需求。新增 Out-of-scope 必须由用户明确确认。
 
@@ -45,11 +45,11 @@ Rain Core Release 推荐定位为：
 - 首发保留现有文本助手能力，但不承诺图像输入、当前帧解释或包含 Vision 暗示的完整助手视觉合同。
 - risk 22 的 App-scope import Owner 与判别式 progress contract 属于 Launch 的行为保持架构工作，必须分别裁判；它们不授权新的导入行为，也不能合并成一次大重写。
 
-## 4. 54 条 Proposed 决策的逐条推荐
+## 4. M1-S1 时 54 条 Proposed 决策的逐条推荐
 
 ### 4.1 Launch — 31 条
 
-这些行为属于 Core Release 必需闭环，但在获得对应 Confirmed AC 和 Judge 前仍保持 Proposed。
+这些行为属于 Core Release 必需闭环；它们已在 M1-S2 获得 Confirmed AC，但仍须按 coverage 的 Partial/Gap 完成实现和 Judge。
 
 | Decision | 推荐去向 | 首发边界与理由 | 目标工作包 |
 | --- | --- | --- | --- |
@@ -58,7 +58,7 @@ Rain Core Release 推荐定位为：
 | DEC-PRD-013 | Launch | 长目录必须可滚动、定位当前项并有可理解边界 | M6-S1 |
 | DEC-PRD-022 | Launch | AI/随记 Tab 是现有两类核心学习活动的生产入口 | M6-S2 |
 | DEC-PRD-023 | Launch | 首发需要可用布局、比例记忆及字幕/转录分离；逐项拆 Slice | M6-S2、M6-S3 |
-| DEC-PRD-053 | Launch | 核心快捷键及输入焦点门禁是桌面学习效率和安全边界 | M6-S5 |
+| DEC-PRD-053 | Launch | 核心快捷键及输入焦点门禁是桌面学习效率和安全边界；M1-S2 更具体地确认 Core 禁用 `Del/Backspace`，节点删除/编辑保持 Post-release | M6-S5 |
 | DEC-PRD-057 | Launch | ready/non-ready 卡片必须提供完整、可理解的信息层级 | M5-S3 |
 | DEC-PRD-058 | Launch | 最近学习、导入时间和名称三档排序属于基础列表闭环 | M5-S1 |
 | DEC-PRD-059 | Launch | 标题搜索属于基础列表闭环；不扩展标签或正文搜索 | M5-S1 |
@@ -151,7 +151,7 @@ Rain Core Release 推荐定位为：
 
 ### 5.2 M1-S2 必须形成的 Release AC 队列
 
-用户已确认本范围。M1-S2 至少逐条提出并确认：
+用户已确认本范围，且 M1-S2 已逐条确认以下队列；当前实现强度以正式 coverage 为准：
 
 1. Windows x64 安装包身份、版本和发布渠道；
 2. 单一 GPU 增强通用安装包：公开渠道只有一个安装包；其中 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime 共存；约 804 MB 大小披露、硬件要求、无 NVIDIA 环境启动与可见 CPU fallback、Forced CPU/GPU、失败重试，以及普通 CPU-safe/Harness 构建仅作内部验证产物均须由 Confirmed AC 裁判；
@@ -190,16 +190,16 @@ Release Notes 必须把“不承诺”与“当前受控接口存在”分开描
 3. Core Release 不承诺真实站点兼容、云端 ASR、翻译、Vision 和高级树编辑；
 4. GPU 产品化进入 Launch，但公开分发形态由原建议的双安装包修订为一个 GPU 增强通用安装包；CPU-safe 主程序、CPU adapter、Auto 可见回退和 Forced CPU 仍是同一产品的必需组成，不得把“只发 GPU 版本”解释为删除 CPU 路径；
 5. risk 22 两项行为保持架构工作进入 Launch 且分别实施；
-6. 下一步是 M1-S2 按第 5.2 节建立并由用户确认 Release AC，而不是直接开始产品实现。
+6. M1-S2 已按第 5.2 节建立并由用户确认 Release AC；正式控制面迁移经独立审查后，下一步进入 M2 Hosted replay，而不是跳过路线图直接实现任意功能。
 
-本确认冻结的是发布去向与安装包产品边界，不会自动把 31 条 Launch 行从 Proposed 提升为 Confirmed，也不会签发现有 Evidence。后续调整仍须按 Decision ID 或 Release AC 明确记录，并重新经过独立审查。
+本确认最初只冻结发布去向与安装包边界；用户随后在 M1-S2 单独确认 50 条 AC。该确认与正式迁移仍不会签发实现或 Evidence。后续调整须按 Decision ID 或 AC 明确记录，并重新经过独立审查。
 
 ## 8. 本轮完成条件
 
-- 当前 `product-decision-coverage.md` 的 54 条 Proposed ID 在第 4.1/4.2 节的处置表中恰好各出现一次；
+- M1-S1 输入的 54 个源 ID 在第 4.1/4.2 节的处置表中恰好各出现一次；
 - Launch/Post-release/新增 Out-of-scope 数量分别为 31/23/0；
 - 本文件没有修改任何 AC 或 product-decision disposition；
 - `npm run harness:control` 与 `git diff --check` 通过；
 - 独立只读 reviewer 按 Spec 后 Standards 检查完整性、混合决策边界、越权和假完成；
 - 审查发现及关闭方式写入 `PROJECT_STATE.md`；
-- 用户确认记录与单一安装包修订已同步到全部 Active 计划；完成独立审查后，下一唯一动作进入 M1-S2。
+- M1-S1 与 M1-S2 用户确认均已记录；正式 AC migration 完成独立审查后，下一唯一动作进入 M2 Hosted replay。

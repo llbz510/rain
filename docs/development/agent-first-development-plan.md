@@ -13,7 +13,7 @@
 - 本地 `master` 与 `origin/master` 同为 `7e278a6`，开始审查时工作树干净。
 - 本地 `npm run harness:control` 和 `npm run harness:check` 通过。
 - 当前 HEAD 的 GitHub Actions `Clean Windows Harness` run `30739528593` 通过。
-- 验收标准包含 40 条 Confirmed AC；历史产品决策覆盖为 41 条 Confirmed AC 映射、54 条 Proposed、4 条 Out-of-scope。这些数量不是完成百分比。
+- 验收标准包含 90 条 Confirmed AC；历史产品决策覆盖为 72 条 Confirmed AC 映射、23 条 Post-release Proposed、4 条 Out-of-scope。这些数量不是完成百分比；50 条 M1-S2 新 AC 多数仍为 Partial/Gap。
 - 核心本地视频、学习页、Runtime Settings、数据库原子边界和默认 CI 已有 Strong Judge；当前最大的已确认缺口是 `AC-LV-21` 的双环境 Release Evidence。
 - Hosted `Runtime Settings Desktop E2E` 最后一次成功仍是 `9251962` 的 run `30341065896`。后续 `AC-LV-20` 已扩展同一真实桌面脚本，当前 HEAD 尚无 Hosted Windows 重放。
 - 本地存在已忽略的构建缓存、日志和历史 Evidence 运行物；它们不属于源码变更，也不得未经用户批准进行大规模清理。
@@ -121,7 +121,7 @@ npm run harness:control
 
 ### P0 — 重放执行时目标提交的 Hosted Runtime Settings Judge
 
-状态：`Ready after M1-S2 confirmation and explicit dispatch`；M1-S1 已确认，但 M1 尚未退出；不改变产品代码。
+状态：`Next — M1-S2 complete; explicit dispatch required`；不改变产品代码。
 
 - **控制范围**：`AC-HE-05`，并核对后续加入同一脚本的 `AC-LV-20` 重启恢复路径。
 - **原因**：最后一次 Hosted GREEN 是 `9251962`；此后的桌面脚本和 E2E adapter 已有实质扩展。截至本次审查，尚无覆盖这些扩展的 Hosted replay。
@@ -132,7 +132,7 @@ npm run harness:control
 
 ### P1 — 补齐 AC-LV-21 的无 NVIDIA/CUDA Release Evidence
 
-状态：`Confirmed AC / Evidence Gap`；公开产物已选择单一 GPU 增强通用安装包，具体 Release AC、执行目标环境和 Evidence 合同仍须在 M1-S2 明确确认。
+状态：`Confirmed AC / Evidence Gap`；单一 GPU 增强通用安装包及双环境合同由 `AC-RL-02/07/08/18` 控制，执行目标环境和 Release Evidence 仍缺失。
 
 第一个 Slice 只设计并确认可复放 Evidence 合同，不同时处理签名、许可和下载 UX：
 
@@ -142,9 +142,9 @@ npm run harness:control
 - **禁止替代**：debug worker override、只检查 DLL 字符串、fake worker、旧 CUDA Evidence、开发树直接运行。
 - **独立审查**：核对环境确无 NVIDIA/CUDA、安装目标和提交一致、实际 backend 为 CPU、输出来自生产接口。
 
-后续另立 Proposed release Slice，分别决定：
+后续按已确认 `AC-RL-*` 分立 Slice 落实：
 
-1. MSI/NSIS 安装、升级、卸载生命周期；
+1. 单一 NSIS 安装、升级、卸载生命周期；
 2. 代码签名与发布密钥治理；
 3. CUDA runtime 重新分发条款的 release-owner 评审；
 4. 约 804 MB GPU payload 的下载/安装 UX。
@@ -153,38 +153,37 @@ npm run harness:control
 
 ### P2 — 为应用所有缩略图建立删除与孤儿 GC 产品合同
 
-状态：`Proposed behavior / user-confirmed Launch scope`；对应 `DEC-PRD-060`，必须先在 M1-S2 获得 Confirmed AC，不得直接实现。
+状态：`Confirmed AC / implementation Gap`；对应 `DEC-PRD-060` 与 `AC-VL-05/06`，不得把既有数据库级联删除冒充派生文件生命周期完成。
 
-第一个原子 Slice 只起草并请用户确认产品 AC，必须决定：
+第一个原子 Slice 只实现 `AC-VL-05` 的已知 Video 缩略图删除合同；已确认边界包括：
 
-- 数据库删除成功但缩略图删除失败时，用户看到成功、部分成功还是整体失败；
-- 文件删除与 SQLite 事务的顺序、补偿和重试语义；
-- 只允许删除 app-data `thumbnails/` 中由合法 Video ID 推导的路径，如何拒绝任意/用户源路径；
-- orphan keep-set 的事实源、启动时机、失败诊断和是否自动执行；
-- 删除/GC 是否共享一个 Rust 深模块，前端只调用一个有业务含义的 interface。
+- 数据库提交后才删除已知 app-owned 缩略图；文件失败不得伪装成功，必须可见并允许受控重试；
+- 只允许删除 app-data `thumbnails/` 中由合法 Video ID 推导的路径，拒绝任意路径和用户源媒体；
+- 删除与 GC 共享一个 Rust thumbnail lifecycle 深模块，前端不拼接文件路径或补偿步骤；
+- orphan keep-set、并发新建、幂等、部分失败和有界运行留给独立 `AC-VL-06` Slice。
 
-确认后拆成两个实现 Slice：先处理“删除已知 Video 的已知缩略图”，再处理“孤儿扫描与 GC”。每个 Slice 都需要真实隔离文件系统 Judge；内存数据库或组件文案不能证明文件生命周期。
+随后以独立 `AC-VL-06` Slice 处理孤儿扫描与 GC。两个 Slice 都需要真实隔离文件系统 Judge；内存数据库或组件文案不能证明文件生命周期。
 
 ### P3 — 在扩展导入导航前关闭 risk 22 的两个架构债
 
-状态：`User-confirmed Launch architecture boundaries / AC gaps`；当前不是用户可见 P0/P1，必须先在 M1-S2 明确行为保持 AC。
+状态：`Confirmed AC / architecture Gap`；risk 22a/22b 分别由 `AC-AR-05/06` 控制，仍须按两个独立 Slice 实现。
 
 按两个独立 Slice 处理，不合并重写：
 
 1. **App-scope import Owner**：把 `VideoImportController` 生命周期从“隐藏但保持挂载的完整 VideoListPage”提升为显式 App 级 Owner，同时保持 `AC-LV-19/20` 的取消、后台继续、single-flight 和同记录更新。
 2. **Discriminated progress contract**：用一种有阶段判别的完整 payload 替代松散的 `stage/percent/details` 元组，让 producer、Pipeline、Controller 和 UI 不能组合出非法进度。
 
-开始前需确认架构 AC 或清楚声明由哪些既有 AC 保护行为保持。Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败；不得因为文件较大而启动整页/整 Controller 重写。
+Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败；不得因为文件较大而启动整页/整 Controller 重写。
 
 ### P4 — 完成高价值、低外部成本的视频列表闭环
 
-状态：`Proposed behavior / user-confirmed Launch scope`；覆盖 `DEC-PRD-058`、`DEC-PRD-059`、`DEC-PRD-062`，必须先在 M1-S2 逐条定位 Confirmed AC。
+状态：`Confirmed AC / implementation Gap`；`AC-VL-02/03/04` 已冻结排序、搜索和列表组合，仍须逐条实现并裁判。
 
-先审计现有排序、搜索、顶栏和空状态的真实生产行为，再向用户提出一个最小 AC。推荐拆分为：
+先审计现有排序、搜索、顶栏和空状态的真实生产行为，再按已确认 AC 拆分：
 
 1. 查询与排序语义：默认排序、三种排序、标题搜索、清空搜索和 SQLite/内存一致性；
 2. 列表交互：空状态、导入入口、搜索/排序 UI 与非 ready 详情共存；
-3. 精确视觉：只有用户确认视觉合同后才进入，不能由 CSS token 存在替代生产画面 Judge。
+3. 精确视觉：按已确认 `AC-VL-07` 独立执行，不能由 CSS token 存在替代生产画面 Judge。
 
 前两项可由生产 `VideoListPage` + 公共数据库接口 + 双 adapter 行为测试裁判；若涉及真实桌面布局或视觉，则增加截图/DOM/视觉 reviewer，而不是把 jsdom 称为完整视觉 Evidence。
 
@@ -192,7 +191,7 @@ npm run harness:control
 
 状态：`Superseded as a free-choice queue by the Active release scope`。
 
-下列能力仍不得并行铺开。进入 Core Release 的线路先在 M1-S2 形成 Confirmed AC 和证据预算；Post-release 线路不阻断本次发布，也不得由局部实现静默带入：
+下列能力仍不得并行铺开。Core Release 线路已形成 Confirmed AC 和证据预算，必须按原子 Slice 关闭 coverage；Post-release 线路不阻断本次发布，也不得由局部实现静默带入：
 
 | 能力线 | M1-S1 路由 | 主要未决边界 | 预计 Judge 成本 |
 | --- | --- | --- | --- |
@@ -203,7 +202,7 @@ npm run harness:control
 | 精确视觉系统 | Launch | 卡片、目录、字幕、动效、无障碍 | 高，需视觉基准与独立 visual reviewer |
 | 在线真实站点 | Post-release | 站点差异、登录、播放列表、长下载 | 高，需外网与可复放 Evidence |
 
-实际顺序以完整交付路线图和 Active `release-scope-contract.md` 为准。不得按 DEC 编号顺序机械补齐 54 条 Proposed，也不得把 Launch 路由误称为实现授权。
+实际顺序以完整交付路线图和 Active `release-scope-contract.md` 为准。不得按 DEC 编号顺序机械补齐原始 54 条决策，也不得把 Confirmed Launch 合同误称为实现完成。
 
 ## 5. 持续 Harness 改进队列
 
@@ -218,7 +217,7 @@ npm run harness:control
 ## 6. 明确不做
 
 - 不把 `docs/superpowers/plans/` 的历史勾选状态当当前进度。
-- 不一次性“完成 54 条 Proposed”。
+- 不一次性“完成”M1 起始的 54 条决策。
 - 不因 agent-first 名义降低分支保护、完整 Harness、真实 SQLite/Tauri 或 Evidence 要求。
 - 不让 builder 修改 AC/锁定 Harness 来追求 GREEN。
 - 不用三个以上代理处理一个普通小修复；独立 reviewer 是每个已实现 Slice 的最低必需分离。
@@ -227,4 +226,4 @@ npm run harness:control
 
 ## 7. 下一会话唯一推荐动作
 
-只执行 M1-S2 的用户确认门：审阅 Proposed [`release-acceptance-contract.md`](release-acceptance-contract.md) 中 50 条候选 AC、逐项 Evidence tier、31 条 Launch traceability 和六项首发细节建议，并整体确认或按 AC ID 修订。本动作不写产品代码、不触发外部 workflow、不运行安装器或签发 Evidence。用户确认后，下一个原子 Slice 只把获批 AC 迁入 `acceptance-standard.md`/`harness-coverage.md` 并更新 disposition；该迁移经独立审查后 M1 才退出，随后进入 M2 Hosted replay。
+只执行 M2-S1 Hosted Runtime Settings replay：从执行时目标提交显式触发并验证 `Runtime Settings Desktop E2E` workflow，保持无 live key、无模型、无完整视频和不改写 Evidence。该 Slice 只处理 `AC-HE-05` 的目标提交 freshness，不同时开始安装器、GPU 双环境或产品 Gap 实现。

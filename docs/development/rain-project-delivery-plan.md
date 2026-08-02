@@ -13,7 +13,7 @@ Rain 已经拥有可工作的本地视频主链路、学习页核心闭环、Run
 本计划必须同时做到：
 
 1. 明确什么叫“落地”，避免测试通过却没有可安装、可升级、可验证的产品。
-2. 把当前 54 条 Proposed 历史决策全部放入明确的产品工作流或延期决策，不遗漏、不默认实现。
+2. 把 M1 开始时的 54 条 Proposed 历史决策全部放入明确的产品工作流或延期决策，不遗漏、不默认实现。
 3. 把每个里程碑拆成单一 AC/单一缺口的 Slice，使任一新会话都能接续。
 4. 为每个 Slice 指定 Owner、Judge、Evidence 层级和范围外行为。
 5. 每个落实后的 Slice 必须由独立只读 AI 审查，发现关闭前不得交付。
@@ -59,18 +59,18 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 
 当前可靠结论：
 
-- 40 条 AC 为 Confirmed。
-- 历史决策覆盖为 41 条 Confirmed AC 映射、54 条 Proposed、4 条 Out-of-scope。
+- 90 条 AC 为 Confirmed；其中 50 条 M1-S2 AC 的当前覆盖仍全部为 Partial 或 Gap。
+- M1-S2 正式迁移后的历史决策覆盖为 72 条 Confirmed AC 映射、23 条 Post-release Proposed、4 条 Out-of-scope。
 - 本地视频导入、Stage2、学习页、模型管理、Runtime Settings、数据库原子边界和默认 Windows Harness 已形成强控制。
 - `AC-LV-21` 只有 Strong 行为和本机 NVIDIA 短样本，尚无双环境 Release Evidence。
 - Hosted Runtime Settings Judge 的最后一次成功属于旧目标提交；扩展后的当前桌面 Judge需要在执行时目标提交上重新运行。
-- 应用所有缩略图的删除和孤儿 GC 尚无 Active AC。
-- risk 22 的 App-scope Controller Owner 与判别式 progress contract 仍是非阻断架构债。
-- schema 必需形状有真实 Judge，但版本升级兼容、正式安装生命周期、签名和发布许可尚未形成完整发布合同。
+- 应用所有缩略图的删除和孤儿 GC 已由 `AC-VL-05/06` 冻结语义，但实现与真实文件 Judge 仍是 Gap。
+- risk 22 的 App-scope Controller Owner 与判别式 progress contract 已由 `AC-AR-05/06` 冻结，仍是非阻断实现债。
+- schema 升级兼容、正式安装生命周期、签名和发布许可已有 `AC-RL-*` 合同，但实现、外部 Evidence 与人类批准仍缺失。
 
 ## 4. 交付策略：先 Core Release，再扩展完整产品面
 
-为了避免 54 条 Proposed 同时展开，本计划采用两个连续目标。
+为了避免 M1 开始时的 54 条 Proposed 同时展开，本计划采用两个连续目标。
 
 ### 4.1 已确认的 Core Release 范围
 
@@ -96,7 +96,7 @@ M1-S1 已确认本次首次正式落地至少包括：
 - 需要登录态、播放列表或站点专用适配的在线导入；
 - 非首发必需的精确动画和高级导图手势。
 
-精确逐行去向以 Active [`release-scope-contract.md`](release-scope-contract.md) 为准。该确认只冻结发布范围；其中仍为 Proposed 的行为必须在 M1-S2 或后续原子 Slice 获得 Confirmed AC 后才能实施。
+精确逐行去向以 Active [`release-scope-contract.md`](release-scope-contract.md) 为准。31 条 Launch 已获得 M1-S2 Confirmed AC；实现完成度仍只相信 [`harness-coverage.md`](harness-coverage.md) 的 Partial/Gap 与所需 Evidence。
 
 ## 5. 关键路径
 
@@ -124,7 +124,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 | 里程碑 | 目标 | 预计 Slice 数 | 当前状态 | 退出条件 |
 | --- | --- | ---: | --- | --- |
 | M0 | 控制面与 agent-first 会话协议 | 2 | Complete | Active 计划、控制地图、独立审查规则可发现 |
-| M1 | 发布范围冻结与 Release AC | 2–4 | In progress — M1-S1 confirmed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
+| M1 | 发布范围冻结与 Release AC | 2–4 | Complete — M1-S1 + M1-S2 confirmed and reviewed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
 | M2 | 当前目标提交证据重放 | 1–3 | Ready with authorization | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
 | M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | Gap | 双环境安装证据、生命周期、签名和许可全部完成 |
 | M4 | 数据、派生文件、schema 与架构边界 | 5–8 | Partial | 升级兼容、缩略图生命周期、risk 22 和架构政策完成 |
@@ -164,18 +164,18 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 - **状态**：`Complete`。用户已确认 [`release-scope-contract.md`](release-scope-contract.md) 的 31 Launch / 23 Post-release / 0 新增 Out-of-scope，以及现有 4 条 Out-of-scope 不变。
 - **产品决定**：本次发布是 Core Release；不承诺云端 ASR、翻译、Vision、高级树编辑或真实站点兼容。公开分发只有一个 GPU 增强通用安装包，但同一包必须保留 CPU-safe 主程序、CPU adapter 和无 NVIDIA 环境的可见回退。
-- **输出**：Active 发布范围表，每个 Proposed 决策标记 Launch 或 Post-release 并写明理由；Launch 仍不是实现完成或 AC Confirmed。
+- **输出**：Active 发布范围表把当时每个 Proposed 决策标记 Launch 或 Post-release；随后 M1-S2 只把 31 条 Launch 升为 Confirmed AC，仍不代表实现完成。
 - **Owner**：Active `release-scope-contract.md` 拥有已确认的发布去向；M1-S2 release acceptance 接管正式行为语义；`product-decision-coverage.md` 继续只记录当前 disposition。
 - **Judge**：54 条 Proposed 路由恰好为 31 Launch / 23 Post-release 且无重复或遗漏，既有 4 条 Out-of-scope 不变；用户确认和独立只读审查均已记录。
 - **范围外**：本 Slice 不写实现。
 
 ### M1-S2 确认 Release AC
 
-- **状态**：`Proposed — awaiting user confirmation`。
+- **状态**：`Complete — user confirmed; formal control migration passed independent Spec + Standards review`。
 - **输出**：[`release-acceptance-contract.md`](release-acceptance-contract.md) 提出 50 条原子 AC 及逐项 Evidence tier，逐行覆盖 31 条 Launch decision、risk 22a/22b 和 M1-S1 的 13 类发布缺口。
 - **首发细节建议**：`Rain 0.1.0`、Windows x64、GitHub Releases、单一 NSIS `.exe`；默认卸载保留用户数据/模型并永不删除源视频；首次正式发布从冻结的 `c2eb4c4` 预发布 fixture 升级。
-- **确认边界**：用户可整体确认或按 AC ID 修改；确认前不写 `acceptance-standard.md`/`harness-coverage.md`，不更新 disposition，也不实现或运行 Evidence。
-- **确认后下一 Slice**：只迁移正式 AC 控制面并接受独立审查，不同时写产品代码。
+- **确认记录**：用户于 2026-08-02 整体确认；50 条 AC 已迁入 `acceptance-standard.md`/`harness-coverage.md`，31 条 Launch disposition 已更新。
+- **迁移边界**：本 Slice 只更新正式控制面并接受独立审查，未同时写产品代码或运行 Evidence。
 
 ### M1 退出条件
 
@@ -252,7 +252,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 - 公开渠道只提供一个安装包，不再提供独立公开 CPU 安装包；同一包包含 CPU-safe Rain 主程序、CPU adapter 和隔离 CUDA worker/runtime。
 - 发布页与安装器必须显示约 804 MB 大小、硬件要求、无兼容 NVIDIA 环境的 Auto 可见回退、Forced CPU/GPU、失败与重试。
 - 普通 CPU-safe/Harness 构建继续作为 CI 与内部 release-evidence 产物，不得被误写成第二个公开安装包。
-- 该已确认产品边界仍必须在 M1-S2 获得独立 Confirmed AC，不能由构建脚本或现有 overlay 自我证明。
+- 该产品边界已由 `AC-RL-02/07/08/18` 确认；构建脚本或现有 overlay 仍不能自我证明实现与 Release Evidence。
 
 ### M3 退出条件
 
@@ -292,24 +292,24 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 - producer、Pipeline、Controller、UI 和 Tauri event 使用同一合法状态集合。
 - mutation Judge 必须让非法字段组合、倒退百分比和终态后更新失败。
 
-### M4-S6 架构政策确认
+### M4-S6 已确认架构政策的实现
 
-- `DEC-PRD-092`：确认 LLM 请求的前端 OpenAI-compatible ownership。
-- `DEC-PRD-096`：确认本地媒体/缩略图 asset protocol 边界。
-- `DEC-PRD-099`：确认 Zustand 只缓存会话态，SQLite 保存持久事实。
+- `DEC-PRD-092` / `AC-AR-02`：落实 LLM 请求的前端 OpenAI-compatible ownership。
+- `DEC-PRD-096` / `AC-AR-03`：落实本地媒体/缩略图 asset protocol 边界。
+- `DEC-PRD-099` / `AC-AR-04`：落实 Zustand 只缓存会话态，SQLite 保存持久事实。
 - 对高复发违规增加负向 policy；不新增通用 DAL 或浅转发模块。
 
 ### M4 退出条件
 
 - 旧数据库升级、缩略图生命周期和 import Owner 都有真实行为 Judge。
-- 三条架构 Proposed 决策获得用户确认或明确延期。
+- 三条架构决策达到各自 Confirmed AC 的 Strong/Evidence 要求。
 - risk 22 关闭，模块地图和 coverage 同步。
 
 ## 12. M5 — 视频列表与导入任务产品闭环
 
 ### M5-S1 查询与排序语义
 
-- 确认默认排序和最近学习、导入时间、名称三档规则。
+- 实现 `AC-VL-02` 已确认的默认排序和最近学习、导入时间、名称三档规则。
 - 标题搜索大小写、空值、清空和排序组合在 SQLite/内存 adapter 中一致。
 - 不加入标签、正文搜索或未确认筛选。
 
@@ -584,11 +584,11 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 - 没有首轮阻断缺陷，或阻断缺陷已经修复并重新发布。
 - PROJECT_STATE 记录正式版本、tag、产物哈希、证据、已知限制和下一版本候选。
 
-## 19. 54 条 Proposed 决策的完整路由
+## 19. M1 起始 54 条决策的完整路由
 
-下表确保每条 Proposed 决策都进入一个明确里程碑；它不改变其 Proposed 状态。
+下表确保 M1 起始的 54 条 Proposed 决策都进入明确里程碑。M1-S2 已把其中 31 条 Launch 行迁为 Confirmed AC；23 条 Post-release 继续 Proposed。
 
-| 工作簇 | Proposed decisions | 目标里程碑 | M1-S1 已确认去向 |
+| 工作簇 | M1 起始 decision | 目标里程碑 | 当前去向 |
 | --- | --- | --- | --- |
 | 高级树编辑与恢复 | 004, 015, 035, 039, 042, 043, 044, 045, 046, 052, 083, 088, 090 | M8 | 全部 Post-release |
 | 助手与 Vision | 006, 010, 080 | M8 | Proposed 扩展全部 Post-release；现有 Confirmed 文本助手仍在 Launch 基线 |
@@ -596,7 +596,7 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 | 云端 ASR、语言与翻译 | 032, 033, 085, 086 | M7 | 全部 Post-release；本地 ASR 由现有 Confirmed AC 保持 Launch |
 | 视频列表与派生文件 | 057, 058, 059, 060, 062, 077 | M4/M5 | 全部 Launch |
 | 视觉系统 | 063, 064, 065, 066, 067, 068, 069, 070, 071, 073, 074, 075, 076 | M9 | 全部 Launch |
-| 架构边界 | 092, 096, 099 | M4 | 全部 Launch；各自仍须 Confirmed AC |
+| 架构边界 | 092, 096, 099 | M4 | 全部 Launch；分别由 `AC-AR-02/03/04` Confirmed |
 
 总数检查：13 + 3 + 12 + 4 + 6 + 13 + 3 = 54。
 
@@ -676,8 +676,8 @@ Next single action:
 在本计划获得独立审查并提交后，后续会话严格按以下顺序开始：
 
 1. M1-S1：`Complete` — 用户已确认 Core Release 范围、post-release 能力簇和单一 GPU 增强通用安装包边界。
-2. M1-S2：`Proposed matrix complete` — 下一唯一动作是用户确认或按 AC ID 修订 [`release-acceptance-contract.md`](release-acceptance-contract.md)；确认后另起正式 AC migration Slice。
-3. M2-S1：对执行时目标提交重放 Hosted Runtime Settings desktop Judge。
+2. M1-S2：`Complete` — 用户已确认 50 条 AC，正式 acceptance/coverage/disposition 已迁移并通过独立 Spec + Standards 双轴审查。
+3. M2-S1：`Next — explicit dispatch required`；对执行时目标提交重放 Hosted Runtime Settings desktop Judge。
 4. M2-S2：审计 canonical Evidence freshness。
 5. M3-S1：确认正式 release artifact contract。
 6. M3-S2：建立无 NVIDIA/CUDA 干净 Windows CPU Evidence。
