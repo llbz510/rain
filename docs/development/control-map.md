@@ -33,6 +33,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | Runtime Settings 桌面 Judge 失败在哪里诊断 | 系统临时目录 `rain-runtime-settings-e2e-latest-failure/summary.json` | 单份脱敏失败阶段、主错误和 driver logs；正常成功会清除 stale 诊断 |
 | 哪个模块负责什么 | `docs/development/module-map.md` | 模块接口、依赖方向和迁移中的违规点 |
 | 某一次真实运行发生了什么 | 对应 `evidence/rain-real-e2e-*/manifest.json` 及其证据包 | 只证明该次运行，不自动证明当前代码 |
+| 最新 tracked schema v2 Evidence 能否证明当前目标 | `docs/development/canonical-evidence-freshness-2026-08-02.md` | M2-S2 Active 审计；区分历史产物事实、当前 validator 回归价值与精确 RC 重跑要求 |
 
 ## 2. 文档状态
 

@@ -229,4 +229,4 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ## 7. 下一会话唯一推荐动作
 
-只执行 M2-S2 当前 canonical Evidence freshness 审计：核对 schema v2 Evidence 的目标提交、配置指纹和从该提交到当前 `master` 的代码差异，逐条标记仍可引用、仅属历史和 RC 前必须重跑的结论。该 Slice 不运行收费模型、不改写 Evidence，也不同时开始安装器、GPU 双环境或产品 Gap 实现。
+只执行 M3-S1 release artifact contract 确认：把已确认的单一 Windows x64 NSIS、0.1.0、com.rain.app、CPU-safe main + isolated CUDA worker/runtime、commit/version/hash manifest 和单一公开 asset 边界拆成可执行的 artifact contract。不得同时构建安装器、运行 GPU/CPU Evidence 或开始产品 Gap。

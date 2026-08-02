@@ -125,7 +125,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 | --- | --- | ---: | --- | --- |
 | M0 | 控制面与 agent-first 会话协议 | 2 | Complete | Active 计划、控制地图、独立审查规则可发现 |
 | M1 | 发布范围冻结与 Release AC | 2–4 | Complete — M1-S1 + M1-S2 confirmed and reviewed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
-| M2 | 当前目标提交证据重放 | 1–3 | In progress — M2-S1 Complete; M2-S2 Next | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
+| M2 | 当前目标提交证据重放 | 1–3 | Complete — M2-S1 + M2-S2 | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
 | M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | Gap | 双环境安装证据、生命周期、签名和许可全部完成 |
 | M4 | 数据、派生文件、schema 与架构边界 | 5–8 | Partial | 升级兼容、缩略图生命周期、risk 22 和架构政策完成 |
 | M5 | 视频列表与导入任务产品闭环 | 6–9 | Partial | 排序/搜索/空状态/卡片/删除交互达到 Strong + 必要桌面证据；受控 URL 接口不被误写为真实站点承诺 |
@@ -197,7 +197,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M2-S2 当前 canonical Evidence 审计
 
-状态：`Next`。
+状态：`Complete` — audit recorded in `docs/development/canonical-evidence-freshness-2026-08-02.md`; independent Spec/Standards review passed, the current package is historical 408b6db-era Evidence, and exact-RC full rerun remains mandatory.
 
 - 检查 schema v2 Evidence 的目标提交、配置指纹和当前代码差异。
 - 逐条标记哪些结论仍可引用、哪些只属历史、哪些 RC 前必须重跑。
@@ -682,8 +682,8 @@ Next single action:
 1. M1-S1：`Complete` — 用户已确认 Core Release 范围、post-release 能力簇和单一 GPU 增强通用安装包边界。
 2. M1-S2：`Complete` — 用户已确认 50 条 AC，正式 acceptance/coverage/disposition 已迁移并通过独立 Spec + Standards 双轴审查。
 3. M2-S1：`Complete` — workflow_dispatch run `30756311932` 已对精确 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 重放通过。
-4. M2-S2：`Next` — 审计 canonical Evidence freshness。
-5. M3-S1：确认正式 release artifact contract。
+4. M2-S2：`Complete` — schema v2 包保留为 408b6db-era 历史 Evidence；独立 Spec/Standards gate 已通过。
+5. M3-S1：`Next` — 确认正式 release artifact contract。
 6. M3-S2：建立无 NVIDIA/CUDA 干净 Windows CPU Evidence。
 
 完成上述六个工作包所需的原子 Slice 前，不并行启动翻译、Vision 或高级树编辑。M3 之后依赖图允许 M4 和经确认的产品工作流并行，但每个独立 worktree 仍只承载一个可验证 Slice，并在合并前重新基于最新主线运行 Harness 与独立审查。
