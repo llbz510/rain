@@ -686,6 +686,6 @@ Next single action:
 3. M2-S1：`Complete` — workflow_dispatch run `30756311932` 已对精确 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 重放通过。
 4. M2-S2：`Complete` — schema v2 包保留为 408b6db-era 历史 Evidence；独立 Spec/Standards gate 已通过。
 5. M3-S1：`Complete` — [`release-artifact-contract.md`](release-artifact-contract.md) 已定义正式产物合同，并通过独立 Spec + Standards review。
-6. M3-S2：`In progress` — 当前 Slice 建立无 NVIDIA/CUDA CPU Evidence runner；真实干净 Windows 运行和 Evidence 审查仍是下一原子动作。
+6. M3-S2：`In progress` — CPU Evidence runner 已由 PR #29 合并；当前 Slice 修复正式候选的 NSIS generator prerequisite。合并后从精确 `master` 重建同一候选并执行真实干净 Windows Evidence。
 
 完成上述六个工作包所需的原子 Slice 前，不并行启动翻译、Vision 或高级树编辑。M3 之后依赖图允许 M4 和经确认的产品工作流并行，但每个独立 worktree 仍只承载一个可验证 Slice，并在合并前重新基于最新主线运行 Harness 与独立审查。

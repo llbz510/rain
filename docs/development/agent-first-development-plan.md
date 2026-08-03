@@ -229,4 +229,4 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ## 7. 下一会话唯一推荐动作
 
-M3-S2 已开始：当前原子 Slice 只建立 `AC-RL-07` 的 no-NVIDIA CPU release-evidence runner。完成并合并后，下一唯一动作是在干净无 NVIDIA/CUDA Windows 上用正式候选安装包运行该 runner 并审查生成的 Evidence；不得同时运行 NVIDIA Evidence、签名/许可、安装生命周期或真实视频 Evidence。
+M3-S2 已开始：`AC-RL-07` 的 no-NVIDIA CPU release-evidence runner 已由 PR #29 合并。当前原子 Slice 只修复 GPU release overlay，使 `bundle:gpu` 生成合同要求的唯一 NSIS，而不是只生成裸 `rain.exe`。完成并合并后，下一唯一动作是从精确合并后的 `master` 重建正式候选，并在干净无 NVIDIA/CUDA Windows 上运行该 runner、审查生成的 Evidence；不得同时运行 NVIDIA Evidence、签名/许可、安装生命周期或真实视频 Evidence。
