@@ -229,4 +229,4 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ## 7. 下一会话唯一推荐动作
 
-M3-S1 release artifact contract 已由 [`release-artifact-contract.md`](release-artifact-contract.md) 拆成可执行产物合同，完成前仍需独立 Spec + Standards PASS 和合并门禁。通过后，下一唯一动作是 M3-S2：从同一合同出发建立无 NVIDIA/CUDA 干净 Windows CPU Evidence；不得同时运行 NVIDIA Evidence、签名/许可、安装生命周期或真实视频 Evidence。
+M3-S1 release artifact contract 已由 [`release-artifact-contract.md`](release-artifact-contract.md) 拆成可执行产物合同，并通过独立 Spec + Standards review。PR #28 合并后，下一唯一动作是 M3-S2：从同一合同出发建立无 NVIDIA/CUDA 干净 Windows CPU Evidence；不得同时运行 NVIDIA Evidence、签名/许可、安装生命周期或真实视频 Evidence。
