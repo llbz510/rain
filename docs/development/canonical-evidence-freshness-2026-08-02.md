@@ -6,6 +6,8 @@ Audited target: master commit b2fb7113318e389200b9ce07c912d8aebd4474f1
 Canonical evidence: evidence/rain-real-e2e-20260726-195652/
 Repository association commit: 408b6db9b37d753522e153d6b7801fe887500eb1
 
+Support amendment: the 2026-08-03 GPU-required Harness Migration supersedes this audit's future clean no-NVIDIA Release Evidence action. Historical freshness classifications remain unchanged; current target-installer Evidence is required only on a supported NVIDIA release host.
+
 ## Question and boundary
 
 This audit answers which conclusions from the schema v2 canonical Evidence can still be cited, which are historical only, and which must be rerun before a Release Candidate. It does not run a paid model, mutate Evidence, change an AC, change a locked Judge, or claim a current full-pipeline pass.
@@ -29,7 +31,7 @@ The manifest does not contain a Git commit SHA. Commit 408b6db is the first comm
 | Video hash, transcript contents, block contents, counts, recorded configuration, timings and screenshots | Citable historical artifact facts | They are immutable tracked bytes and still pass the current validator | Always name Evidence ID and repository association 408b6db; do not present them as a current-target run |
 | Evidence schema, cross-artifact consistency, secret scan and validator acceptance | Current reusable Judge over the historical artifact | The current validator accepts the unchanged package and its negative tests remain controlled | Keep using it as a regression fixture; this does not refresh product behavior |
 | Exact model fingerprints and the three recorded Verified role records | Historical exact-configuration Evidence | They prove the named configuration completed the 408b6db-era path; the manifest has no current target binding | Rerun on the exact RC before claiming current Release verification |
-| ASR/CUDA execution | Historical only for current product behavior | Rain now uses a CPU-safe main process plus isolated CUDA worker, Auto fallback and forced modes; the old CUDA log does not prove that route | Rerun the current worker path on the exact NVIDIA RC and separately complete clean no-NVIDIA CPU Release Evidence |
+| ASR/CUDA execution | Historical only for current product behavior | Rain now uses a CPU-safe main process plus isolated CUDA worker, Auto fallback and forced modes; the old CUDA log does not prove that route | Rerun Auto/Forced CUDA and Forced CPU through the current worker path on the exact NVIDIA RC |
 | Cancellation, retry and restart event chain | Historical only for current product behavior | ASR lifecycle, persistence seams, import-task ownership and explicit pending recovery changed after 408b6db | Rerun cancellation/retry and explicit pending recovery on the exact RC |
 | ready/database persistence result | Historical only for current product behavior | Schema ownership and SQLite persistence were deeply refactored after 408b6db | Rerun against the current schema and production persistence commands on the exact RC |
 | Study page DOM and screenshot | Historical only for current product behavior | Study loading, playback, navigation, notes, progress and layout behavior changed after 408b6db | Capture current production DOM and screenshots on the exact RC |
@@ -52,10 +54,10 @@ Before RC exit, a new full Evidence run must:
 4. Exercise current capability checks, import runtime gates, isolated CUDA worker selection, cancellation/retry, explicit pending recovery, current SQLite persistence and current StudyInterface DOM/screenshot.
 5. Record input/model/artifact hashes, actual backend/device/worker protocol, configuration fingerprints and sanitized logs.
 6. Pass the current validator and independent Evidence review.
-7. Keep the clean no-NVIDIA CPU installation/sample, installer lifecycle, signing and release publication as separate M3/M10 Release Evidence; the NVIDIA full run cannot substitute for them.
+7. Keep supported-NVIDIA installer behavior, installer lifecycle, signing and release publication as separate M3/M10 Release Evidence; a paid full-video run cannot substitute for them.
 
 A paid Qwen call and long real-video execution require explicit cost/external-state authorization in the later RC Evidence Slice. This audit does not grant that authorization.
 
 ## Result
 
-M2-S2 is complete after independent Spec and Standards PASS. The canonical schema v2 package remains valuable historical Evidence and a current validator regression fixture, but it is not current RC Evidence. M3-S1 release artifact contract confirmation is the unique next action.
+M2-S2 is complete after independent Spec and Standards PASS. The canonical schema v2 package remains valuable historical Evidence and a current validator regression fixture, but it is not current RC Evidence. M3-S1 was the next action at audit time; after the 2026-08-03 support migration, the current next runtime Slice is M3-S3 supported-NVIDIA target-candidate Evidence.

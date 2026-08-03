@@ -1,10 +1,10 @@
 # Rain Core Release Acceptance Contract
 
-> 状态：`Active — user confirmed; formal control migration complete`
-> 更新日期：2026-08-02
+> 状态：`Active — user confirmed; amended by 2026-08-03 Harness Migration`
+> 更新日期：2026-08-03
 > 路线图位置：M1-S2 Confirm Release AC
 > 上游范围：Active [`release-scope-contract.md`](release-scope-contract.md)
-> 授权边界：用户已于 2026-08-02 整体确认本文件。正式语义迁入 `acceptance-standard.md`、当前强度迁入 `harness-coverage.md`；本次确认仍不授权产品实现、外部 workflow、签名或 Evidence。
+> 授权边界：用户已于 2026-08-02 整体确认本文件。2026-08-03 用户确认 Core Release 只支持具备受支持 NVIDIA GPU + 兼容驱动的主机，`AC-RL-07` 因此 Superseded。正式当前语义以 `acceptance-standard.md`、当前强度以 `harness-coverage.md` 为准。
 
 ## 1. Slice Contract
 
@@ -26,16 +26,16 @@
 
 1. 首个公开版本为 `Rain 0.1.0`，只发布 Windows x64。
 2. 用户可见下载物只有一个 NSIS `.exe` 安装器，建议命名 `Rain_0.1.0_x64-setup.exe`，通过 GitHub Releases 发布；不同时发布 MSI、portable、CPU-only 或其他平台安装包。
-3. 同一安装包包含 CPU-safe Rain 主程序、CPU adapter 和隔离 CUDA worker/runtime。无兼容 NVIDIA 环境仍可安装、启动并使用 CPU。
+3. 同一安装包包含 CPU-safe Rain 主程序、CPU adapter 和隔离 CUDA worker/runtime。原“无兼容 NVIDIA 环境仍受支持”合同已于 2026-08-03 退役；Core Release 最低要求为受支持 NVIDIA GPU + 兼容驱动。
 4. 安装器卸载默认只移除程序文件，保留 SQLite、设置、笔记、模型和应用拥有的媒体派生文件，供重装恢复；用户源视频永不由卸载器删除。发布文档提供明确的“彻底清理应用数据”人工步骤，但首发不增加卸载器删除数据复选框。
 5. 首次正式发布必须在已有同 identifier 的安装场景中读取并原子迁移一个冻结的 `c2eb4c4` 数据库/设置 fixture；该 fixture 不冒充不存在的旧正式安装器。后续版本还必须覆盖“上一公开版本 → 当前版本”。升级失败保留可恢复备份并拒绝进入半迁移应用。
 6. P0、P1 和影响 Launch AC/数据/安全/Evidence 真实性的 P2 阻断 RC；普通非阻断 P2 必须进入 Release Notes 或后续队列。
 
 以上六项已经整体确认；后续改变任一项必须按对应 AC 重新走产品确认与 Harness Migration。
 
-## 3. Confirmed Release AC registry — 20 条
+## 3. Original Release AC registry — 20 IDs（19 Confirmed + 1 Superseded）
 
-| Confirmed AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
+| AC | 单一可观察合同 | Owner | Judge / Evidence | 明确范围外 |
 | --- | --- | --- | --- | --- |
 | AC-RL-01 | 公开发布只有一个与目标 commit、`0.1.0`、`com.rain.app` 一致的 Windows x64 NSIS 安装器，GitHub Release 页面可定位其版本与 SHA | Tauri config、release build script、人类 release owner | 干净 checkout 构建；安装器 metadata/文件名/版本/commit manifest 一致；公开页只有一个安装下载物 | MSI、portable、自动更新、非 x64、非 Windows |
 | AC-RL-02 | 单一安装器同时包含 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime；不存在第二个公开 CPU 包 | GPU bundle script、Tauri GPU overlay | 安装后主程序无 CUDA import；worker/runtime/manifest 齐全且不含 `nvcuda.dll`；公开 Release asset 只有该通用安装器 | 把 CUDA feature 加入主程序/默认 Harness；静默按需下载；驱动 DLL 再分发；发布文案由 AC-RL-18 控制 |
@@ -43,8 +43,8 @@
 | AC-RL-04 | 同版本重装幂等：程序文件恢复到目标 manifest，已有设置/SQLite/模型不重复、不丢失，重装后可再次启动 | installer lifecycle owner | `0.1.0 → 0.1.0` 真实重装；前后数据摘要、文件 manifest、启动日志 | 跨版本 schema 升级、手工覆盖程序目录 |
 | AC-RL-05 | `0.1.0` 安装器在发现同 identifier 的冻结 `c2eb4c4` 数据/设置 fixture 时保留并交给版本化迁移；未来版本从上一公开安装版本升级；安装失败不得破坏原数据 | installer upgrade owner、database migration entry | 同 identifier 安装场景 + 冻结数据 fixture；安装失败故障注入；成功后交由 AC-RL-13 裁判迁移内容 | 假造旧正式 installer、任意更古老开发快照、跨主版本降级 |
 | AC-RL-06 | 默认卸载移除程序文件和注册项但保留用户数据/模型/设置/派生文件；重装恢复；用户源视频永不删除；彻底清理步骤在文档中显式列出 | installer uninstall owner、app-data policy | 卸载前后文件/注册/数据库摘要；重装恢复；源视频哈希不变；人工清理文档复核 | 首发卸载器内“删除全部数据”复选框、自动删除用户源媒体 |
-| AC-RL-07 | 无 NVIDIA GPU/驱动/CUDA runtime 的干净 Windows 安装同一候选包后可启动，`Auto` 显示原因并完成真实 CPU 短样本 | `whisper_backend`、universal installer | 隔离 Evidence runner 记录硬件/驱动清单、安装器哈希、主程序 CUDA import 检查、真实短媒体/模型非空单调句子、实际 backend=`cpu` | fake worker、开发 override、只做 DLL 字符串检查 |
-| AC-RL-08 | 受支持 NVIDIA Windows 安装同一候选包后，Auto/Forced CUDA/Forced CPU、取消与失败分类符合 `AC-LV-21` 并完成真实短样本 | `whisper_backend`、CUDA worker、universal installer | 独立 Evidence runner 记录 GPU/驱动、包/模型哈希；Auto 与 Forced CUDA 真实输出；Forced CPU 不启动 worker；取消/崩溃/模型错误 Evidence | 把本机旧 smoke 自动继承给 RC、跨所有 NVIDIA 型号承诺 |
+| AC-RL-07 | `Superseded` — 原无 NVIDIA 安装/启动/CPU 短样本合同由 2026-08-03 用户决定退役 | 无当前 Owner；历史 owner 为 `whisper_backend`、universal installer | `harness-migration-2026-08-03-gpu-required-release.md` 记录替代 AC 与影子 runner 退役 | 删除 CPU adapter、把无 NVIDIA 行为宣传为受支持能力 |
+| AC-RL-08 | 按 `CONTEXT.md` 的生产 worker probe + 模型显存门禁确认受支持 NVIDIA 主机；安装同一候选后，Auto/Forced CUDA/Forced CPU、取消与失败分类符合 `AC-LV-21` 并完成真实短样本 | `whisper_backend`、CUDA worker、universal installer | 独立 Evidence runner 记录 GPU/驱动/总空闲显存/worker 协议/probe/显存门禁/包和模型哈希；只签发该精确配置；随后裁判真实输出、Forced CPU、取消与错误分类 | 把本机旧 smoke 自动继承给 RC、跨所有 NVIDIA 型号或驱动承诺 |
 | AC-RL-09 | 公开 installer 和主可执行文件使用受信任 Windows 代码签名；私钥不进入仓库、日志或 artifact | 人类 release/security owner、签名流水线 | 目标下载物离线/在线签名验证、证书链/时间戳记录、secret scan | AI 自批证书、仓库保存私钥、自签名证书作为正式证明 |
 | AC-RL-10 | 每个 RC/正式下载物同时发布 SHA-256、机器可读 artifact manifest、SBOM 和第三方 notices，且全部来自同一目标 SHA | release manifest generator | 从安装器反算哈希；依赖/资源与 SBOM/notices 对账；目标 SHA/构建环境可定位 | 法律批准、运行时能力 Evidence |
 | AC-RL-11 | CUDA runtime 再分发在公开发布前取得人类 release/legal owner 的书面批准，批准范围与实际 DLL/版本一致 | 人类 release/legal owner | 签署记录、DLL 清单/版本/来源/许可证逐项对账 | AI 或测试代替法律判断；分发 `nvcuda.dll` |
@@ -54,7 +54,7 @@
 | AC-RL-15 | P0/P1 和影响 Launch AC、数据/秘密安全或 Evidence 真实性的 P2 阻断发布；非阻断 P2 必须进入 Release Notes 或已拥有 Owner/Judge 的后续队列 | human release owner、defect policy | 缺陷/审查 fixture 逐级触发阻断或允许；发布决策与例外有签署记录 | 用 skip/ignore 降低严重度、在本 AC 执行回滚 |
 | AC-RL-16 | 正式 tag 只引用已验收 RC；从用户可见 URL 重新下载的安装器与 RC 的签名、SHA-256 和 manifest 完全一致并可干净安装 | release publication owner | 独立 download verifier 完成 tag/commit/RC 对账、公开 URL 二次下载和签名/哈希/安装复验 | 发布后重新构建不同二进制；只核对文件名 |
 | AC-RL-17 | 首轮生产观察只收集用户明确授权的脱敏诊断，不上传视频、转录、API Key 或 SQLite；缺陷绑定版本、AC、Judge 和严重度 | support/privacy owner、diagnostic exporter | 同意流程、诊断 schema/secret scan、撤回/不上传路径、首轮缺陷记录 | 默认遥测、远程采集用户内容、把观察当成 AC Evidence |
-| AC-RL-18 | 下载页与安装器在安装前披露单一安装包、约 804 MB、NVIDIA/模型要求、无兼容环境的 Auto 可见 CPU fallback、Forced CPU/GPU、失败/重试和数据保留 | release/download disclosure owner、installer UI | 下载页 + 安装器真实 UI/文本 Judge，并与 installer manifest、GPU/runtime 行为 Evidence 对账；不得把受控 URL 写成真实站点保证 | Release Notes、营销性扩大承诺、未验证硬件/模型兼容性 |
+| AC-RL-18 | 下载页与安装器在安装前披露单一安装包、约 804 MB、`CONTEXT.md` 的 NVIDIA/驱动/probe/模型显存资格要求、无 NVIDIA 不受支持、有效 M3-S3 签发的精确已验证配置、受支持主机内的 Auto CPU fallback、Forced CPU/GPU、失败/重试和数据保留 | release/download disclosure owner、installer UI | 下载页 + 安装器真实 UI/文本 Judge，并与 installer manifest、生产 probe/显存门禁及 GPU/runtime Evidence 的精确配置对账；不得外推全部 NVIDIA 或把受控 URL 写成真实站点保证 | Release Notes、营销性扩大承诺、未验证硬件/模型兼容性 |
 | AC-RL-19 | 回滚只能到签名、哈希已知且与当前用户数据兼容的已验收版本；不兼容时停止分发并提供备份/恢复指引，不静默降级 schema | human release owner、rollback runbook、database compatibility owner | 已安装 RC 回滚演练；签名/哈希/数据库兼容检查；不兼容 fixture 必须拒绝并保留数据 | 缺陷严重度判定、自动跨主版本降级 |
 | AC-RL-20 | Release Notes 精确列出 Launch、Post-release 与不承诺能力、已验证配置、已知限制、非阻断 P2 和回滚方式，且不得把候选或局部 Evidence 写成已交付事实 | release notes owner、scope contract | Release Notes 与 Active scope、Confirmed AC/coverage、目标 artifact、有效 Evidence、缺陷队列和回滚 runbook 逐项对账 | 下载页/安装器 UI、营销性扩大承诺、未验证硬件/模型兼容性 |
 
@@ -122,7 +122,7 @@
 | `AC-RL-04` | Strong + Release Evidence | 同版本重装前后数据/manifest |
 | `AC-RL-05` | Strong + Release Evidence | 同 identifier 数据 fixture 的安装升级/故障注入 |
 | `AC-RL-06` | Strong + Release Evidence | 卸载/重装/源视频哈希 Evidence |
-| `AC-RL-07` | Strong + Release Evidence | 无 NVIDIA 环境安装、回退、CPU 短样本 |
+| `AC-RL-07` | Retired | 2026-08-03 Harness Migration 退役，不再要求无 NVIDIA Release Evidence |
 | `AC-RL-08` | Strong + Release Evidence | NVIDIA 环境 Auto/Forced/取消/错误短样本 |
 | `AC-RL-09` | Strong + Human approval + Release Evidence | 证书治理记录与目标 artifact 签名验证 |
 | `AC-RL-10` | Strong + Release Evidence | SHA、manifest、SBOM、notices 对账 |
@@ -221,7 +221,7 @@
 | 安装包身份、版本、渠道 | AC-RL-01 |
 | 单一 GPU 增强通用安装包与披露 | AC-RL-02、AC-RL-18 |
 | 干净安装、重装、升级、卸载 | AC-RL-03、AC-RL-04、AC-RL-05、AC-RL-06 |
-| 无 NVIDIA/CUDA | AC-RL-07 |
+| 原无 NVIDIA/CUDA 支持 | `AC-RL-07`（Superseded；由 `AC-RL-08` + `AC-RL-18` 接管当前发布边界） |
 | NVIDIA Auto/Forced CPU/GPU | AC-RL-08 |
 | 签名、SHA、SBOM、notices、CUDA 许可与 artifact 卫生 | AC-RL-09、AC-RL-10、AC-RL-11、AC-RL-12 |
 | schema 升级/回滚/备份 | AC-RL-13 |
@@ -242,8 +242,8 @@
 
 ## 9. M1-S2 迁移完成条件
 
-- Confirmed AC ID 恰好为 20 `AC-RL` + 7 `AC-VL` + 7 `AC-SU` + 6 `AC-UX` + 5 `AC-PF` + 5 `AC-AR`，共 50 条，无重复；
-- 50 条 AC 在第 4.5 节各有一个明确 Required Evidence tier，并在正式 acceptance/coverage 中各出现一次；
+- 2026-08-02 原确认 ID 恰好为 20 `AC-RL` + 7 `AC-VL` + 7 `AC-SU` + 6 `AC-UX` + 5 `AC-PF` + 5 `AC-AR`，共 50 条，无重复；2026-08-03 后 49 条仍 Confirmed，`AC-RL-07` 为 Superseded；
+- 50 个历史 ID 在第 4.5 节各保留一个 Evidence tier 或 Retired 记录，并在正式 acceptance/coverage 中各出现一次；
 - 当前 31 条 Launch decision 在第 5 节和 decision coverage 中各出现一次，无 Post-release/Out-of-scope 泄漏；
 - M1-S1 第 5.2 节 13 类缺口全部有 Confirmed AC 去向；
 - 每条 Confirmed AC 指定 Owner、Judge/Evidence 和明确范围外，当前 `Partial`/`Gap` 不被伪装成完成；

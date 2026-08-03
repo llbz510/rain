@@ -3,6 +3,7 @@
 > 状态：Active
 > 用户确认：2026-07-31
 > 对应验收：`AC-LV-21`
+> 发布支持修订：2026-08-03 用户确认 Core Release 最低要求为受支持 NVIDIA GPU + 兼容驱动；本设计的 CPU adapter/回退行为保留，但无 NVIDIA 发布支持与 Evidence 要求退役。
 
 ## 目标
 
@@ -12,7 +13,7 @@ Rain 的本地 Whisper 默认使用 `Auto`：
 - CUDA 后端不存在、驱动不兼容、显存明显不足或工作进程失败时，`Auto` 必须给出可见原因并安全回退 CPU；
 - 用户可显式选择 `Auto`、`NVIDIA GPU` 或 `CPU`；
 - 显式 `NVIDIA GPU` 不得静默回退；
-- 无 NVIDIA 驱动或 CUDA runtime 的 Windows 机器仍必须能启动 Rain，并能使用 CPU。
+- CPU-safe 主程序和 CPU adapter 必须保留；无 NVIDIA 驱动的 Windows 主机不再属于 Core Release 支持矩阵。
 
 本决定只涉及本地 Whisper 执行后端，不改变模型池、模型文件格式、ASR 结果契约、Stage2、LLM 或在线导入合同。
 
@@ -97,7 +98,7 @@ CUDA runtime 体积和许可必须在正式发布前单独复核。构建成功�
 
 `RAIN_WHISPER_CUDA_WORKER` 只允许 debug 构建使用（真实 E2E 也构建 debug 主程序）；release 产品始终忽略该变量并定位安装资源中的 worker，避免普通环境变量替换发布 worker。
 
-以上只签发本机实现和 NVIDIA smoke，不签发最终 Release Evidence。正式发布前仍必须在目标提交上完成：无 NVIDIA/CUDA 干净 Windows 安装、启动和 CPU 短样本；正式 GPU 安装包的安装/卸载/升级；代码签名；CUDA runtime 可再分发许可复核；安装体积和下载体验决策。没有这些证据时不得把本 AC 写成 `Strong + Evidence`。
+以上只签发本机实现和 NVIDIA smoke，不签发最终 Release Evidence。正式发布前仍必须在目标提交和受支持 NVIDIA Windows 上完成 Auto/Forced CUDA、Forced CPU、取消与错误分类；还须完成正式安装包的安装/卸载/升级、代码签名、CUDA runtime 可再分发许可复核以及安装体积和下载体验决策。没有这些证据时不得把本 AC 写成 `Strong + Evidence`。
 
 ## Judge
 
@@ -113,4 +114,4 @@ CUDA runtime 体积和许可必须在正式发布前单独复核。构建成功�
 - CPU 主程序二进制无 CUDA DLL 依赖；
 - CUDA worker 有精确协议和所需 DLL 清单。
 
-最终 `Strong + Evidence` 还要求目标发布 commit 的真实 Windows/NVIDIA 运行证明，以及无 NVIDIA/CUDA 环境的干净启动与 CPU 短样本证明。
+最终 `Strong + Evidence` 要求目标发布 commit 在受支持 Windows/NVIDIA 主机上的真实 Auto/Forced CUDA、Forced CPU、取消与失败分类证明；不再要求无 NVIDIA/CUDA 环境的发布证明。

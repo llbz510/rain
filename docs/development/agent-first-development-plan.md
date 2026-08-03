@@ -16,8 +16,8 @@ This opening snapshot is a historical plan-creation baseline, not the current pr
 - 本地 `master` 与 `origin/master` 同为 `7e278a6`，开始审查时工作树干净。
 - 本地 `npm run harness:control` 和 `npm run harness:check` 通过。
 - 当前 HEAD 的 GitHub Actions `Clean Windows Harness` run `30739528593` 通过。
-- 验收标准包含 90 条 Confirmed AC；历史产品决策覆盖为 72 条 Confirmed AC 映射、23 条 Post-release Proposed、4 条 Out-of-scope。这些数量不是完成百分比；50 条 M1-S2 新 AC 多数仍为 Partial/Gap。
-- 核心本地视频、学习页、Runtime Settings、数据库原子边界和默认 CI 已有 Strong Judge；当前最大的已确认缺口是 `AC-LV-21` 的双环境 Release Evidence。
+- 验收标准包含 89 条当前 Confirmed AC 和 1 条 Superseded AC；历史产品决策覆盖为 72 条 Confirmed AC 映射、23 条 Post-release Proposed、4 条 Out-of-scope。这些数量不是完成百分比；M1-S2 原 50 条 AC 中 `AC-RL-07` 已退役，其余多数仍为 Partial/Gap。
+- 核心本地视频、学习页、Runtime Settings、数据库原子边界和默认 CI 已有 Strong Judge；当前最大的已确认缺口是 `AC-LV-21` 在受支持 NVIDIA 正式候选上的 Release Evidence。
 - Hosted `Runtime Settings Desktop E2E` 最后一次成功仍是 `9251962` 的 run `30341065896`。后续 `AC-LV-20` 已扩展同一真实桌面脚本，当前 HEAD 尚无 Hosted Windows 重放。
 - 本地存在已忽略的构建缓存、日志和历史 Evidence 运行物；它们不属于源码变更，也不得未经用户批准进行大规模清理。
 
@@ -133,17 +133,17 @@ npm run harness:control
 - **失败处理**：保留既有单份脱敏诊断；下一 Slice 只修一个确定的环境或产品 RED，不放宽断言或用延长超时掩盖未知错误。
 - **独立审查**：只读核对目标 SHA、workflow 命令、完整日志、artifact/秘密边界和 AC 结论；远端 GREEN 不能由本地 GREEN 替代。
 
-### P1 — 补齐 AC-LV-21 的无 NVIDIA/CUDA Release Evidence
+### P1 — 补齐 AC-LV-21 的受支持 NVIDIA Release Evidence
 
-状态：`Confirmed AC / Evidence Gap`；单一 GPU 增强通用安装包及双环境合同由 `AC-RL-02/07/08/18` 控制，执行目标环境和 Release Evidence 仍缺失。
+状态：`Confirmed AC / Evidence Gap`；单一 GPU 增强安装包、受支持 NVIDIA 目标环境和最低要求披露由 `AC-RL-02/08/18` 控制，目标候选 Release Evidence 仍缺失。`AC-RL-07` 已由 2026-08-03 migration 退役。
 
 第一个 Slice 只设计并确认可复放 Evidence 合同，不同时处理签名、许可和下载 UX：
 
-- **结果**：在干净、无 NVIDIA/CUDA 的 Windows 目标上安装目标提交的正式候选包，Rain 成功启动，并通过生产路径完成 CPU 短样本。
-- **Owner**：CPU-safe Rain 主程序、现有 Whisper backend selector、正式安装产物和一个隔离的 release-evidence runner。
-- **Judge**：检查已安装主程序无 CUDA 装载依赖；真实启动；`Auto` 给出可见 CPU 回退原因；使用真实短媒体和受支持小模型得到非空、时间单调句子；失败诊断脱敏且与目标 SHA/产物哈希绑定。
-- **禁止替代**：debug worker override、只检查 DLL 字符串、fake worker、旧 CUDA Evidence、开发树直接运行。
-- **独立审查**：核对环境确无 NVIDIA/CUDA、安装目标和提交一致、实际 backend 为 CPU、输出来自生产接口。
+- **结果**：在按 `CONTEXT.md` 生产 worker probe + 所选模型显存门禁判定合格的 Windows 目标上安装目标提交正式候选包，完成 Auto/Forced CUDA、Forced CPU、取消与失败分类短样本。
+- **Owner**：CPU-safe Rain 主程序、现有 Whisper backend selector、CUDA worker、正式安装产物和隔离 release-evidence runner。
+- **Judge**：检查已安装主程序无 CUDA 装载依赖；记录 GPU 型号、驱动、总/空闲显存、worker 协议、生产 probe、模型显存门禁及包/模型哈希；真实启动；Auto/Forced CUDA 使用 worker 并输出非空单调句子；Forced CPU 不启动 worker；取消、崩溃和模型错误分类正确；诊断脱敏且与目标 SHA/产物哈希绑定。
+- **禁止替代**：debug worker override、fake worker、旧 CUDA Evidence、开发树直接运行、把无 NVIDIA 行为宣传为受支持能力。
+- **独立审查**：按 `CONTEXT.md` 的唯一谓词核对主机资格、安装目标和提交一致、每个实际 backend/输出来自生产接口；只签发记录的精确 GPU/驱动配置，不外推未验证型号。
 
 后续按已确认 `AC-RL-*` 分立 Slice 落实：
 
@@ -229,4 +229,4 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ## 7. 下一会话唯一推荐动作
 
-M3-S2 已开始：`AC-RL-07` 的 no-NVIDIA CPU release-evidence runner 已由 PR #29 合并。当前原子 Slice 只修复 GPU release overlay，使 `bundle:gpu` 生成合同要求的唯一 NSIS，而不是只生成裸 `rain.exe`。完成并合并后，下一唯一动作是从精确合并后的 `master` 重建正式候选，并在干净无 NVIDIA/CUDA Windows 上运行该 runner、审查生成的 Evidence；不得同时运行 NVIDIA Evidence、签名/许可、安装生命周期或真实视频 Evidence。
+当前原子 Slice 是用户明确授权的 GPU-required Harness Migration：退役 `AC-RL-07`、no-NVIDIA runner 和无 NVIDIA 发布承诺，同时保留 CPU adapter/Auto fallback 实现。完成并合并后，下一唯一动作是 M3-S3：从精确合并后的 `master` 重建正式候选，在当前受支持 NVIDIA Windows 上执行 Auto/Forced CUDA、Forced CPU、取消与错误分类 Evidence；不得同时启动签名/许可、安装生命周期或真实视频 Evidence。

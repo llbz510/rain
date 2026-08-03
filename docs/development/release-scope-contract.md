@@ -1,9 +1,9 @@
 # Rain Core Release Scope Contract
 
 > 状态：`Active — user-confirmed`
-> 更新日期：2026-08-02
+> 更新日期：2026-08-03
 > 路线图位置：M1-S1 Release Scope Contract
-> 产品授权边界：用户已确认本文件的首发范围，并把公开分发形态修订为单一 GPU 增强通用安装包。M1-S2 的 50 条 AC 已于 2026-08-02 确认并进入正式迁移；Launch 行仍必须按各自 coverage Gap 实现和验收后才能宣称完成。
+> 产品授权边界：用户已确认本文件的首发范围，并把公开分发形态修订为单一 GPU 增强安装包。M1-S2 的 50 条 AC 于 2026-08-02 进入正式迁移；2026-08-03 用户进一步把受支持 NVIDIA GPU + 兼容驱动设为最低要求并退役 `AC-RL-07`，其余 Launch 行仍必须按各自 coverage Gap 实现和验收后才能宣称完成。
 
 ## 1. Slice Contract
 
@@ -38,8 +38,8 @@ Rain Core Release 推荐定位为：
 
 - 当前全部 40 条 Confirmed AC 进入 Launch 基线，实际范围只以 AC 原文为准。
 - 本地视频、现有受控 URL-to-local-media 接口、模型下载/能力门禁、Runtime Settings、学习页核心、原子持久化和 Harness 属于 Launch。
-- 首发必须补齐正式安装、双硬件环境、schema 升级、派生文件生命周期、签名/许可、RC 和回滚合同；这些在 M1-S2 形成 Release AC。
-- GPU 产品化属于 Launch。用户确认只公开分发一个 **GPU 增强通用安装包**：它同时包含 CPU-safe Rain 主程序、CPU adapter，以及隔离的 CUDA worker/runtime；不再提供独立的公开 CPU 安装包。兼容 NVIDIA 环境下 `Auto` 优先使用 CUDA；没有兼容 NVIDIA/驱动/runtime 时，应用仍须正常启动、显示原因并回退 CPU。Forced CPU/Forced GPU 的现有语义保持不变。发布页和安装器必须提前披露约 804 MB payload、硬件要求、失败/重试和 CPU fallback。普通 CPU-safe/Harness 构建继续作为内部验证产物存在，不作为第二个公开安装包。该边界须在 M1-S2 形成独立 Confirmed AC。
+- 首发必须补齐正式安装、受支持 NVIDIA 环境、schema 升级、派生文件生命周期、签名/许可、RC 和回滚合同；这些在 M1-S2 形成 Release AC，并由后续 migration 维护当前状态。
+- GPU 产品化属于 Launch。用户确认只公开分发一个 **GPU 增强安装包**：它同时包含 CPU-safe Rain 主程序、CPU adapter，以及隔离的 CUDA worker/runtime；不再提供独立的公开 CPU 安装包。Core Release 的最低支持环境是受支持 NVIDIA GPU + 兼容驱动；无 NVIDIA 环境不承诺安装、启动或 CPU 转写支持。受支持主机上 `Auto` 优先使用 CUDA，CPU adapter、Forced CPU/Forced GPU 和可见回退语义保持不变。发布页和安装器必须提前披露约 804 MB payload、最低硬件要求、失败/重试和 CPU fallback。普通 CPU-safe/Harness 构建继续作为内部验证产物存在，不作为第二个公开安装包。
 - 首发不承诺任何真实视频站点兼容性。`AC-LV-17` 只保证受控 HTTP(S) URL 进入 app-owned 本地媒体；真实站点 Evidence 属于 Post-release。
 - 首发只承诺本地 Whisper ASR。云端 ASR、自动翻译、Vision 和高级树编辑进入 Post-release。
 - 首发保留现有文本助手能力，但不承诺图像输入、当前帧解释或包含 Vision 暗示的完整助手视觉合同。
@@ -147,16 +147,16 @@ Rain Core Release 推荐定位为：
 - 学习加载、导航、播放同步、进度、笔记、文本助手和布局会话；
 - 控制面、双构建隔离、干净 Windows Harness、Hosted desktop 入口和数据库架构政策。
 
-这不自动补齐 `AC-LV-21` 双环境 Release Evidence，也不把旧 Hosted run 或旧 canonical Evidence升级为当前 RC 证据。
+这不自动补齐 `AC-LV-21` 在受支持 NVIDIA 正式候选上的 Release Evidence，也不把旧 Hosted run 或旧 canonical Evidence 升级为当前 RC 证据。
 
 ### 5.2 M1-S2 必须形成的 Release AC 队列
 
 用户已确认本范围，且 M1-S2 已逐条确认以下队列；当前实现强度以正式 coverage 为准：
 
 1. Windows x64 安装包身份、版本和发布渠道；
-2. 单一 GPU 增强通用安装包：公开渠道只有一个安装包；其中 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime 共存；约 804 MB 大小披露、硬件要求、无 NVIDIA 环境启动与可见 CPU fallback、Forced CPU/GPU、失败重试，以及普通 CPU-safe/Harness 构建仅作内部验证产物均须由 Confirmed AC 裁判；
+2. 单一 GPU 增强安装包：公开渠道只有一个安装包；其中 CPU-safe 主程序/adapter 与隔离 CUDA worker/runtime 共存；约 804 MB 大小、受支持 NVIDIA GPU/兼容驱动最低要求、无 NVIDIA 不受支持、受支持主机内的 CPU fallback、Forced CPU/GPU、失败重试，以及普通 CPU-safe/Harness 构建仅作内部验证产物均须由当前 Confirmed AC 裁判；
 3. 干净安装、同版本重装、旧版升级、卸载和数据保留/清理；
-4. 无 NVIDIA/CUDA 环境安装、启动、Auto 可见回退和 CPU 短样本；
+4. `Superseded`：原无 NVIDIA/CUDA 环境安装、启动、Auto 可见回退和 CPU 短样本要求由 2026-08-03 migration 退役；
 5. NVIDIA 环境安装、CUDA/Forced CPU/Forced GPU 和取消/失败分类；
 6. 签名、SHA-256、SBOM、第三方 notices 和 CUDA runtime 许可评审；
 7. schema 支持起点、升级事务、失败回滚和备份；
@@ -188,7 +188,7 @@ Release Notes 必须把“不承诺”与“当前受控接口存在”分开描
 1. 31 条 Proposed 进入 Launch、23 条进入 Post-release、0 条新增 Out-of-scope；
 2. 现有 4 条 Out-of-scope 处置不变；
 3. Core Release 不承诺真实站点兼容、云端 ASR、翻译、Vision 和高级树编辑；
-4. GPU 产品化进入 Launch，但公开分发形态由原建议的双安装包修订为一个 GPU 增强通用安装包；CPU-safe 主程序、CPU adapter、Auto 可见回退和 Forced CPU 仍是同一产品的必需组成，不得把“只发 GPU 版本”解释为删除 CPU 路径；
+4. GPU 产品化进入 Launch，公开分发只有一个 GPU 增强安装包；2026-08-03 后最低支持环境要求受支持 NVIDIA GPU + 兼容驱动。CPU-safe 主程序、CPU adapter、Auto 可见回退和 Forced CPU 仍是同一产品的必需组成，但不再外推为无 NVIDIA 发布支持；
 5. risk 22 两项行为保持架构工作进入 Launch 且分别实施；
 6. M1-S2 已按第 5.2 节建立并由用户确认 Release AC；正式控制面迁移经独立审查后，下一步进入 M2 Hosted replay，而不是跳过路线图直接实现任意功能。
 

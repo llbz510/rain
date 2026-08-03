@@ -42,7 +42,7 @@
 | AC-LV-18 | `video-thumbnail-ownership.test.tsx`、`video-list-local-import.test.tsx`、`video-import-local-id.test.ts`、M21、Rust `thumbnail_storage_tests.rs` | Strong（生产卡片 + 页面/Controller 公开路径 + 真实文件副作用） | 生产卡片通过既有 `localMediaUrl` 桥接本地绝对路径、保留 HTTP(S) 并为空值显示占位；未锁定 Controller Judge 证明两个 Controller 共享数据库并发导入时仍在任何缩略图副作用前取得唯一 Video ID，经批准迁移的 M21 仅证明前端只传 `filePath/videoId/timestamp` 并持久化 app-owned 返回路径；生产页面证明缩略图失败以包含底层诊断的非致命状态可见且 Pipeline 继续；Rust 深 module 通过真实媒体和隔离 app-data 证明非空原子提交、源目录不变、非法 ID 拒绝、普通失败无残留、既有最终文件保护，以及操作系统拒绝清理时失败不得被吞掉。在线缩略图本地化、删除/GC、精确视觉和桌面 E2E 不在本行 |
 | AC-LV-19 | `video-import-task-dialog.test.tsx`、`stage2-runner.test.ts`、`pipeline-asr.test.ts`、`video-list-page-recovery.test.tsx`、`video-list-deletion.test.tsx`、M17 | Strong（生产页面/App 生命周期 + 生产 Stage2/Pipeline + 公开 Controller + 真实内存数据库） | 生产页面逐一证明 `pending/processing/failed/cancelled` 卡只打开同一记录详情且关闭无持久化或任务副作用；详情展示 SQLite 状态/阶段/错误和完整实时阶段、百分比、分块与重试事实，显式重试/取消才进入公开 Controller，关闭时后台继续并在完成后刷新。App 往返设置页的 Judge 证明同一前端 Pipeline Owner 没有因页面切换丢失；无内存 Owner 的重启遗留 `processing` 仍调用桌面取消并以精确持久态闭合。Stage2 runner 用真实两块及首块无效响应证明 block/retrying/percent 生产，Pipeline 与页面分别证明公开回调贯通和可见结果，不依赖虚构事件签发。删除竞态 Judge 还证明 URL 媒体发布后取消会把无人接管的 `pending` 收口为可重试 `cancelled/download` 并清除旧实时覆盖。M17 仍只保留局部卡片回调合同；进程重启后的 `pending` 自动恢复另列为当前风险，本行不签发桌面重启自动恢复或精确视觉 |
 | AC-LV-20 | `video-import-task-dialog.test.tsx`、`run-runtime-settings-e2e.ps1` | Strong（生产页面 + 公开 Controller + 真实内存数据库 + 无 Key 真实桌面重启） | 新挂载页面中的 `pending/null` 记录在任何显式动作前保持空闲，打开/关闭详情无副作用；“继续导入”只启动同一 Video ID，重复点击 single-flight，关闭后后台继续并刷新同一行。短桌面 Judge 在隔离真实 SQLite 中首次写入记录、重启证明无自动启动、点击后允许 Runtime Settings 预检确定性失败关闭，并在再次重启后证明同一行结果持久且没有第二条 Video。该结论不签发自动扫描、跨进程 lease/队列、live-key/模型/公网、stale `processing`、缩略图 GC 或 risk 22 重构 |
-| AC-LV-21 | Rust `whisper_backend` tests、`whisper-backend-preference.test.ts`、`runtime-settings-store.test.ts`、`preflight.test.ts`、`video-import-task-dialog.test.tsx`、GPU build/probe/short-sample smoke、CPU binary import inspection | Strong（行为 + 本机 NVIDIA 短样本）；双环境 Release Evidence Gap | 默认/持久化/能力失效/命令快照/UI 可见性，以及 Auto/CUDA/CPU 选择、worker 缺失与资源错误回退、强制 GPU 失败、显存门禁、模型错误和取消不回退均由生产接口或深 module Judge 覆盖。本机 RTX 5060 Ti 已用隔离 worker + large-v3 完成真实短样本，普通 Rain 主程序导入表无 CUDA DLL。仍未在无 NVIDIA/CUDA 的干净 Windows 安装机完成启动 + CPU 短样本，也未签发目标提交的正式安装包、代码签名与 CUDA runtime 分发许可证据；因此不得标 Strong + Evidence |
+| AC-LV-21 | Rust `whisper_backend` tests、`whisper-backend-preference.test.ts`、`runtime-settings-store.test.ts`、`preflight.test.ts`、`video-import-task-dialog.test.tsx`、GPU build/probe/short-sample smoke、CPU binary import inspection | Strong（行为 + 本机 NVIDIA 短样本）；目标 NVIDIA Release Evidence Gap | 默认/持久化/能力失效/命令快照/UI 可见性，以及 Auto/CUDA/CPU 选择、worker 缺失与资源错误回退、强制 GPU 失败、显存门禁、模型错误和取消不回退均由生产接口或深 module Judge 覆盖。本机 RTX 5060 Ti 已用隔离 worker + large-v3 完成真实短样本，普通 Rain 主程序导入表无 CUDA DLL。无 NVIDIA 发布支持已由 2026-08-03 migration 退役；仍未签发目标提交正式安装包上的 NVIDIA Auto/Forced/CPU/取消/错误 Evidence、代码签名与 CUDA runtime 分发许可证据，因此不得标 Strong + Evidence |
 
 ## 3. Whisper 模型下载
 
@@ -110,7 +110,7 @@
 
 ## 7. Core Release 新确认 AC 的当前覆盖
 
-以下 50 条 AC 已于 2026-08-02 确认产品语义，但本次 Harness Migration 不修改测试或产品实现。`Partial`/`Gap` 是正式开发队列，不得因 AC 已 Confirmed 而升级为完成；达到 AC 中指定的 Required Evidence tier 后才可关闭。
+以下 50 条 AC 最初于 2026-08-02 确认产品语义。2026-08-03 Harness Migration 将 `AC-RL-07` 标为 `Superseded`，其余 49 条继续 Confirmed；本行保留退役 AC 的覆盖记录以便审计。`Partial`/`Gap` 是正式开发队列，`Retired` 不是完成或 Evidence 升级。
 
 | AC | 当前裁判 | 等级 | 当前结论与缺口 |
 | --- | --- | --- | --- |
@@ -120,8 +120,8 @@
 | AC-RL-04 | 尚无重装 Judge | Gap | 缺同版本真实重装、程序 manifest 恢复和用户数据摘要 |
 | AC-RL-05 | 尚无安装升级 Judge | Gap | 缺同 identifier 的冻结 `c2eb4c4` fixture 安装场景与安装失败故障注入 |
 | AC-RL-06 | 尚无卸载 Judge | Gap | 缺卸载/重装、注册项、保留数据、源视频哈希和人工彻底清理文档闭环 |
-| AC-RL-07 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests、`scripts/run-no-nvidia-cpu-evidence.ps1` | Partial | 生产选择和 CPU fallback 有行为覆盖；M3-S2a 新增 release-evidence runner 合同，要求从真实 NSIS 安装包安装后记录无 NVIDIA/driver 环境、安装器 SHA、主程序 CUDA import absence、Auto CPU fallback reason 和真实 CPU 短样本；尚未在干净无 NVIDIA/CUDA Windows 上对目标候选包运行并签发 Release Evidence |
-| AC-RL-08 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests、本机 GPU smoke | Partial | Auto/Forced/错误分类及单机 GPU 短样本存在；未绑定目标安装器/SHA，取消/崩溃/模型错误的 RC Evidence 未齐 |
+| AC-RL-07 | `harness-migration-2026-08-03-gpu-required-release.md` | Retired | 用户确认 Core Release 最低要求为受支持 NVIDIA GPU + 兼容驱动；无 NVIDIA 发布合同和 runner 已退役。CPU adapter/Auto fallback 行为仍由 `AC-LV-21` 控制，不构成无 NVIDIA 支持承诺 |
+| AC-RL-08 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests、本机 GPU smoke | Partial | Auto/Forced/错误分类及单机 GPU 短样本存在；`CONTEXT.md` 已把生产 worker probe + 模型显存门禁定义为主机资格 Judge，但尚未在目标安装器/SHA 上记录并签发精确 GPU/驱动配置，取消/崩溃/模型错误的 RC Evidence 未齐 |
 | AC-RL-09 | 尚无正式签名 Judge | Gap | 缺受信任证书、时间戳、目标 installer/主程序验证和人类 security 批准 |
 | AC-RL-10 | `release-artifact-contract.md`；尚无 release manifest/SBOM Judge | Gap | M3-S1 定义了 release artifact manifest 最小字段；缺同一目标 SHA 生成的 installer SHA、机器 manifest、SBOM 与 notices 对账 |
 | AC-RL-11 | 尚无人类 legal 批准 | Gap | CUDA runtime DLL/版本/来源/许可证清单尚未取得书面批准 |
@@ -131,7 +131,7 @@
 | AC-RL-15 | 本迁移的缺陷政策文档 | Gap | 尚无可执行严重度 fixture、发布阻断器和人类签署例外记录 |
 | AC-RL-16 | 尚无公开下载复验 | Gap | 缺正式 tag/RC 对账、用户 URL 二次下载、签名/哈希和干净安装复验 |
 | AC-RL-17 | 尚无生产观察 Judge | Gap | 缺显式授权、脱敏诊断 schema、撤回路径和绑定版本/AC/严重度的首轮记录 |
-| AC-RL-18 | `release-artifact-contract.md`；尚无下载页/安装器 UI Judge | Gap | M3-S1 定义单一安装包、约 804 MB 需按目标 artifact 复测、硬件/CPU fallback/Forced 模式披露对账边界；缺真实安装前披露及与目标 manifest、GPU/runtime Evidence 的对账 |
+| AC-RL-18 | `release-artifact-contract.md`；尚无下载页/安装器 UI Judge | Gap | M3-S1 定义单一安装包、约 804 MB 需按目标 artifact 复测；当前披露合同要求 `CONTEXT.md` 的 NVIDIA/驱动/probe/模型显存资格、无 NVIDIA 不受支持、有效 M3-S3 签发的精确已验证配置及受支持主机内 CPU fallback/Forced 模式；缺真实安装前披露及与目标 manifest、GPU/runtime Evidence 的对账 |
 | AC-RL-19 | 尚无回滚演练 | Gap | 缺签名已知版本的安装回滚、数据库兼容拒绝和数据保留 Evidence |
 | AC-RL-20 | Active scope/AC/coverage 文档 | Partial | 控制面可提供 truth source；尚无目标 Release Notes 与 artifact、有效 Evidence、缺陷和回滚逐项发布对账 |
 | AC-VL-01 | `video-import-task-dialog.test.tsx`、`video-list-page-recovery.test.tsx`、M17 | Partial | 多持久状态、错误和动作已有生产 DOM 行为；规定信息层级与完整视觉 Evidence 未裁判 |

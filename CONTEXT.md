@@ -1,7 +1,7 @@
 # Rain 领域语言
 
 > 状态：Active
-> 更新日期：2026-07-26
+> 更新日期：2026-08-03
 > 作用：让用户、开发者和 AI 用同一组词讨论 Rain，避免同一个词在 PRD、代码和测试里表达不同含义。
 
 ## 模型配置（Model configuration）
@@ -35,3 +35,9 @@
 ## 能力指纹（Capability fingerprint）
 
 能力记录中用于识别“被检查配置 + 角色”的非明文标识。模型名称、接口地址或 Key 变化时，旧指纹不再匹配，旧结果必须失效。
+
+## 受支持发布主机（Supported release host）
+
+Rain Core Release 支持矩阵中的 Windows x64 主机，必须具备受支持的 NVIDIA GPU 和兼容驱动。CPU 后端仍可在该边界内被显式选择或由 `Auto` 回退使用；无 NVIDIA 主机属于不承诺发布支持的环境。
+
+“受支持”不是未限定的 NVIDIA 品牌声明。对一个精确候选包和 Evidence 模型，已安装生产 CUDA worker 的版本化探针必须以 Rain 主程序期望的协议返回 `available=true`、设备名和显存数据，这同时证明该驱动可装载候选包内的 CUDA runtime；所选模型还必须通过 `whisper_backend` 的生产显存门禁（当前为模型文件字节数加 512 MiB headroom）。M3-S3 必须记录 GPU 型号、驱动版本、总/空闲显存、worker 协议、候选包和模型哈希；只有该次签发的精确配置可列为已验证配置，不得外推到未验证 NVIDIA 型号或驱动。探针、协议或显存门禁失败的主机不属于该候选的发布支持矩阵，即使保留的 CPU fallback 仍能用于诊断或故障处理。
