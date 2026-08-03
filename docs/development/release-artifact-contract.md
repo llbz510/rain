@@ -4,16 +4,17 @@
 > 更新日期：2026-08-03
 > 路线图位置：M3-S1 Release artifact contract
 > 授权边界：本文件只确认正式发布产物的可执行合同。它不构建安装器、不签发 Release Evidence、不批准 CUDA runtime 许可、不修改产品代码、不运行 GPU/CPU 短样本、不生成真实视频 Evidence。
+> 支持矩阵修订：2026-08-03 用户确认 Core Release 只支持具备受支持 NVIDIA GPU + 兼容驱动的 Windows x64 主机；`AC-RL-07` 和 M3-S2 no-NVIDIA Judge 已退役。
 
 ## 1. Slice Contract
 
 | 字段 | 本轮合同 |
 | --- | --- |
 | Slice | M3-S1：确认 Release artifact contract |
-| AC / Proposed AC | `AC-RL-01`、`AC-RL-02`、`AC-RL-07`、`AC-RL-08`、`AC-RL-10`、`AC-RL-12`、`AC-RL-18` 的产物边界合同；不改变 AC 原文 |
+| AC / Proposed AC | `AC-RL-01`、`AC-RL-02`、`AC-RL-08`、`AC-RL-10`、`AC-RL-12`、`AC-RL-18` 的当前产物边界合同；`AC-RL-07` 仅保留 Superseded 历史 |
 | User-visible result | 用户和 release reviewer 能看到唯一公开安装包、CPU-safe 主程序、隔离 CUDA payload、manifest、禁止项和后续 Evidence Judge 的精确边界 |
 | In scope | Windows x64 NSIS 产物身份；安装/资源逻辑位置；CUDA worker/runtime payload；模型、数据库和设置位置边界；release artifact manifest 最小 schema；禁止打包项；后续 Judge 的输入输出 |
-| Out of scope | 构建安装器；推送 GitHub Release；安装/重装/升级/卸载 Evidence；无 NVIDIA 或 NVIDIA 短样本；代码签名；SBOM/notices 生成；CUDA legal approval；下载页/安装器 UI 实现 |
+| Out of scope | 构建安装器；推送 GitHub Release；安装/重装/升级/卸载 Evidence；NVIDIA 短样本；代码签名；SBOM/notices 生成；CUDA legal approval；下载页/安装器 UI 实现 |
 | Owner | Tauri release config、GPU bundle script、release manifest generator、artifact hygiene scanner、人类 release/legal owner |
 | Judge | 当前 Slice：`npm run harness:control`、`git diff --check`、独立只读 Spec + Standards review。后续实现 Slice：本文件第 8 节的 artifact/Evidence Judge |
 | Evidence tier | 文档控制面 + 独立审查；不升级任何 coverage 等级 |
@@ -63,7 +64,7 @@ The Core Release installer is a single GPU-enhanced universal package:
 - It includes the isolated CUDA worker and the allowed CUDA runtime DLLs in `whisper-backends/`.
 - It does not include `nvcuda.dll`.
 - It does not require CUDA Toolkit on the end-user machine.
-- `Auto` may use CUDA only through the installed resource worker; without a compatible NVIDIA driver/device/runtime path it must remain able to start and use CPU.
+- `Auto` may use CUDA only through the installed resource worker. CPU-safe startup and fallback remain implementation properties, but the Core Release support matrix requires a supported NVIDIA device and compatible driver.
 - Forced CPU must not start the CUDA worker.
 - Forced GPU must fail closed when the worker/runtime/device is unavailable.
 
@@ -119,7 +120,7 @@ This contract deliberately keeps current coverage conservative:
 
 - `AC-RL-01` remains Gap until a target installer and public asset/SHA Judge exist.
 - `AC-RL-02` remains Partial until the installed artifact proves CPU-safe imports plus exact worker/runtime/manifest contents.
-- `AC-RL-07` remains Partial until the same installer passes a clean no-NVIDIA Windows startup and CPU short-sample Judge.
+- `AC-RL-07` is Superseded by the 2026-08-03 GPU-required release migration; no no-NVIDIA Release Evidence is required.
 - `AC-RL-08` remains Partial until the same installer passes an NVIDIA Windows Auto/Forced/CPU/cancel/error Judge.
 - `AC-RL-10` remains Gap until the artifact manifest, SBOM and notices are generated from the same target SHA.
 - `AC-RL-12` remains Partial until an unpacked-installer hygiene scanner proves the forbidden contents are absent.
@@ -129,16 +130,16 @@ No existing local GPU smoke, historical schema v2 video Evidence or clean Window
 
 ## 8. Required Future Judges
 
-The next implementation Slice, M3-S2, must start from this contract and produce a real target installer or explicitly stop if the artifact generator is not ready. Later Slice contracts must stay separate:
+The next runtime Evidence Slice is M3-S3 on a supported NVIDIA Windows host. Later Slice contracts must stay separate:
 
 | Future Slice | Required Judge |
 | --- | --- |
 | M3 artifact generator | Builds from clean checkout, produces one NSIS installer, generates artifact manifest from bytes and installed files, and verifies main executable CUDA imports are absent |
-| M3-S2 no NVIDIA/CUDA Evidence | `scripts/run-no-nvidia-cpu-evidence.ps1` installs the same candidate on a clean Windows machine without NVIDIA/CUDA, records hardware/driver absence, starts Rain, shows Auto CPU fallback reason, runs CPU short sample and records backend `cpu` |
-| M3-S3 NVIDIA Evidence | Installs the same candidate on supported NVIDIA Windows, proves Auto CUDA, Forced CUDA, Forced CPU no-worker, cancellation and classified worker/model failures |
+| M3-S2 no NVIDIA/CUDA Evidence | `Retired` — `AC-RL-07` and its runner were superseded by the 2026-08-03 GPU-required release migration |
+| M3-S3 NVIDIA Evidence | Uses `CONTEXT.md`'s production probe + model-memory predicate, records and signs only the exact GPU/driver/memory/protocol/package/model configuration, then proves Auto CUDA, Forced CUDA, Forced CPU no-worker, cancellation and classified worker/model failures |
 | M3 lifecycle Slices | Clean install, same-version reinstall, old-fixture upgrade, uninstall and reinstall each record file/user-data manifests separately |
 | M3-S5 signing/SBOM/legal/hygiene | Separately verifies signature, SBOM/notices, human CUDA redistribution approval and forbidden-content scan |
-| M3-S6 disclosure UX | Verifies download page and installer UI text against the artifact manifest and CPU/GPU Evidence |
+| M3-S6 disclosure UX | Verifies download page and installer UI text against the artifact manifest, NVIDIA Evidence, the executable host-eligibility predicate and only the exact configurations signed by valid M3-S3 Evidence |
 
 If any future Judge finds the current Tauri config, resource layout or CUDA file list cannot satisfy this contract, the fix must be a new implementation Slice with its own review. Do not silently weaken this document to match a failing artifact.
 

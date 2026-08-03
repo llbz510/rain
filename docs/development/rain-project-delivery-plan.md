@@ -41,8 +41,7 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 
 - 精确 RC 提交通过本地 `npm run harness:check` 和独立 `Clean Windows Harness`。
 - 目标 RC 提交完成当前 Hosted Runtime Settings Desktop E2E。
-- 正式候选安装包在无 NVIDIA/CUDA 的干净 Windows 上完成安装、启动和 CPU 短样本。
-- GPU 产品包在受支持 NVIDIA Windows 上完成安装、CUDA 短样本和 Auto/Forced GPU/CPU 行为。
+- 正式候选安装包在受支持 NVIDIA Windows 上完成安装、CUDA 短样本和 Auto/Forced GPU/CPU 行为；下载与安装前明确披露 NVIDIA GPU + 兼容驱动最低要求及无 NVIDIA 不受支持。
 - 正式安装、升级、卸载、应用数据保留/清理、签名、产物哈希和许可审查有可定位证据。
 - 当前真实本地视频 canonical E2E 在 RC 提交上重新签发；旧 Evidence 不能自动继承。
 
@@ -59,10 +58,10 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 
 当前可靠结论：
 
-- 90 条 AC 为 Confirmed；其中 50 条 M1-S2 AC 的当前覆盖仍全部为 Partial 或 Gap。
+- 90 条 AC 中 89 条 Confirmed、`AC-RL-07` 一条 Superseded；M1-S2 原 50 条 AC 中其余 49 条当前覆盖仍为 Partial 或 Gap，`AC-RL-07` coverage 为 Retired。
 - M1-S2 正式迁移后的历史决策覆盖为 72 条 Confirmed AC 映射、23 条 Post-release Proposed、4 条 Out-of-scope。
 - 本地视频导入、Stage2、学习页、模型管理、Runtime Settings、数据库原子边界和默认 Windows Harness 已形成强控制。
-- `AC-LV-21` 只有 Strong 行为和本机 NVIDIA 短样本，尚无双环境 Release Evidence。
+- `AC-LV-21` 只有 Strong 行为和本机 NVIDIA 短样本，尚无受支持 NVIDIA 目标候选 Release Evidence。
 - Hosted Runtime Settings Judge 已在 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 上由 workflow_dispatch run `30756311932` 重放通过；该结论只属于此目标提交，后续相关桌面边界变化仍需重新签发。
 - 应用所有缩略图的删除和孤儿 GC 已由 `AC-VL-05/06` 冻结语义，但实现与真实文件 Judge 仍是 Gap。
 - risk 22 的 App-scope Controller Owner 与判别式 progress contract 已由 `AC-AR-05/06` 冻结，仍是非阻断实现债。
@@ -77,7 +76,7 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 M1-S1 已确认本次首次正式落地至少包括：
 
 - 当前所有 Confirmed AC；
-- 证据新鲜度和 `AC-LV-21` 双环境发布证据；
+- 证据新鲜度和 `AC-LV-21` 受支持 NVIDIA 目标候选发布证据；
 - 正式安装、升级、卸载、签名、许可与产物分发；
 - schema 升级兼容和应用所有缩略图生命周期；
 - 视频列表排序、搜索、空状态和生产卡片闭环；
@@ -104,7 +103,7 @@ M1-S1 已确认本次首次正式落地至少包括：
 M0 控制基线
   -> M1 发布范围冻结
   -> M2 当前证据重放
-  -> M3 Release Engineering 与双环境证据
+  -> M3 Release Engineering 与受支持 NVIDIA 证据
   -> M4 数据/文件生命周期与架构深化
   -> M5 视频列表产品闭环
   -> M6 学习页交互闭环
@@ -126,7 +125,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 | M0 | 控制面与 agent-first 会话协议 | 2 | Complete | Active 计划、控制地图、独立审查规则可发现 |
 | M1 | 发布范围冻结与 Release AC | 2–4 | Complete — M1-S1 + M1-S2 confirmed and reviewed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
 | M2 | 当前目标提交证据重放 | 1–3 | Complete — M2-S1 + M2-S2 | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
-| M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | In progress — M3-S1 complete; M3-S2 next | 双环境安装证据、生命周期、签名和许可全部完成 |
+| M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | In progress — M3-S1 complete; M3-S2 superseded; M3-S3 next | 受支持 NVIDIA 安装证据、生命周期、签名和许可全部完成 |
 | M4 | 数据、派生文件、schema 与架构边界 | 5–8 | Partial | 升级兼容、缩略图生命周期、risk 22 和架构政策完成 |
 | M5 | 视频列表与导入任务产品闭环 | 6–9 | Partial | 排序/搜索/空状态/卡片/删除交互达到 Strong + 必要桌面证据；受控 URL 接口不被误写为真实站点承诺 |
 | M6 | 学习页基础产品闭环 | 5–9 | Partial | 布局、目录、字幕、右侧面板、快捷键和会话稳定性完成 |
@@ -163,7 +162,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 ### M1-S1 建立 Release Scope Contract
 
 - **状态**：`Complete`。用户已确认 [`release-scope-contract.md`](release-scope-contract.md) 的 31 Launch / 23 Post-release / 0 新增 Out-of-scope，以及现有 4 条 Out-of-scope 不变。
-- **产品决定**：本次发布是 Core Release；不承诺云端 ASR、翻译、Vision、高级树编辑或真实站点兼容。公开分发只有一个 GPU 增强通用安装包，但同一包必须保留 CPU-safe 主程序、CPU adapter 和无 NVIDIA 环境的可见回退。
+- **产品决定**：本次发布是 Core Release；不承诺云端 ASR、翻译、Vision、高级树编辑或真实站点兼容。公开分发只有一个 GPU 增强安装包，最低支持环境为受支持 NVIDIA GPU + 兼容驱动；同一包仍保留 CPU-safe 主程序、CPU adapter 和受支持主机内的可见回退，但无 NVIDIA 环境不受支持。
 - **输出**：Active 发布范围表把当时每个 Proposed 决策标记 Launch 或 Post-release；随后 M1-S2 只把 31 条 Launch 升为 Confirmed AC，仍不代表实现完成。
 - **Owner**：Active `release-scope-contract.md` 拥有已确认的发布去向；M1-S2 release acceptance 接管正式行为语义；`product-decision-coverage.md` 继续只记录当前 disposition。
 - **Judge**：54 条 Proposed 路由恰好为 31 Launch / 23 Post-release 且无重复或遗漏，既有 4 条 Out-of-scope 不变；用户确认和独立只读审查均已记录。
@@ -209,7 +208,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 - RC 前必须重跑的真实 Evidence 清单明确。
 - reviewer 独立核对目标 SHA、日志、诊断与证据边界。
 
-## 10. M3 — Release Engineering 与双环境证据
+## 10. M3 — Release Engineering 与受支持 NVIDIA 证据
 
 ### M3-S1 Release artifact contract
 
@@ -221,13 +220,12 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M3-S2 无 NVIDIA/CUDA 干净 Windows Evidence
 
-- 从正式候选安装包安装，而不是从开发树运行。
-- 证明应用启动、Runtime Settings 可用、Auto 显示回退原因、CPU 短样本输出非空且时间单调。
-- 记录 OS、安装包哈希、目标提交、模型哈希、backend/device 和运行日志。
+状态：`Superseded` — 用户于 2026-08-03 确认 Core Release 最低支持环境为受支持 NVIDIA GPU + 兼容驱动；`AC-RL-07`、no-NVIDIA runner 和本 Slice 的发布阻断作用由 Harness Migration 退役。CPU adapter 与 Auto fallback 实现保留。
 
 ### M3-S3 NVIDIA Windows Evidence
 
-- 安装与无 NVIDIA 环境相同的正式 GPU 增强通用候选包。
+- 安装精确目标提交的正式 GPU 增强候选包。
+- 按 `CONTEXT.md` 的唯一资格谓词记录生产 worker probe、模型显存门禁、GPU/驱动/显存/协议和包/模型哈希；只签发该精确配置，不外推未验证型号。
 - 证明 Auto 使用 CUDA、Forced CUDA 成功、Forced CPU 不启动 worker。
 - 验证取消、worker 崩溃分类、可见回退与模型错误不跨后端重跑。
 
@@ -396,7 +394,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M7-S1 本地 ASR 发布缺口与 Post-release 云 ASR 队列
 
-- Core Release 只支持本地 Whisper；完成现有本地 ASR 的 `AC-LV-21` 双环境 Release Evidence 和对应 Release AC。
+- Core Release 只支持本地 Whisper；完成现有本地 ASR 的 `AC-LV-21` 受支持 NVIDIA 目标候选 Release Evidence 和对应 Release AC。
 - 云端短/长音频档已确认 Post-release，不得进入首发 UI、配置承诺或 RC Evidence。
 - 若未来通过显式 scope amendment 提升云端档，每档都必须归一为 Sentence、句级时间戳、取消和失败分类；云端长音频需要真实供应商 Evidence，连接成功不算能力完成。
 
@@ -529,8 +527,7 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 
 | 环境 | 必须证明 |
 | --- | --- |
-| 干净 Windows、无 NVIDIA/CUDA | 安装同一个 GPU 增强通用候选包、启动、Auto 可见回退、CPU 短样本、卸载 |
-| 支持 NVIDIA Windows | 安装同一个 GPU 增强通用候选包、CUDA probe、GPU 短样本、Forced CPU/GPU、卸载 |
+| 支持 NVIDIA Windows | 安装同一个 GPU 增强候选包、CUDA probe、GPU 短样本、Forced CPU/GPU、取消/失败分类、卸载 |
 | 旧版升级环境 | schema/设置/视频/笔记/模型保留，失败可回滚 |
 | 重装环境 | 数据保留策略和安装器幂等 |
 
@@ -564,7 +561,7 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 
 - 从已验收 RC 创建正式 tag，不重建不同来源的未知二进制。
 - 上传签名安装包、SHA-256、第三方 notices、SBOM 和 release notes。
-- 发布页明确只有一个 GPU 增强通用安装包，并说明其中的 CPU/GPU 行为、硬件要求、Auto 回退、模型下载大小和已验证配置。
+- 发布页明确只有一个 GPU 增强安装包，受支持 NVIDIA GPU + 兼容驱动是最低要求，无 NVIDIA 不受支持；同时说明受支持主机内的 CPU/GPU 行为、Auto 回退、模型下载大小和已验证配置。
 
 ### M11-S2 下载后独立验证
 
@@ -623,7 +620,7 @@ npm run validate:evidence -- -EvidenceManifest $rcEvidenceManifest
 | TypeScript/file-scoped Rust format | 修改对应语言时 |
 | `harness:check` | 每个代码交付 Slice |
 | Hosted desktop | 桌面/跨进程边界或 Evidence freshness 要求时 |
-| 双环境安装 | release/Whisper backend/安装器变更时 |
+| 受支持 NVIDIA 安装 | release/Whisper backend/安装器变更时 |
 | live model / real video / external site | AC 明确需要且用户授权成本与外部状态时 |
 
 ### 20.3 独立审查
@@ -681,11 +678,11 @@ Next single action:
 
 在本计划获得独立审查并提交后，后续会话严格按以下顺序开始：
 
-1. M1-S1：`Complete` — 用户已确认 Core Release 范围、post-release 能力簇和单一 GPU 增强通用安装包边界。
-2. M1-S2：`Complete` — 用户已确认 50 条 AC，正式 acceptance/coverage/disposition 已迁移并通过独立 Spec + Standards 双轴审查。
+1. M1-S1：`Complete` — 用户已确认 Core Release 范围、post-release 能力簇和单一 GPU 增强安装包边界；2026-08-03 增补受支持 NVIDIA 最低要求。
+2. M1-S2：`Complete` — 用户原确认 50 条 AC；2026-08-03 后 49 条仍 Confirmed，`AC-RL-07` Superseded，正式 acceptance/coverage/disposition 由 Harness Migration 维护。
 3. M2-S1：`Complete` — workflow_dispatch run `30756311932` 已对精确 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 重放通过。
 4. M2-S2：`Complete` — schema v2 包保留为 408b6db-era 历史 Evidence；独立 Spec/Standards gate 已通过。
 5. M3-S1：`Complete` — [`release-artifact-contract.md`](release-artifact-contract.md) 已定义正式产物合同，并通过独立 Spec + Standards review。
-6. M3-S2：`In progress` — CPU Evidence runner 已由 PR #29 合并；当前 Slice 修复正式候选的 NSIS generator prerequisite。合并后从精确 `master` 重建同一候选并执行真实干净 Windows Evidence。
+6. M3-S2：`Superseded` — PR #29 runner 与 PR #30 NSIS prerequisite 保留历史；2026-08-03 GPU-required migration 退役无 NVIDIA 发布 Evidence。下一原子动作是 M3-S3 受支持 NVIDIA Windows Evidence。
 
 完成上述六个工作包所需的原子 Slice 前，不并行启动翻译、Vision 或高级树编辑。M3 之后依赖图允许 M4 和经确认的产品工作流并行，但每个独立 worktree 仍只承载一个可验证 Slice，并在合并前重新基于最新主线运行 Harness 与独立审查。

@@ -15,8 +15,8 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 当前状态、最近验证和已知风险 |
 | 跨会话开发切片按什么流程和优先级执行 | `docs/development/agent-first-development-plan.md` | Active 会话/交付协议与候选队列；不新增产品语义，Proposed 切片仍需用户确认 |
 | 从当前状态到正式发布按什么里程碑推进 | `docs/development/rain-project-delivery-plan.md` | Active 项目交付路线、Release 完成定义、全部 Proposed 决策路由和 RC/上线门禁；不自动授权新行为 |
-| 本次 Core Release 包含什么 | `docs/development/release-scope-contract.md` | Active、用户已确认的 M1-S1 范围合同；记录 Launch/Post-release 去向与单一 GPU 增强通用安装包边界，Launch 行仍须取得 Confirmed AC |
-| 本次 Core Release 用什么 AC 验收 | `docs/development/acceptance-standard.md` | 50 条 M1-S2 合同已 Confirmed 并迁入正式标准；`release-acceptance-contract.md` 保留用户确认、Evidence tier 和 31 条 Launch traceability |
+| 本次 Core Release 包含什么 | `docs/development/release-scope-contract.md` | Active、用户已确认并于 2026-08-03 修订的范围合同；记录 Launch/Post-release 去向、单一 GPU 增强安装包和受支持 NVIDIA 最低要求 |
+| 本次 Core Release 用什么 AC 验收 | `docs/development/acceptance-standard.md` | M1-S2 原确认 50 条合同；2026-08-03 Harness Migration 后 49 条仍 Confirmed，`AC-RL-07` 已 Superseded；`release-acceptance-contract.md` 保留确认历史和 31 条 Launch traceability |
 | 正式发布产物必须长什么样 | `docs/development/release-artifact-contract.md` | Active M3-S1 产物合同；定义唯一 NSIS、版本/identifier、CPU-safe 主程序、隔离 CUDA worker/runtime、manifest、禁止项和后续 Release Evidence Judge；不代表安装器已生成 |
 | 用户希望产品做什么 | 根目录 `PRD.md` 和对应 `M*.md` | 已确认产品意图；不自动代表代码已经实现 |
 | 99 条历史产品决策当前由什么控制 | `docs/development/product-decision-coverage.md` | 72 条映射 Confirmed AC、23 条 Post-release Proposed、4 条 Out-of-scope；不是完成百分比 |
@@ -34,7 +34,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | Runtime Settings 桌面 Judge 失败在哪里诊断 | 系统临时目录 `rain-runtime-settings-e2e-latest-failure/summary.json` | 单份脱敏失败阶段、主错误和 driver logs；正常成功会清除 stale 诊断 |
 | 哪个模块负责什么 | `docs/development/module-map.md` | 模块接口、依赖方向和迁移中的违规点 |
 | 某一次真实运行发生了什么 | 对应 `evidence/rain-real-e2e-*/manifest.json` 及其证据包 | 只证明该次运行，不自动证明当前代码 |
-| 最新 tracked schema v2 Evidence 能否证明当前目标 | `docs/development/canonical-evidence-freshness-2026-08-02.md` | M2-S2 Active 审计；区分历史产物事实、当前 validator 回归价值与精确 RC 重跑要求 |
+| 最新 tracked schema v2 Evidence 能否证明当前目标 | `docs/development/canonical-evidence-freshness-2026-08-02.md` | M2-S2 Active 审计；区分历史产物事实、当前 validator 回归价值与精确 RC 重跑要求；未来 no-NVIDIA 动作已由 2026-08-03 migration 修订 |
 
 ## 2. 文档状态
 
@@ -164,3 +164,11 @@ Rain 正式支持模型池中的多种配置。模型是否可用于某个角色
 Rain 的本地 Whisper 默认偏好为 `Auto`。受支持的 NVIDIA CUDA 后端通过运行时探针时优先使用 GPU；CUDA worker 缺失、驱动不兼容、显存明显不足或后端工作进程失败时，`Auto` 必须给出可见原因并安全回退 CPU。用户可以显式选择 `Auto`、`NVIDIA GPU` 或 `CPU`；显式 GPU 不得静默回退。
 
 Rain 主程序必须保持 CPU 安全且不得在装载时依赖 CUDA DLL。CUDA 推理由独立、版本化协议的 worker adapter 承担，CPU adapter 留在主进程；用户取消必须终止当前 adapter 的工作且不得触发另一个后端重跑。该决定以 `AC-LV-21` 和 `docs/superpowers/specs/2026-07-31-whisper-gpu-auto-fallback-design.md` 为准，覆盖 M20 决策94中“CPU/GPU 完全交给 binding”以及“不使用 CLI 子进程”的旧实现取舍，但不改变 `whisper-rs`、模型文件、Sentence 输出或 Stage2 合同。
+
+### DEC-008 Core Release 只支持具备 NVIDIA 的发布主机
+
+状态：`Confirmed`（用户于 2026-08-03 确认）
+
+Rain Core Release 的最低支持环境是 Windows x64、受支持的 NVIDIA GPU 和兼容驱动。`CONTEXT.md` 的“受支持发布主机”定义是唯一资格谓词：精确候选的生产 worker 协议探针和所选模型显存门禁必须通过，M3-S3 只签发实际记录的 GPU/驱动配置。无 NVIDIA GPU/驱动的机器不再属于发布支持矩阵，也不再要求签发无 NVIDIA 安装、启动或 CPU 短样本 Release Evidence。
+
+本决定只修订发布支持边界：保留 CPU-safe 主程序、CPU adapter、显式 CPU 模式、`Auto` 可见回退、Forced GPU 失败关闭和普通无 CUDA Harness 构建。它使 `AC-RL-07` Superseded，并由 `AC-RL-08` 负责受支持 NVIDIA 候选包 Evidence、`AC-RL-18` 负责最低硬件要求披露；不得把“GPU required”解释为把 CUDA 链接回 Rain 主进程。

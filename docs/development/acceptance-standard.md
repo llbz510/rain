@@ -16,6 +16,7 @@
 AC 状态：
 
 - `Confirmed`：已有明确产品依据，当前生效。
+- `Superseded`：曾经生效，但已由后续用户决定和 Harness Migration 退役；只保留历史可追溯性。
 - `Provisional`：根据当前实现和证据整理，等待用户确认产品语义。
 - `Decision needed`：存在冲突，不得据此扩展功能。
 
@@ -283,11 +284,11 @@ Runtime Settings 首次加载成功前，Store 的公开设置动作必须拒绝
 
 Rain 主程序和 CPU adapter 不得在装载时依赖 CUDA DLL。CUDA 推理由独立 worker adapter 承担。`auto` 在 CUDA 探针通过且显存没有明显不足时使用 CUDA；CUDA worker 不存在、驱动/runtime 不兼容、显存不足或 worker 启动/协议/崩溃失败时，必须保留可见回退原因并改用 CPU。显式 `cuda` 遇到同类问题必须失败关闭，不得静默回退；显式 `cpu` 不得启动 CUDA worker。确定的模型文件错误和用户取消均不得触发另一后端重跑。
 
-运行时自检和设置页必须显示用户偏好、实际选择的后端、CUDA 设备或不可用原因。导入详情必须能观察实际 ASR 后端以及 Auto 回退原因。缺少 NVIDIA GPU、驱动或 CUDA runtime 时，Rain 仍必须能启动并完成 CPU 能力检查。
+运行时自检和设置页必须显示用户偏好、实际选择的后端、CUDA 设备或不可用原因。导入详情必须能观察实际 ASR 后端以及 Auto 回退原因。CPU-safe 主程序和 CPU adapter 继续作为内部架构与受支持 NVIDIA 主机上的运行模式存在；本 AC 不承诺无 NVIDIA 主机属于发布支持范围。
 
 实现归属：`src-tauri/src/whisper_backend.rs` 拥有选择、探针、worker 协议、错误分类、取消和回退；`src-tauri/src/bin/rain-whisper-cuda.rs` 是 CUDA adapter；既有 `whisper.rs` 是 CPU adapter；`asr_execution.rs`、Runtime Settings、预检和设置/导入 UI 只调用该深 module 的 interface。GPU 产品构建由 `scripts/build-whisper-cuda-worker.ps1` 和独立 Tauri GPU 配置拥有，不得把 CUDA feature 设为默认 Rust/Harness feature。
 
-裁判：Rust `whisper_backend` module tests 通过 fake worker adapter 证明选择、回退、强制 GPU 失败、强制 CPU、显存门禁和取消；`src/__tests__/whisper-backend-preference.test.ts`、`runtime-settings-store.test.ts`、`preflight.test.ts`、`pipeline-asr.test.ts` 和设置/导入生产 UI 测试证明偏好持久化、能力失效、命令快照和可见状态。构建 Judge 必须检查 CPU Rain 二进制没有 CUDA DLL import，CUDA worker 具备精确协议和 runtime 依赖。`Strong + Evidence` 还要求目标提交在真实 NVIDIA Windows 上完成 CUDA 短样本/主链路，并在无 CUDA 环境完成干净启动和 CPU 短样本；旧 CUDA Evidence 不自动签发本 AC。
+裁判：Rust `whisper_backend` module tests 通过 fake worker adapter 证明选择、回退、强制 GPU 失败、强制 CPU、显存门禁和取消；`src/__tests__/whisper-backend-preference.test.ts`、`runtime-settings-store.test.ts`、`preflight.test.ts`、`pipeline-asr.test.ts` 和设置/导入生产 UI 测试证明偏好持久化、能力失效、命令快照和可见状态。构建 Judge 必须检查 CPU Rain 二进制没有 CUDA DLL import，CUDA worker 具备精确协议和 runtime 依赖。`Strong + Evidence` 还要求目标提交在受支持 NVIDIA Windows 上完成 CUDA 短样本/主链路、Forced CPU 和失败分类；旧 CUDA Evidence 不自动签发本 AC。
 
 ## 3. Whisper 模型下载
 
@@ -589,25 +590,27 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 ### AC-RL-07
 
-状态：`Confirmed`
+状态：`Superseded`
 
-无 NVIDIA GPU/驱动/CUDA runtime 的干净 Windows 安装同一候选包后可启动，`Auto` 显示原因并完成真实 CPU 短样本
+历史合同：无 NVIDIA GPU/驱动/CUDA runtime 的干净 Windows 安装同一候选包后可启动，`Auto` 显示原因并完成真实 CPU 短样本。
 
-实现归属：`whisper_backend`、universal installer。
+2026-08-03 用户确认 Core Release 只支持具备受支持 NVIDIA GPU 与兼容驱动的 Windows x64 主机，本合同及其 Release Evidence 要求退役。当前发布边界由 `AC-RL-08` 的 NVIDIA 候选包 Evidence 与 `AC-RL-18` 的最低硬件披露接管；CPU adapter 和 `AC-LV-21` 的运行时回退实现不因此删除。
 
-裁判：隔离 Evidence runner 记录硬件/驱动清单、安装器哈希、主程序 CUDA import 检查、真实短媒体/模型非空单调句子、实际 backend=`cpu`。Required Evidence tier：Strong + Release Evidence。
+实现归属：无当前实现 Owner；历史 owner 为 `whisper_backend`、universal installer。
 
-明确范围外：fake worker、开发 override、只做 DLL 字符串检查。
+裁判：`harness-migration-2026-08-03-gpu-required-release.md` 记录旧合同、替代 AC、影子 runner 退役和验证；不再要求无 NVIDIA Release Evidence。
+
+明确范围外：删除 CPU adapter、把 CUDA 链接回 Rain 主进程、把无 NVIDIA 行为宣传为受支持能力。
 
 ### AC-RL-08
 
 状态：`Confirmed`
 
-受支持 NVIDIA Windows 安装同一候选包后，Auto/Forced CUDA/Forced CPU、取消与失败分类符合 `AC-LV-21` 并完成真实短样本
+受支持 NVIDIA Windows 安装同一候选包后，按 `CONTEXT.md` 的生产 worker 探针与所选模型显存门禁确认主机资格；随后 Auto/Forced CUDA/Forced CPU、取消与失败分类符合 `AC-LV-21` 并完成真实短样本
 
 实现归属：`whisper_backend`、CUDA worker、universal installer。
 
-裁判：独立 Evidence runner 记录 GPU/驱动、包/模型哈希；Auto 与 Forced CUDA 真实输出；Forced CPU 不启动 worker；取消/崩溃/模型错误 Evidence。Required Evidence tier：Strong + Release Evidence。
+裁判：独立 Evidence runner 记录 GPU 型号、驱动版本、总/空闲显存、worker 协议、生产 probe 结果、包/模型哈希和显存门禁结果；Auto 与 Forced CUDA 真实输出；Forced CPU 不启动 worker；取消/崩溃/模型错误 Evidence。只有记录的精确 GPU/驱动配置获得签发。Required Evidence tier：Strong + Release Evidence。
 
 明确范围外：把本机旧 smoke 自动继承给 RC、跨所有 NVIDIA 型号承诺。
 
@@ -723,11 +726,11 @@ P0/P1 和影响 Launch AC、数据/秘密安全或 Evidence 真实性的 P2 阻�
 
 状态：`Confirmed`
 
-下载页与安装器在安装前披露单一安装包、约 804 MB、NVIDIA/模型要求、无兼容环境的 Auto 可见 CPU fallback、Forced CPU/GPU、失败/重试和数据保留
+下载页与安装器在安装前披露单一安装包、约 804 MB、`CONTEXT.md` 定义的 NVIDIA/驱动/生产 probe/模型显存资格要求、无 NVIDIA 环境不受支持、由有效 M3-S3 Evidence 签发的精确已验证配置、受支持主机内的 Auto 可见 CPU fallback、Forced CPU/GPU、失败/重试和数据保留
 
 实现归属：release/download disclosure owner、installer UI。
 
-裁判：下载页 + 安装器真实 UI/文本 Judge，并与 installer manifest、GPU/runtime 行为 Evidence 对账；不得把受控 URL 写成真实站点保证。Required Evidence tier：Strong + Desktop/Visual + Release Evidence。
+裁判：下载页 + 安装器真实 UI/文本 Judge，并与 installer manifest、生产 probe/显存门禁和 GPU/runtime Evidence 的精确 GPU/驱动配置对账；没有有效 M3-S3 Evidence 时不得列出“已验证配置”，不得把一次通过外推为全部 NVIDIA 支持，也不得把受控 URL 写成真实站点保证。Required Evidence tier：Strong + Desktop/Visual + Release Evidence。
 
 明确范围外：Release Notes、营销性扩大承诺、未验证硬件/模型兼容性。
 
