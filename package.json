@@ -15,6 +15,7 @@
     "test:live:qwen": "npm run test:live:llm",
     "e2e:runtime-settings": "powershell.exe -ExecutionPolicy Bypass -File scripts/run-runtime-settings-e2e.ps1",
     "e2e:real": "powershell.exe -ExecutionPolicy Bypass -File scripts/run-real-e2e.ps1",
+    "evidence:no-nvidia-cpu": "powershell.exe -ExecutionPolicy Bypass -File scripts/run-no-nvidia-cpu-evidence.ps1",
     "validate:evidence": "powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1",
     "build:whisper-gpu-worker": "powershell.exe -ExecutionPolicy Bypass -File scripts/build-whisper-cuda-worker.ps1",
     "bundle:gpu": "npm run build:whisper-gpu-worker && tauri build --config src-tauri/tauri.gpu.conf.json"

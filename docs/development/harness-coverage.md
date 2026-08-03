@@ -120,7 +120,7 @@
 | AC-RL-04 | 尚无重装 Judge | Gap | 缺同版本真实重装、程序 manifest 恢复和用户数据摘要 |
 | AC-RL-05 | 尚无安装升级 Judge | Gap | 缺同 identifier 的冻结 `c2eb4c4` fixture 安装场景与安装失败故障注入 |
 | AC-RL-06 | 尚无卸载 Judge | Gap | 缺卸载/重装、注册项、保留数据、源视频哈希和人工彻底清理文档闭环 |
-| AC-RL-07 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests | Partial | 生产选择和 CPU fallback 有行为覆盖；缺无 NVIDIA/CUDA 干净 Windows 上目标安装器启动和真实 CPU 短样本 Release Evidence |
+| AC-RL-07 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests、`scripts/run-no-nvidia-cpu-evidence.ps1` | Partial | 生产选择和 CPU fallback 有行为覆盖；M3-S2a 新增 release-evidence runner 合同，要求从真实 NSIS 安装包安装后记录无 NVIDIA/driver 环境、安装器 SHA、主程序 CUDA import absence、Auto CPU fallback reason 和真实 CPU 短样本；尚未在干净无 NVIDIA/CUDA Windows 上对目标候选包运行并签发 Release Evidence |
 | AC-RL-08 | `whisper-backend-preference.test.ts`、Rust `whisper_backend` tests、本机 GPU smoke | Partial | Auto/Forced/错误分类及单机 GPU 短样本存在；未绑定目标安装器/SHA，取消/崩溃/模型错误的 RC Evidence 未齐 |
 | AC-RL-09 | 尚无正式签名 Judge | Gap | 缺受信任证书、时间戳、目标 installer/主程序验证和人类 security 批准 |
 | AC-RL-10 | `release-artifact-contract.md`；尚无 release manifest/SBOM Judge | Gap | M3-S1 定义了 release artifact manifest 最小字段；缺同一目标 SHA 生成的 installer SHA、机器 manifest、SBOM 与 notices 对账 |
