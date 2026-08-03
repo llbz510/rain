@@ -126,7 +126,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 | M0 | 控制面与 agent-first 会话协议 | 2 | Complete | Active 计划、控制地图、独立审查规则可发现 |
 | M1 | 发布范围冻结与 Release AC | 2–4 | Complete — M1-S1 + M1-S2 confirmed and reviewed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
 | M2 | 当前目标提交证据重放 | 1–3 | Complete — M2-S1 + M2-S2 | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
-| M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | Gap | 双环境安装证据、生命周期、签名和许可全部完成 |
+| M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | In progress — M3-S1 in review | 双环境安装证据、生命周期、签名和许可全部完成 |
 | M4 | 数据、派生文件、schema 与架构边界 | 5–8 | Partial | 升级兼容、缩略图生命周期、risk 22 和架构政策完成 |
 | M5 | 视频列表与导入任务产品闭环 | 6–9 | Partial | 排序/搜索/空状态/卡片/删除交互达到 Strong + 必要桌面证据；受控 URL 接口不被误写为真实站点承诺 |
 | M6 | 学习页基础产品闭环 | 5–9 | Partial | 布局、目录、字幕、右侧面板、快捷键和会话稳定性完成 |
@@ -212,6 +212,8 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 ## 10. M3 — Release Engineering 与双环境证据
 
 ### M3-S1 Release artifact contract
+
+状态：`In review` — 合同草案记录在 [`release-artifact-contract.md`](release-artifact-contract.md)。本 Slice 只确认产物合同，不生成安装器、不跑 GPU/CPU Evidence、不签发许可或发布物。
 
 - 定义 CPU-safe 主程序、GPU worker、CUDA runtime、模型文件和配置文件的精确安装位置。
 - 定义版本、协议、SHA-256 manifest、文件权限和禁止打包的驱动 DLL。
@@ -683,7 +685,7 @@ Next single action:
 2. M1-S2：`Complete` — 用户已确认 50 条 AC，正式 acceptance/coverage/disposition 已迁移并通过独立 Spec + Standards 双轴审查。
 3. M2-S1：`Complete` — workflow_dispatch run `30756311932` 已对精确 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 重放通过。
 4. M2-S2：`Complete` — schema v2 包保留为 408b6db-era 历史 Evidence；独立 Spec/Standards gate 已通过。
-5. M3-S1：`Next` — 确认正式 release artifact contract。
-6. M3-S2：建立无 NVIDIA/CUDA 干净 Windows CPU Evidence。
+5. M3-S1：`In review` — [`release-artifact-contract.md`](release-artifact-contract.md) 已定义正式产物合同；等待独立 Spec/Standards gate、PR、Clean Windows Harness 和合并。
+6. M3-S2：`Next after M3-S1 merge` — 建立无 NVIDIA/CUDA 干净 Windows CPU Evidence。
 
 完成上述六个工作包所需的原子 Slice 前，不并行启动翻译、Vision 或高级树编辑。M3 之后依赖图允许 M4 和经确认的产品工作流并行，但每个独立 worktree 仍只承载一个可验证 Slice，并在合并前重新基于最新主线运行 Harness 与独立审查。

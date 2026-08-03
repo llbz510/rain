@@ -17,6 +17,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 从当前状态到正式发布按什么里程碑推进 | `docs/development/rain-project-delivery-plan.md` | Active 项目交付路线、Release 完成定义、全部 Proposed 决策路由和 RC/上线门禁；不自动授权新行为 |
 | 本次 Core Release 包含什么 | `docs/development/release-scope-contract.md` | Active、用户已确认的 M1-S1 范围合同；记录 Launch/Post-release 去向与单一 GPU 增强通用安装包边界，Launch 行仍须取得 Confirmed AC |
 | 本次 Core Release 用什么 AC 验收 | `docs/development/acceptance-standard.md` | 50 条 M1-S2 合同已 Confirmed 并迁入正式标准；`release-acceptance-contract.md` 保留用户确认、Evidence tier 和 31 条 Launch traceability |
+| 正式发布产物必须长什么样 | `docs/development/release-artifact-contract.md` | Active M3-S1 产物合同；定义唯一 NSIS、版本/identifier、CPU-safe 主程序、隔离 CUDA worker/runtime、manifest、禁止项和后续 Release Evidence Judge；不代表安装器已生成 |
 | 用户希望产品做什么 | 根目录 `PRD.md` 和对应 `M*.md` | 已确认产品意图；不自动代表代码已经实现 |
 | 99 条历史产品决策当前由什么控制 | `docs/development/product-decision-coverage.md` | 72 条映射 Confirmed AC、23 条 Post-release Proposed、4 条 Out-of-scope；不是完成百分比 |
 | 本地视频主链路当前按什么设计 | `docs/superpowers/specs/2026-07-17-rain-real-local-video-repair-design.md` | 已实施修复的设计依据；与更晚的事实冲突时需要重新确认 |
@@ -80,8 +81,9 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 10. `docs/development/rain-project-delivery-plan.md`
 11. M1/发布任务再读 `docs/development/release-scope-contract.md`
 12. M1-S2/发布验收任务再读 `docs/development/release-acceptance-contract.md`
-13. 与任务有关的 PRD/spec
-14. 相关代码、测试和最近真实证据
+13. M3/发布产物任务再读 `docs/development/release-artifact-contract.md`
+14. 与任务有关的 PRD/spec
+15. 相关代码、测试和最近真实证据
 
 不需要每次通读 99 条历史决策。先通过控制地图找到本次任务真正相关的资料。
 
