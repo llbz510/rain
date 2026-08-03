@@ -134,7 +134,7 @@ The next implementation Slice, M3-S2, must start from this contract and produce 
 | Future Slice | Required Judge |
 | --- | --- |
 | M3 artifact generator | Builds from clean checkout, produces one NSIS installer, generates artifact manifest from bytes and installed files, and verifies main executable CUDA imports are absent |
-| M3-S2 no NVIDIA/CUDA Evidence | Installs the same candidate on a clean Windows machine without NVIDIA/CUDA, records hardware/driver absence, starts Rain, shows Auto CPU fallback reason, runs CPU short sample and records backend `cpu` |
+| M3-S2 no NVIDIA/CUDA Evidence | `scripts/run-no-nvidia-cpu-evidence.ps1` installs the same candidate on a clean Windows machine without NVIDIA/CUDA, records hardware/driver absence, starts Rain, shows Auto CPU fallback reason, runs CPU short sample and records backend `cpu` |
 | M3-S3 NVIDIA Evidence | Installs the same candidate on supported NVIDIA Windows, proves Auto CUDA, Forced CUDA, Forced CPU no-worker, cancellation and classified worker/model failures |
 | M3 lifecycle Slices | Clean install, same-version reinstall, old-fixture upgrade, uninstall and reinstall each record file/user-data manifests separately |
 | M3-S5 signing/SBOM/legal/hygiene | Separately verifies signature, SBOM/notices, human CUDA redistribution approval and forbidden-content scan |
