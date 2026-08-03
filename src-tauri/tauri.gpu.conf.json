@@ -1,5 +1,7 @@
 {
   "bundle": {
+    "active": true,
+    "targets": ["nsis"],
     "resources": {
       "target/whisper-gpu-bundle/whisper-backends/rain-whisper-cuda.exe": "whisper-backends/rain-whisper-cuda.exe",
       "target/whisper-gpu-bundle/whisper-backends/cublas64_12.dll": "whisper-backends/cublas64_12.dll",
