@@ -16,7 +16,7 @@ The no-key Runtime Settings desktop behavior Judge and its independent Hosted Wi
 Historical product-intent coverage is now mechanically controlled by `AC-HE-06`.
 `docs/development/product-decision-coverage.md` contains exactly `DEC-PRD-001` through `DEC-PRD-099`, each with a current PRD/M source and one disposition: 72 map to Confirmed ACs, 23 Post-release rows remain Proposed, and 4 are Out-of-scope. These counts are not a project-completion percentage. The 31 M1-S2 promotions freeze Launch product semantics, while `harness-coverage.md` conservatively keeps the new ACs at their actual Partial/Gap strength.
 
-M1-S2, M2-S1 and M2-S2 are complete. PR #25's prerequisite Clean Windows Harness passed on exact head `b64a22f20962980089b08c1873b4bc8294850dbe`, the protected merge produced `master` commit `a329059b8172dab82c7326deb0af322045a0c396`, and that exact commit passed the manual Hosted Runtime Settings replay. The M2-S2 audit classifies the schema v2 package as historical target Evidence rather than current RC Evidence. The unique next roadmap action is M3-S1: confirm the release artifact contract.
+M1-S2, M2-S1, M2-S2 and M3-S1 are complete. PR #25's prerequisite Clean Windows Harness passed on exact head `b64a22f20962980089b08c1873b4bc8294850dbe`, the protected merge produced `master` commit `a329059b8172dab82c7326deb0af322045a0c396`, and that exact commit passed the manual Hosted Runtime Settings replay. The M2-S2 audit classifies the schema v2 package as historical target Evidence rather than current RC Evidence. M3-S1 defines the release artifact contract in `docs/development/release-artifact-contract.md`, but no installer, Release Evidence, GPU/CPU short sample, signing, licensing or real-video Evidence has been produced. The unique next roadmap action after PR #28 merges is M3-S2: establish no NVIDIA/CUDA clean Windows CPU Evidence from the artifact contract.
 
 `AC-LV-19` is Strong on merged `master` commit `bcec16f`: every non-ready card opens a persisted import-task detail without starting work, production Stage2 block/retry progress can overlay the SQLite fact, and only explicit detail actions retry or cancel. Closing the detail leaves the current task running; App page switches retain the same frontend Pipeline Owner; a restart-stale `processing` record can explicitly cancel through the desktop adapter and close its persisted state. The production-page/jsdom, public Controller, real memory database and production Stage2/Pipeline Judges passed locally and in the clean Windows merge gate. That AC still does not claim automatic `pending` restart recovery; the separately confirmed explicit recovery boundary is now `AC-LV-20` below.
 
@@ -85,12 +85,13 @@ Read in this order:
 9. `docs/development/rain-project-delivery-plan.md` — Active milestone roadmap from scope freeze through RC, formal release and post-release verification; Proposed product slices still require user confirmation.
 10. `docs/development/release-scope-contract.md` — Active, user-confirmed M1-S1 Core Release scope; it fixes Launch/Post-release destinations and the single GPU-enhanced universal installer boundary.
 11. `docs/development/release-acceptance-contract.md` — Active M1-S2 confirmation/traceability record; its 50 ACs are formalized in `acceptance-standard.md`, while completion strength remains in `harness-coverage.md`.
-12. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
-13. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
-14. `docs/development/canonical-evidence-freshness-2026-08-02.md` — Active M2-S2 audit; classifies canonical schema v2 claims as immutable historical facts, current validator coverage or exact-RC rerun requirements.
-15. `package.json` — runnable frontend/test/E2E commands.
-16. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
-17. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
+12. `docs/development/release-artifact-contract.md` — Active M3-S1 artifact contract; defines the single NSIS artifact, CPU-safe main program, isolated CUDA payload, manifest, forbidden contents and future Release Evidence Judges.
+13. `docs/development/control-plane-harness.md` — mechanical control-document rules and one-command Harness entry.
+14. `docs/development/runtime-settings-desktop-e2e.md` — no-live-key desktop restart contract for Runtime Settings.
+15. `docs/development/canonical-evidence-freshness-2026-08-02.md` — Active M2-S2 audit; classifies canonical schema v2 claims as immutable historical facts, current validator coverage or exact-RC rerun requirements.
+16. `package.json` — runnable frontend/test/E2E commands.
+17. `scripts/run-real-e2e.ps1` — real E2E automation and runtime environment assumptions.
+18. `scripts/validate-evidence.ps1` — what counts as acceptable real evidence.
 
 Do not infer real progress from PRD wording, old screenshots, or old evidence directories. Validate with commands or committed evidence.
 
@@ -1930,6 +1931,32 @@ The first independent M2-S2 review used baseline `b2fb7113318e389200b9ce07c912d8
 The correction kept the audit decision ready but M2-S2 `In review`, made closing the independent gate the unique current action, and changed the remaining stale narrative count to 34. It did not change the Evidence package, an AC, a coverage-strength decision or the exact-RC rerun contract.
 
 The corrected staged diff then received final PASS from both independent axes with P0/P1/P2 empty and no baseline smell. Spec independently reconfirmed the repository association, missing manifest target binding, blob/hash/count facts, conservative Historical/current-Gap classifications, unchanged ACs, exact-RC rerun boundary and no paid-call authorization. Standards confirmed both first-round findings closed, consistent In-review/Pending status during review, discoverable Active audit, six-document-only write set, no temporary residue or forbidden path, and proportionate docs-only validation. Both reviewers reported `npm.cmd run harness:control`, the current public Evidence validator and `git diff --cached --check b2fb7113318e389200b9ce07c912d8aebd4474f1` passing. This dual PASS closes M2-S2; the conclusion-only status sync makes M3-S1 the unique next action.
+
+## 2026-08-03 M3-S1 release artifact contract
+
+Branch `codex/m3-release-artifact-contract` starts from clean `master` commit `c1662d67f244f9976dafacf46fc5ed31a4d54589`, matching `origin/master` and the expected post-PR #27 merge. Takeover commands passed: `git status --short` was empty, `git branch --show-current` returned `master` before branching, `git log -5 --oneline` showed `c1662d6` at the top, and `npm.cmd run harness:control` passed.
+
+Slice contract:
+
+- AC / gap: M3-S1 artifact boundary for `AC-RL-01`, `AC-RL-02`, `AC-RL-07`, `AC-RL-08`, `AC-RL-10`, `AC-RL-12` and `AC-RL-18`; no AC text or coverage strength is changed.
+- Observable result: release reviewers have an Active contract for the only public Windows x64 NSIS installer, version `0.1.0`, identifier `com.rain.app`, CPU-safe main executable, isolated CUDA worker/runtime resources, machine-readable artifact manifest, forbidden contents and future Evidence Judges.
+- In scope: docs-only artifact contract, control-map source registration, roadmap status, conservative coverage notes and this state sync.
+- Out of scope: installer build, GitHub Release, CPU/GPU short samples, Hosted desktop dispatch, real video Evidence, signing, SBOM/notices, CUDA legal approval, installer/download UI and product source changes.
+- Owner: Tauri release config, GPU bundle script, release manifest generator, artifact hygiene scanner and human release/legal owner.
+- Judge: local `npm.cmd run harness:control`, `git diff --check`, and independent read-only Spec + Standards review. Full `harness:check` is intentionally not required for this documentation-only contract unless review identifies a control risk.
+- Allowed writes: `docs/development/release-artifact-contract.md`, control/plan/coverage documents and this state file. Locked Harness, product source, workflow, Evidence and generated artifacts remain untouched.
+
+Current write set defines the artifact contract without signing off implementation. `harness-coverage.md` still keeps `AC-RL-01/10/18` as Gap and `AC-RL-02/12` as Partial; no Release Evidence tier is promoted. M3-S2 remains blocked until M3-S1 passes independent review, PR Clean Windows Harness and protected merge.
+
+Required pre-commit checks are `npm.cmd run harness:control`, `git diff --check` and independent read-only Spec/Standards review of the stable diff. Findings, closure and final verdict must be appended here before commit.
+
+The first independent Spec review returned `PASS` with P0/P1/P2 empty. It confirmed the docs-only atomic boundary, correct release AC references, single public Windows x64 NSIS `0.1.0` / `com.rain.app` identity, CPU-safe main plus isolated CUDA worker/runtime, `nvcuda.dll` exclusion, manifest and forbidden-content boundaries, conservative coverage and no authorization for paid model, real-video, GPU, CPU, installer, signing, licensing or Release Evidence.
+
+The first independent Standards review returned `FAIL` with no content or boundary defect. It found one P1 process blocker: the new Active contract file was still untracked, so ordinary diff/review commands omitted the central source even though control documents already linked it. It also found one P2: the new contract had a trailing blank line at EOF that only became visible when checking the untracked file directly. Closure: the full six-file write set is now staged including `docs/development/release-artifact-contract.md`, and the EOF blank line was removed. Required rechecks are `npm.cmd run harness:control`, `git diff --cached --check` and independent Standards re-review of the staged diff.
+
+The Standards re-review returned final `PASS` with P0/P1/P2 empty. It confirmed the prior untracked-file P1 and EOF P2 are closed, the staged diff contains exactly the intended six documentation files, `git diff --cached --check` and `npm.cmd run harness:control` pass, and all unrun heavy gates remain future Partial/Gap or Release Evidence requirements. Together with the earlier Spec `PASS`, this closes the independent review gate for M3-S1. Full `harness:check`, installer build, GitHub Release, GPU/CPU samples, signing/legal approval, SBOM/notices, disclosure UI and real-video Evidence were intentionally not run for this docs-only artifact contract.
+
+PR #28 was opened from commit `4e9f961` and its first Clean Windows Harness run `30797502667` passed in 10m16s. A conclusion-only status sync then changed only control-plane status text from In review to complete/next-action wording; it did not change the artifact contract, AC text, coverage strength, product source, locked Harness, workflow, Evidence or generated artifacts. This final sync needs a short independent read-only review, local `npm.cmd run harness:control`, `git diff --cached --check`, a replacement Clean Windows Harness on the updated PR head, protected merge and local master sync.
 
 ## Maintenance checklist for every future session
 
