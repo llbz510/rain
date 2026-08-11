@@ -57,11 +57,30 @@ function hasFile(reference, availableFiles) {
   return [...availableFiles].some((path) => basename(path) === normalized)
 }
 
+function normalizeWindowsPath(value) {
+  return value
+    .trim()
+    .replaceAll('/', '\\')
+    .replace(/\\+/g, '\\')
+    .replace(/\\+$/, '')
+    .toLowerCase()
+}
+
+function hasActiveNoNvidiaExitSemantics(deliveryPlan) {
+  return deliveryPlan.split(/\r?\n/).some((line) => {
+    const describesNoNvidia = /(?:no[-\s]?nvidia|without\s+(?:an?\s+)?nvidia|无\s*(?:nvidia|gpu))/i.test(line)
+    const requiresExitEvidence = /(?:release blocker|exit criterion|before\s+release\s+exit|(?:requires?|must|remains|required).*?(?:evidence|release\s+exit|exit)|(?:evidence).*?(?:required|must))/i.test(line)
+    const isRetiredContext = /\b(?:superseded|retired|not a release blocker|no longer)\b|不再|不是|退役/i.test(line)
+    return describesNoNvidia && requiresExitEvidence && !isRetiredContext
+  })
+}
+
 export function validateControlPlaneDocuments({
   acceptance,
   coverage,
   decisionCoverage = '',
   projectState,
+  deliveryPlan = '',
   availableFiles,
 }) {
   const errors = []
@@ -162,13 +181,50 @@ export function validateControlPlaneDocuments({
     }
   }
 
+  const expectedDispositionCounts = new Map([
+    ['Confirmed AC', 72],
+    ['Proposed', 23],
+    ['Out-of-scope', 4],
+  ])
+  const actualDispositionCounts = new Map([...expectedDispositionCounts.keys()]
+    .map((disposition) => [disposition, decisionRows.filter((row) => row.disposition === disposition).length]))
+  const dispositionSummary = [...expectedDispositionCounts.keys()]
+    .map((disposition) => `${disposition}=${actualDispositionCounts.get(disposition)}`)
+    .join(', ')
+  const expectedDispositionSummary = [...expectedDispositionCounts.entries()]
+    .map(([disposition, count]) => `${disposition}=${count}`)
+    .join(', ')
+  if ([...expectedDispositionCounts].some(([disposition, count]) => actualDispositionCounts.get(disposition) !== count)) {
+    errors.push(`Product decision disposition counts are ${dispositionSummary}; expected ${expectedDispositionSummary}.`)
+  }
+
   const currentFacts = projectState.split(/^## What changed\b/m)[0]
+  const primaryCheckout = currentFacts.match(/^Primary checkout:[ \t]*(.+)$/m)?.[1]?.trim() ?? ''
+  if (!primaryCheckout) {
+    errors.push('PROJECT_STATE active current facts define no canonical checkout.')
+  } else if (normalizeWindowsPath(primaryCheckout).includes(normalizeWindowsPath('D:\\gongju\\shengcan\\rain'))) {
+    errors.push('PROJECT_STATE active canonical checkout still uses legacy path: D:\\gongju\\shengcan\\rain.')
+  }
   for (const criterion of confirmed) {
     const contradictoryLine = currentFacts.split(/\r?\n/).find((line) => (
       line.includes(criterion.id) && /\bProposed\b/i.test(line)
     ))
     if (contradictoryLine) {
       errors.push(`PROJECT_STATE current facts call Confirmed ${criterion.id} Proposed.`)
+    }
+  }
+
+  for (const criterion of criteria.filter((item) => item.status === 'Superseded')) {
+    const activeExitCriterion = deliveryPlan.split(/\r?\n/).find((line) => {
+      if (!line.includes(criterion.id)) return false
+      if (!/release blocker|exit criterion|requires? .*evidence|must .*evidence|发布阻断|退出条件|必须.*证据/i.test(line)) return false
+      return !/\bSuperseded\b|\bRetired\b|not a release blocker|不再|不是|退役/i.test(line)
+    })
+    if (activeExitCriterion) {
+      errors.push(`Active delivery plan treats Superseded ${criterion.id} as an exit criterion.`)
+    }
+    if (criterion.id === 'AC-RL-07' && hasActiveNoNvidiaExitSemantics(deliveryPlan)) {
+      errors.push('Active delivery plan requires no-NVIDIA Evidence despite a Superseded no-NVIDIA release contract.')
     }
   }
 
@@ -196,6 +252,7 @@ export function validateControlPlane(root) {
     coverage: join(root, 'docs', 'development', 'harness-coverage.md'),
     decisionCoverage: join(root, 'docs', 'development', 'product-decision-coverage.md'),
     projectState: join(root, 'docs', 'PROJECT_STATE.md'),
+    deliveryPlan: join(root, 'docs', 'development', 'rain-project-delivery-plan.md'),
   }
   const missingDocuments = Object.entries(paths)
     .filter(([, path]) => !existsSync(path))
@@ -207,6 +264,7 @@ export function validateControlPlane(root) {
     coverage: readFileSync(paths.coverage, 'utf8'),
     decisionCoverage: readFileSync(paths.decisionCoverage, 'utf8'),
     projectState: readFileSync(paths.projectState, 'utf8'),
+    deliveryPlan: readFileSync(paths.deliveryPlan, 'utf8'),
     availableFiles: repositoryFiles(root),
   })
 }

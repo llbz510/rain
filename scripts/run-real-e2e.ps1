@@ -3,22 +3,109 @@ param(
   [string]$WhisperModelPath = $env:RAIN_WHISPER_MODEL_PATH,
   [string]$LlmBaseUrl = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_BASE_URL)) { 'https://dashscope.aliyuncs.com/compatible-mode/v1' } else { $env:RAIN_E2E_LLM_BASE_URL }),
   [string]$LlmModel = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_LLM_MODEL)) { 'qwen3-omni-flash' } else { $env:RAIN_E2E_LLM_MODEL }),
+  [string]$RepoRoot = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_REPO_ROOT)) { (Join-Path $PSScriptRoot '..') } else { $env:RAIN_E2E_REPO_ROOT }),
+  [string]$ToolingRoot = $env:RAIN_E2E_TOOLING_ROOT,
+  [string]$CudaToolkitRoot = $env:RAIN_E2E_CUDA_TOOLKIT_ROOT,
+  [string]$NinjaPath = $env:RAIN_E2E_NINJA_PATH,
+  [string]$CargoTargetDir = $env:RAIN_E2E_CARGO_TARGET_DIR,
+  [string]$VideoSearchRoot = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_E2E_VIDEO_ROOT)) { 'D:\xiazaiwenjian\bilidown' } else { $env:RAIN_E2E_VIDEO_ROOT }),
   [string]$EvidenceRoot = 'evidence',
   [ValidateSet('full', 'ui-proof')]
   [string]$RunMode = 'full',
   [string]$ExistingEvidenceManifest = '',
   [int]$DriverPort = 4444,
   [int]$NativeDriverPort = 4445,
+  [string]$NativeDriverPath = $env:RAIN_E2E_NATIVE_DRIVER_PATH,
   [int]$MaxMinutes = 240,
   [ValidateSet('cuda', 'cpu')]
-  [string]$WhisperBackend = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_WHISPER_BACKEND)) { 'cuda' } else { $env:RAIN_WHISPER_BACKEND.ToLowerInvariant() })
+  [string]$WhisperBackend = $(if ([string]::IsNullOrWhiteSpace($env:RAIN_WHISPER_BACKEND)) { 'cuda' } else { $env:RAIN_WHISPER_BACKEND.ToLowerInvariant() }),
+  [switch]$PlanOnly
 )
 
 $ErrorActionPreference = 'Stop'
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+Set-Location -LiteralPath $RepoRoot
+if ([System.IO.Path]::IsPathRooted($EvidenceRoot)) {
+  $EvidenceRoot = [System.IO.Path]::GetFullPath($EvidenceRoot)
+} else {
+  $EvidenceRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $EvidenceRoot))
+}
+
+function ConvertTo-RealE2eWindowsCommandLineArgument([AllowNull()][string]$Value) {
+  if ([string]::IsNullOrEmpty($Value)) { return '""' }
+  if ($Value -notmatch '[\s"]') { return $Value }
+  $builder = [System.Text.StringBuilder]::new()
+  [void]$builder.Append('"')
+  $backslashCount = 0
+  foreach ($character in [char[]]$Value) {
+    if ($character -eq [char]'\') { $backslashCount++; continue }
+    if ($character -eq [char]'"') {
+      [void]$builder.Append('\', ($backslashCount * 2) + 1)
+      [void]$builder.Append('"')
+      $backslashCount = 0
+      continue
+    }
+    if ($backslashCount -gt 0) {
+      [void]$builder.Append('\', $backslashCount)
+      $backslashCount = 0
+    }
+    [void]$builder.Append($character)
+  }
+  if ($backslashCount -gt 0) { [void]$builder.Append('\', $backslashCount * 2) }
+  [void]$builder.Append('"')
+  return $builder.ToString()
+}
+
+function Join-RealE2eWindowsCommandLine([string[]]$Arguments) {
+  return (@($Arguments | ForEach-Object { ConvertTo-RealE2eWindowsCommandLineArgument ([string]$_) }) -join ' ')
+}
+
+if ([string]::IsNullOrWhiteSpace($ToolingRoot)) {
+  $ToolingRoot = Join-Path $RepoRoot '.worktrees\.tooling'
+}
+if ([string]::IsNullOrWhiteSpace($CudaToolkitRoot)) {
+  $CudaToolkitRoot = Join-Path $ToolingRoot 'cuda-12.9-redist-root'
+}
+if ([string]::IsNullOrWhiteSpace($CargoTargetDir)) {
+  $CargoTargetDir = Join-Path $RepoRoot '.worktrees\.cargo-target-rain-real-e2e'
+}
+if (-not [System.IO.Path]::IsPathRooted($ToolingRoot)) {
+  $ToolingRoot = Join-Path $RepoRoot $ToolingRoot
+}
+if (-not [System.IO.Path]::IsPathRooted($CudaToolkitRoot)) {
+  $CudaToolkitRoot = Join-Path $RepoRoot $CudaToolkitRoot
+}
+if (-not [System.IO.Path]::IsPathRooted($CargoTargetDir)) {
+  $CargoTargetDir = Join-Path $RepoRoot $CargoTargetDir
+}
+if (-not [string]::IsNullOrWhiteSpace($NinjaPath) -and -not [System.IO.Path]::IsPathRooted($NinjaPath)) {
+  $NinjaPath = Join-Path $RepoRoot $NinjaPath
+}
+if ($PlanOnly) {
+  [ordered]@{
+    schemaVersion = 1
+    repoRoot = $RepoRoot
+    workingDirectory = (Get-Location).Path
+    evidenceRoot = $EvidenceRoot
+    toolingRoot = $ToolingRoot
+    cudaToolkitRoot = $CudaToolkitRoot
+    cudaNvccCandidate = Join-Path $CudaToolkitRoot 'bin\nvcc.exe'
+    ninjaPath = $NinjaPath
+    cargoTargetDir = $CargoTargetDir
+    whisperModelPath = $WhisperModelPath
+    whisperBackend = $WhisperBackend.ToLowerInvariant()
+    cmakeGenerator = if ($WhisperBackend.ToLowerInvariant() -eq 'cuda') { 'Ninja' } else { $null }
+    cudaWorkerBuildScript = Join-Path $RepoRoot 'scripts\build-whisper-cuda-worker.ps1'
+    expectedWhisperBackend = $WhisperBackend.ToLowerInvariant()
+    nativeDriverPath = $NativeDriverPath
+    nativeDriverArguments = if ([string]::IsNullOrWhiteSpace($NativeDriverPath)) { $null } else { Join-RealE2eWindowsCommandLine @('--native-driver', $NativeDriverPath) }
+  } | ConvertTo-Json -Compress
+  return
+}
 $expectedHash = '3870B5BD62E574685AC99A8E44295F5E44AC44B76343666742C1C4CA48365F8A'
 $localToolPaths = @(
-  'D:\gongju\shengcan\rain\.worktrees\.tooling\cargo-bin\bin',
-  'D:\gongju\shengcan\rain\.worktrees\.tooling\msedgedriver'
+  (Join-Path $ToolingRoot 'cargo-bin\bin'),
+  (Join-Path $ToolingRoot 'msedgedriver')
 ) | Where-Object { Test-Path -LiteralPath $_ }
 if ($localToolPaths.Count -gt 0) {
   $currentPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
@@ -45,7 +132,7 @@ function Require-Command([string]$Name, [string]$InstallHint) {
 function Find-CudaNvcc() {
   $command = Get-Command 'nvcc.exe' -ErrorAction SilentlyContinue
   if ($command) { return $command.Source }
-  $localNvcc = 'D:\gongju\shengcan\rain\.worktrees\.tooling\cuda-12.9-redist-root\bin\nvcc.exe'
+  $localNvcc = Join-Path $CudaToolkitRoot 'bin\nvcc.exe'
   if (Test-Path -LiteralPath $localNvcc) { return $localNvcc }
   $cudaRoot = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA'
   if (-not (Test-Path -LiteralPath $cudaRoot)) { return $null }
@@ -57,7 +144,10 @@ function Find-CudaNvcc() {
 function Find-Ninja() {
   $command = Get-Command 'ninja.exe' -ErrorAction SilentlyContinue
   if ($command) { return $command.Source }
-  $localNinja = 'D:\gongju\shengcan\rain\.worktrees\.tooling\ninja\ninja.exe'
+  if (-not [string]::IsNullOrWhiteSpace($NinjaPath) -and (Test-Path -LiteralPath $NinjaPath)) {
+    return (Resolve-Path -LiteralPath $NinjaPath).Path
+  }
+  $localNinja = Join-Path $ToolingRoot 'ninja\ninja.exe'
   if (Test-Path -LiteralPath $localNinja) { return $localNinja }
   return $null
 }
@@ -93,7 +183,7 @@ function Invoke-BuildCommand([string]$FilePath, [string[]]$Arguments, [string]$V
 
 function Find-RealVideo() {
   if (-not [string]::IsNullOrWhiteSpace($VideoPath)) { return (Resolve-Path -LiteralPath $VideoPath).Path }
-  $root = 'D:\xiazaiwenjian\bilidown'
+  $root = $VideoSearchRoot
   if (-not (Test-Path -LiteralPath $root)) { throw 'VideoPath is required; default bilidown root was not found.' }
   $candidates = Get-ChildItem -LiteralPath $root -Recurse -File -Filter '1.2.1*.mp4' -ErrorAction Stop
   foreach ($candidate in $candidates) {
@@ -105,10 +195,12 @@ function Find-RealVideo() {
 
 function Find-WhisperModel() {
   if ($WhisperModelPath -and (Test-Path -LiteralPath $WhisperModelPath)) { return (Resolve-Path -LiteralPath $WhisperModelPath).Path }
+  $roamingAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+  $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
   $candidates = @(
-    'C:\Users\24627\AppData\Roaming\com.rain.app\whisper-models\ggml-large-v3.bin',
-    'C:\Users\24627\AppData\Local\com.rain.app\whisper-models\ggml-large-v3.bin',
-    'D:\gongju\shengcan\rain\models\ggml-large-v3.bin'
+    (Join-Path $roamingAppData 'com.rain.app\whisper-models\ggml-large-v3.bin'),
+    (Join-Path $localAppData 'com.rain.app\whisper-models\ggml-large-v3.bin'),
+    (Join-Path $RepoRoot 'models\ggml-large-v3.bin')
   )
   foreach ($candidate in $candidates) {
     if (Test-Path -LiteralPath $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
@@ -187,7 +279,14 @@ $hash = (Get-FileHash -LiteralPath $video -Algorithm SHA256).Hash.ToUpperInvaria
 if ($hash -ne $expectedHash) { throw "Unexpected video hash: $hash" }
 
 $tauriDriver = Require-Command 'tauri-driver' 'Install with: cargo install tauri-driver --locked'
-$edgeDriver = Require-Command 'msedgedriver' 'Install a matching Microsoft Edge driver or use msedgedriver-tool.'
+$edgeDriver = if ([string]::IsNullOrWhiteSpace($NativeDriverPath)) {
+  Require-Command 'msedgedriver' 'Install a matching Microsoft Edge driver or use msedgedriver-tool.'
+} else {
+  if (-not (Test-Path -LiteralPath $NativeDriverPath -PathType Leaf)) {
+    throw "NativeDriverPath does not exist: $NativeDriverPath"
+  }
+  (Resolve-Path -LiteralPath $NativeDriverPath).Path
+}
 $ffprobe = Require-Command 'ffprobe' 'Install ffmpeg/ffprobe and add them to PATH.'
 
 $selectedWhisperBackend = $WhisperBackend.ToLowerInvariant()
@@ -208,7 +307,7 @@ if ($selectedWhisperBackend -eq 'cuda') {
   $env:CMAKE_CUDA_COMPILER = $nvcc
   $ninja = Find-Ninja
   if ([string]::IsNullOrWhiteSpace($ninja)) {
-    throw 'Whisper GPU was requested, but ninja.exe was not found. Put ninja.exe at D:\gongju\shengcan\rain\.worktrees\.tooling\ninja\ninja.exe or add it to PATH.'
+    throw 'Whisper GPU was requested, but ninja.exe was not found. Set -NinjaPath or RAIN_E2E_NINJA_PATH, put it under the configured ToolingRoot, or add it to PATH.'
   }
   $env:CMAKE_GENERATOR = 'Ninja'
   $env:CMAKE_MAKE_PROGRAM = $ninja
@@ -254,7 +353,7 @@ $env:RAIN_E2E_LLM_API_KEY = $llmApiKey
 $env:LIBCLANG_PATH = if ($env:LIBCLANG_PATH) { $env:LIBCLANG_PATH } else { 'C:\Program Files\LLVM\bin' }
 $env:CMAKE_CXX_FLAGS = '/utf-8'
 $env:CMAKE_C_FLAGS = '/utf-8'
-$env:CARGO_TARGET_DIR = 'D:\gongju\shengcan\rain\.worktrees\.cargo-target-rain-real-e2e'
+$env:CARGO_TARGET_DIR = $CargoTargetDir
 
 $probePath = Join-Path $root.FullName 'probe.json'
 $probeRaw = & $ffprobe -v error -print_format json -show_format -show_streams $video
@@ -264,9 +363,9 @@ $npmCmd = (Get-Command 'npm.cmd' -ErrorAction Stop).Source
 & $npmCmd run build
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
 if ($selectedWhisperBackend -eq 'cuda') {
-  & powershell.exe -ExecutionPolicy Bypass -File scripts/build-whisper-cuda-worker.ps1 -Configuration debug
+  & powershell.exe -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\build-whisper-cuda-worker.ps1') -Configuration debug
   if ($LASTEXITCODE -ne 0) { throw 'CUDA worker build failed' }
-  $env:RAIN_WHISPER_CUDA_WORKER = (Resolve-Path -LiteralPath 'src-tauri\target\whisper-gpu-bundle\whisper-backends\rain-whisper-cuda.exe').Path
+  $env:RAIN_WHISPER_CUDA_WORKER = (Resolve-Path -LiteralPath (Join-Path $RepoRoot 'src-tauri\target\whisper-gpu-bundle\whisper-backends\rain-whisper-cuda.exe')).Path
 } else {
   Remove-Item Env:RAIN_WHISPER_CUDA_WORKER -ErrorAction SilentlyContinue
 }
@@ -280,7 +379,7 @@ $driverLogName = if ($RunMode -eq 'ui-proof') { 'tauri-driver.ui-proof.log' } el
 $driverErrName = if ($RunMode -eq 'ui-proof') { 'tauri-driver.ui-proof.err.log' } else { 'tauri-driver.err.log' }
 $driverLog = Join-Path $logs.FullName $driverLogName
 $driverErr = Join-Path $logs.FullName $driverErrName
-$driverArgs = @('--port', [string]$DriverPort, '--native-port', [string]$NativeDriverPort, '--native-driver', $edgeDriver)
+$driverArgs = Join-RealE2eWindowsCommandLine @('--port', [string]$DriverPort, '--native-port', [string]$NativeDriverPort, '--native-driver', $edgeDriver)
 $driverProcess = Start-Process -FilePath $tauriDriver -ArgumentList $driverArgs -RedirectStandardOutput $driverLog -RedirectStandardError $driverErr -WindowStyle Hidden -PassThru
 $sessionId = $null
 try {
@@ -393,7 +492,7 @@ return {
     $manifestPath = Join-Path $root.FullName 'manifest.json'
     Write-JsonFile $manifestPath $manifest
   }
-  & powershell.exe -ExecutionPolicy Bypass -File scripts/validate-evidence.ps1 -EvidenceManifest $manifestPath -ExpectedWhisperBackend $selectedWhisperBackend
+  & powershell.exe -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\validate-evidence.ps1') -EvidenceManifest $manifestPath -ExpectedWhisperBackend $selectedWhisperBackend
   if ($LASTEXITCODE -ne 0) { throw 'Evidence validation failed' }
   Write-Output "EVIDENCE_MANIFEST=$manifestPath"
 } finally {

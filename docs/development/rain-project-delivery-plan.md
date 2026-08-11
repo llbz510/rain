@@ -1,7 +1,7 @@
 # Rain 项目完整落地计划
 
 > 状态：`Active`（项目交付路线图）
-> 更新日期：2026-08-02
+> 更新日期：2026-08-10
 > 适用范围：从当前已验证状态，持续推进到范围冻结、功能完成、Release Candidate、正式安装发布和上线后验证。
 > 产品授权边界：本计划规定顺序、门禁和候选工作，不自动把 Proposed 产品行为升级为 Confirmed。新增行为仍必须先由用户确认 AC。
 > 会话执行协议：`docs/development/agent-first-development-plan.md`
@@ -17,7 +17,7 @@ Rain 已经拥有可工作的本地视频主链路、学习页核心闭环、Run
 3. 把每个里程碑拆成单一 AC/单一缺口的 Slice，使任一新会话都能接续。
 4. 为每个 Slice 指定 Owner、Judge、Evidence 层级和范围外行为。
 5. 每个落实后的 Slice 必须由独立只读 AI 审查，发现关闭前不得交付。
-6. 最终 Release Candidate 必须在精确提交上完成真实安装、双硬件环境、真实视频、秘密/许可和回滚检查。
+6. 最终 Release Candidate 必须在精确提交上完成受支持 NVIDIA 主机上的真实安装与 Evidence、真实视频、秘密/许可和回滚检查；无 NVIDIA 环境不是 Release Evidence 门槛。
 
 ## 2. “项目落地”的完成定义
 
@@ -224,6 +224,8 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M3-S3 NVIDIA Windows Evidence
 
+状态：`Blocked — runner safety enablement`。当前原子 Slice 只提交可复放 runner、非锁定 PowerShell 外部接口行为合同和入口；安装器必须先由受控 merged-target build record 提供的独立 manifest SHA-256 绑定目标提交与实际字节，installed CUDA payload 必须通过双向集合校验。由于确定性取消 fixture 和 session-scoped process-tree adapter 尚未实现，runner 在安装器和桌面进程启动前 fail-closed，不能写 passed Evidence。它不构建候选、不执行短样本、不生成 Release Evidence。下一 Slice 必须先以确定性 fake adapter/fixture 关闭上述安全边界，不能通过保护合并直接重建候选或执行下列 Judge。
+
 - 安装精确目标提交的正式 GPU 增强候选包。
 - 按 `CONTEXT.md` 的唯一资格谓词记录生产 worker probe、模型显存门禁、GPU/驱动/显存/协议和包/模型哈希；只签发该精确配置，不外推未验证型号。
 - 证明 Auto 使用 CUDA、Forced CUDA 成功、Forced CPU 不启动 worker。
@@ -254,13 +256,13 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 ### M3-S6 单一 GPU 增强通用安装包 UX
 
 - 公开渠道只提供一个安装包，不再提供独立公开 CPU 安装包；同一包包含 CPU-safe Rain 主程序、CPU adapter 和隔离 CUDA worker/runtime。
-- 发布页与安装器必须显示约 804 MB 大小、硬件要求、无兼容 NVIDIA 环境的 Auto 可见回退、Forced CPU/GPU、失败与重试。
+- 发布页与安装器必须显示约 804 MB 大小、受支持 NVIDIA GPU + 兼容驱动最低要求、无 NVIDIA 不受支持，以及受支持主机内的 Auto 可见回退、Forced CPU/GPU、失败与重试。
 - 普通 CPU-safe/Harness 构建继续作为 CI 与内部 release-evidence 产物，不得被误写成第二个公开安装包。
-- 该产品边界已由 `AC-RL-02/07/08/18` 确认；构建脚本或现有 overlay 仍不能自我证明实现与 Release Evidence。
+- 该产品边界已由 `AC-RL-02/08/18` 确认；`AC-RL-07` 是 Superseded 历史合同，构建脚本或现有 overlay 仍不能自我证明实现与 Release Evidence。
 
 ### M3 退出条件
 
-- 同一 RC 候选在无 GPU 和 NVIDIA 环境都有正式安装证据。
+- 同一 RC 候选在受支持 NVIDIA Windows 上完成正式安装、Auto/Forced CUDA、Forced CPU、取消和错误分类 Evidence；无 NVIDIA 环境不再是发布 Evidence 门槛。
 - 安装/升级/卸载、签名、许可、哈希和分发 UX 均有 Confirmed AC 与 Judge。
 - 无 P0/P1/P2 当前范围发现；所有 reviewer 结论持久化。
 
