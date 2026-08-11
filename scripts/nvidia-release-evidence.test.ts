@@ -19,6 +19,7 @@ const runnerPath = join(repoRoot, 'scripts', 'run-nvidia-release-evidence.ps1')
 const contractModulePath = join(repoRoot, 'scripts', 'nvidia-release-evidence-contract.psm1')
 const temporaryRoots: string[] = []
 const powerShellProcessTimeoutMs = 4_000
+const childCleanupSettlementTimeoutMs = 250
 
 type ChildProcessResult = {
   status: number | null
@@ -30,8 +31,25 @@ type ChildProcessResult = {
 
 type ActiveChildProcess = {
   child: ChildProcess
-  settled: Promise<ChildProcessResult>
+  exited: Promise<void>
   terminateForCleanup: () => void
+}
+
+type ChildProcessCompletion = (
+  error: (Error & { code?: string | number }) | null,
+  stdout: string,
+  stderr: string,
+) => void
+
+type ChildProcessStart = (
+  executable: string,
+  arguments_: string[],
+  completion: ChildProcessCompletion,
+) => Pick<ChildProcess, 'pid' | 'kill'>
+
+type TrackedChildProcessOptions = {
+  activeProcesses?: Set<ActiveChildProcess>
+  startChild?: ChildProcessStart
 }
 
 const activeChildProcesses = new Set<ActiveChildProcess>()
@@ -56,22 +74,41 @@ function resolvePowerShellExecutable(
 
 const powerShellExecutable = resolvePowerShellExecutable()
 
-function runTrackedChildProcess(executable: string, arguments_: string[], timeoutMs: number) {
-  let active!: ActiveChildProcess
-  let termination: { kind: 'timeout'; timeoutMs: number } | { kind: 'cleanup' } | undefined
-  let timeoutHandle: ReturnType<typeof setTimeout>
-  let resolveSettled!: (result: ChildProcessResult) => void
-  const settled = new Promise<ChildProcessResult>((resolve) => {
-    resolveSettled = resolve
-  })
-  const child = execFile(executable, arguments_, {
+function runTrackedChildProcess(
+  executable: string,
+  arguments_: string[],
+  timeoutMs: number,
+  options: TrackedChildProcessOptions = {},
+) {
+  const processes = options.activeProcesses ?? activeChildProcesses
+  const startChild: ChildProcessStart = options.startChild ?? ((file, args, completion) => execFile(file, args, {
     encoding: 'utf8',
     windowsHide: true,
-  }, (error, stdout, stderr) => {
-    clearTimeout(timeoutHandle)
-    activeChildProcesses.delete(active)
+  }, completion))
+  let active!: ActiveChildProcess
+  let termination: { kind: 'timeout'; timeoutMs: number } | { kind: 'cleanup' } | undefined
+  let terminationFailure: Error | undefined
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  let resultWasSettled = false
+  let resolveResult!: (result: ChildProcessResult) => void
+  let resolveExited!: () => void
+  const result = new Promise<ChildProcessResult>((resolve) => {
+    resolveResult = resolve
+  })
+  const exited = new Promise<void>((resolve) => {
+    resolveExited = resolve
+  })
+  const settleResult = (value: ChildProcessResult) => {
+    if (resultWasSettled) return
+    resultWasSettled = true
+    resolveResult(value)
+  }
+  const child = startChild(executable, arguments_, (error, stdout, stderr) => {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    processes.delete(active)
+    resolveExited()
     const timedOut = termination?.kind === 'timeout'
-    resolveSettled({
+    settleResult({
       status: termination ? null : error ? (typeof error.code === 'number' ? error.code : 1) : 0,
       stdout: String(stdout),
       stderr: String(stderr),
@@ -84,18 +121,39 @@ function runTrackedChildProcess(executable: string, arguments_: string[], timeou
     })
   })
   const terminate = (reason: typeof termination) => {
-    if (termination) return
-    child.kill('SIGKILL')
+    if (termination) {
+      if (terminationFailure) throw terminationFailure
+      return
+    }
     termination = reason
+    try {
+      if (!child.kill('SIGKILL')) {
+        throw new Error('the child process rejected SIGKILL')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      terminationFailure = error instanceof Error ? error : new Error(message)
+      if (reason?.kind === 'timeout') {
+        settleResult({
+          status: null,
+          stdout: '',
+          stderr: '',
+          error: `Child process timed out after ${reason.timeoutMs} ms but termination failed: ${message}`,
+          timedOut: true,
+        })
+        return
+      }
+      throw terminationFailure
+    }
   }
   active = {
-    child,
-    settled,
+    child: child as ChildProcess,
+    exited,
     terminateForCleanup: () => terminate({ kind: 'cleanup' }),
   }
-  activeChildProcesses.add(active)
+  processes.add(active)
   timeoutHandle = setTimeout(() => terminate({ kind: 'timeout', timeoutMs }), timeoutMs)
-  return settled
+  return result
 }
 
 function runPowerShell(arguments_: string[]) {
@@ -662,9 +720,35 @@ function allFileNames(root: string): string[] {
   })
 }
 
-async function cleanupPowerShellTestResources() {
+type CleanupPowerShellTestResourcesOptions = {
+  activeProcesses?: Set<ActiveChildProcess>
+  roots?: string[]
+  settlementTimeoutMs?: number
+}
+
+async function waitForChildExit(
+  process: ActiveChildProcess,
+  timeoutMs: number,
+): Promise<{ kind: 'exited' } | { kind: 'failed'; error: unknown } | { kind: 'timeout' }> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<{ kind: 'timeout' }>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs)
+  })
+  const exit = process.exited.then(
+    () => ({ kind: 'exited' as const }),
+    (error: unknown) => ({ kind: 'failed' as const, error }),
+  )
+  const outcome = await Promise.race([exit, timeout])
+  if (timeoutHandle) clearTimeout(timeoutHandle)
+  return outcome
+}
+
+async function cleanupPowerShellTestResources(options: CleanupPowerShellTestResourcesOptions = {}) {
+  const processes = options.activeProcesses ?? activeChildProcesses
+  const roots = options.roots ?? temporaryRoots
+  const settlementTimeoutMs = options.settlementTimeoutMs ?? childCleanupSettlementTimeoutMs
   const cleanupErrors: string[] = []
-  const active = Array.from(activeChildProcesses)
+  const active = Array.from(processes)
   for (const process of active) {
     try {
       process.terminateForCleanup()
@@ -672,21 +756,29 @@ async function cleanupPowerShellTestResources() {
       cleanupErrors.push(`terminate child ${process.child.pid ?? 'unknown'}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  const settlements = await Promise.allSettled(active.map((process) => process.settled))
-  for (const settlement of settlements) {
-    if (settlement.status === 'rejected') {
-      cleanupErrors.push(`settle child: ${settlement.reason instanceof Error ? settlement.reason.message : String(settlement.reason)}`)
+  const exits = await Promise.all(active.map(async (process) => ({
+    process,
+    outcome: await waitForChildExit(process, settlementTimeoutMs),
+  })))
+  for (const { process, outcome } of exits) {
+    if (outcome.kind === 'timeout') {
+      cleanupErrors.push(`child ${process.child.pid ?? 'unknown'} did not exit within ${settlementTimeoutMs} ms`)
+    } else if (outcome.kind === 'failed') {
+      cleanupErrors.push(`observe child ${process.child.pid ?? 'unknown'} exit: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`)
     }
   }
-  if (activeChildProcesses.size > 0) {
-    cleanupErrors.push(`${activeChildProcesses.size} child process(es) remained active after cleanup`)
-  }
-
-  for (const root of temporaryRoots.splice(0)) {
-    try {
-      rmSync(root, { recursive: true, force: true })
-    } catch (error) {
-      cleanupErrors.push(`remove TEMP root ${root}: ${error instanceof Error ? error.message : String(error)}`)
+  if (processes.size > 0) {
+    cleanupErrors.push(`${processes.size} child process(es) remained active after cleanup`)
+    for (const root of roots) {
+      cleanupErrors.push(`preserved TEMP root ${root} because a child process may still access it`)
+    }
+  } else {
+    for (const root of roots.splice(0)) {
+      try {
+        rmSync(root, { recursive: true, force: true })
+      } catch (error) {
+        cleanupErrors.push(`remove TEMP root ${root}: ${error instanceof Error ? error.message : String(error)}`)
+      }
     }
   }
   if (cleanupErrors.length > 0) {
@@ -749,6 +841,28 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(Date.now() - startedAt).toBeLessThan(2_000)
   })
 
+  it('settles the invocation with a clear error when timeout termination is denied', async () => {
+    const isolatedProcesses = new Set<ActiveChildProcess>()
+    const result = await runTrackedChildProcess(
+      'fixture-child.exe',
+      [],
+      10,
+      {
+        activeProcesses: isolatedProcesses,
+        startChild: () => ({
+          pid: 4242,
+          kill: () => {
+            throw new Error('fixture access denied')
+          },
+        }),
+      },
+    )
+
+    expect(result).toMatchObject({ status: null, timedOut: true })
+    expect(result.error).toContain('termination failed: fixture access denied')
+    expect(isolatedProcesses.size).toBe(1)
+  })
+
   it('settles active child processes before deleting their temporary roots', async () => {
     const root = newTemporaryRoot()
     writeFileSync(join(root, 'owned-by-child.txt'), 'cleanup-order-fixture')
@@ -763,6 +877,51 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
 
     expect(result.error).toContain('terminated during test cleanup')
     expect(existsSync(root)).toBe(false)
+  })
+
+  it('bounds failed cleanup and preserves TEMP while a child may still access it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rain-nvidia-evidence-residual-test-'))
+    const isolatedRoots = [root]
+    const isolatedProcesses = new Set<ActiveChildProcess>()
+    const invocation = runTrackedChildProcess(
+      'fixture-child.exe',
+      [],
+      10,
+      {
+        activeProcesses: isolatedProcesses,
+        startChild: () => ({
+          pid: 4343,
+          kill: () => {
+            throw new Error('fixture termination denied')
+          },
+        }),
+      },
+    )
+    const startedAt = Date.now()
+
+    try {
+      expect((await invocation).error).toContain('termination failed: fixture termination denied')
+      let cleanupError = ''
+      try {
+        await cleanupPowerShellTestResources({
+          activeProcesses: isolatedProcesses,
+          roots: isolatedRoots,
+          settlementTimeoutMs: 20,
+        })
+      } catch (error) {
+        cleanupError = error instanceof Error ? error.message : String(error)
+      }
+
+      expect(Date.now() - startedAt).toBeLessThan(1_000)
+      expect(cleanupError).toContain('terminate child 4343: fixture termination denied')
+      expect(cleanupError).toContain('child 4343 did not exit within 20 ms')
+      expect(cleanupError).toContain('1 child process(es) remained active after cleanup')
+      expect(cleanupError).toContain(`preserved TEMP root ${root}`)
+      expect(existsSync(root)).toBe(true)
+      expect(isolatedRoots).toEqual([root])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('requires independent installer and controlled-build artifact-manifest trust inputs', () => {
