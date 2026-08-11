@@ -11,13 +11,30 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execFile, spawnSync } from 'node:child_process'
+import { execFile, spawnSync, type ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const repoRoot = join(__dirname, '..')
 const runnerPath = join(repoRoot, 'scripts', 'run-nvidia-release-evidence.ps1')
 const contractModulePath = join(repoRoot, 'scripts', 'nvidia-release-evidence-contract.psm1')
 const temporaryRoots: string[] = []
+const powerShellProcessTimeoutMs = 4_000
+
+type ChildProcessResult = {
+  status: number | null
+  stdout: string
+  stderr: string
+  error?: string
+  timedOut: boolean
+}
+
+type ActiveChildProcess = {
+  child: ChildProcess
+  settled: Promise<ChildProcessResult>
+  terminateForCleanup: () => void
+}
+
+const activeChildProcesses = new Set<ActiveChildProcess>()
 
 function resolvePowerShellExecutable(
   environment: Record<string, string | undefined> = process.env,
@@ -39,19 +56,50 @@ function resolvePowerShellExecutable(
 
 const powerShellExecutable = resolvePowerShellExecutable()
 
-function runPowerShell(arguments_: string[]) {
-  return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
-    execFile(powerShellExecutable, arguments_, {
-      encoding: 'utf8',
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      resolve({
-        status: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
-        stdout: String(stdout),
-        stderr: String(stderr),
-      })
+function runTrackedChildProcess(executable: string, arguments_: string[], timeoutMs: number) {
+  let active!: ActiveChildProcess
+  let termination: { kind: 'timeout'; timeoutMs: number } | { kind: 'cleanup' } | undefined
+  let timeoutHandle: ReturnType<typeof setTimeout>
+  let resolveSettled!: (result: ChildProcessResult) => void
+  const settled = new Promise<ChildProcessResult>((resolve) => {
+    resolveSettled = resolve
+  })
+  const child = execFile(executable, arguments_, {
+    encoding: 'utf8',
+    windowsHide: true,
+  }, (error, stdout, stderr) => {
+    clearTimeout(timeoutHandle)
+    activeChildProcesses.delete(active)
+    const timedOut = termination?.kind === 'timeout'
+    resolveSettled({
+      status: termination ? null : error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+      stdout: String(stdout),
+      stderr: String(stderr),
+      error: timedOut
+        ? `Child process timed out after ${termination.timeoutMs} ms and was terminated: ${executable}`
+        : termination?.kind === 'cleanup'
+          ? `Child process was terminated during test cleanup: ${executable}`
+          : error?.message,
+      timedOut,
     })
   })
+  const terminate = (reason: typeof termination) => {
+    if (termination) return
+    child.kill('SIGKILL')
+    termination = reason
+  }
+  active = {
+    child,
+    settled,
+    terminateForCleanup: () => terminate({ kind: 'cleanup' }),
+  }
+  activeChildProcesses.add(active)
+  timeoutHandle = setTimeout(() => terminate({ kind: 'timeout', timeoutMs }), timeoutMs)
+  return settled
+}
+
+function runPowerShell(arguments_: string[]) {
+  return runTrackedChildProcess(powerShellExecutable, arguments_, powerShellProcessTimeoutMs)
 }
 
 function newTemporaryRoot() {
@@ -491,7 +539,7 @@ ${JSON.stringify(request)}
     status: result.status,
     output: line ? JSON.parse(line) as { ok: boolean; value?: any; error?: string } : {
       ok: false,
-      error: `${result.stdout}\n${result.stderr}`,
+      error: result.error ?? `${result.stdout}\n${result.stderr}`,
     },
   }
 }
@@ -614,11 +662,39 @@ function allFileNames(root: string): string[] {
   })
 }
 
-afterEach(() => {
-  for (const root of temporaryRoots.splice(0)) {
-    rmSync(root, { recursive: true, force: true })
+async function cleanupPowerShellTestResources() {
+  const cleanupErrors: string[] = []
+  const active = Array.from(activeChildProcesses)
+  for (const process of active) {
+    try {
+      process.terminateForCleanup()
+    } catch (error) {
+      cleanupErrors.push(`terminate child ${process.child.pid ?? 'unknown'}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
-})
+  const settlements = await Promise.allSettled(active.map((process) => process.settled))
+  for (const settlement of settlements) {
+    if (settlement.status === 'rejected') {
+      cleanupErrors.push(`settle child: ${settlement.reason instanceof Error ? settlement.reason.message : String(settlement.reason)}`)
+    }
+  }
+  if (activeChildProcesses.size > 0) {
+    cleanupErrors.push(`${activeChildProcesses.size} child process(es) remained active after cleanup`)
+  }
+
+  for (const root of temporaryRoots.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true })
+    } catch (error) {
+      cleanupErrors.push(`remove TEMP root ${root}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new Error(`PowerShell test cleanup failed: ${cleanupErrors.join('; ')}`)
+  }
+}
+
+afterEach(cleanupPowerShellTestResources)
 
 describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
   it('selects an explicit PowerShell test executable override before preferring pwsh', () => {
@@ -658,6 +734,35 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(firstCompleted).toBe('event-loop-turn')
     expect(eventLoopTurnObserved).toBe(true)
     assertContractSucceeded(await invocation)
+  })
+
+  it('terminates a hung child process within its adapter budget and reports the timeout', async () => {
+    const startedAt = Date.now()
+    const result = await runTrackedChildProcess(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1000)'],
+      100,
+    )
+
+    expect(result).toMatchObject({ status: null, timedOut: true })
+    expect(result.error).toContain('timed out after 100 ms')
+    expect(Date.now() - startedAt).toBeLessThan(2_000)
+  })
+
+  it('settles active child processes before deleting their temporary roots', async () => {
+    const root = newTemporaryRoot()
+    writeFileSync(join(root, 'owned-by-child.txt'), 'cleanup-order-fixture')
+    const invocation = runTrackedChildProcess(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1000)'],
+      200,
+    )
+
+    await cleanupPowerShellTestResources()
+    const result = await invocation
+
+    expect(result.error).toContain('terminated during test cleanup')
+    expect(existsSync(root)).toBe(false)
   })
 
   it('requires independent installer and controlled-build artifact-manifest trust inputs', () => {
