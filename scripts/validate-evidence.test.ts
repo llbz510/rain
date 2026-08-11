@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const validateScript = join(repoRoot, 'scripts', 'validate-evidence.ps1')
+const realE2eScript = join(repoRoot, 'scripts', 'run-real-e2e.ps1')
 const externalEvidenceJudgeTimeoutMs = 30_000
 const videoBytes = Buffer.from('rain evidence validator unit-test video fixture')
 const testVideoHash = createHash('sha256').update(videoBytes).digest('hex').toUpperCase()
@@ -359,20 +360,70 @@ describe('evidence validator', { timeout: externalEvidenceJudgeTimeoutMs }, () =
   })
 })
 describe('real E2E runner GPU preference', () => {
-  it('defaults to CUDA and requires CUDA evidence validation', () => {
-    const runner = readFileSync(join(repoRoot, 'scripts', 'run-real-e2e.ps1'), 'utf8')
+  it('defaults to CUDA and resolves the configured CUDA build plan through its CLI', () => {
+    const toolingRoot = join(tmpdir(), 'rain-real-e2e-tooling-interface')
+    const cudaToolkitRoot = join(tmpdir(), 'rain-real-e2e-cuda-interface')
+    const cargoTargetDir = join(tmpdir(), 'rain-real-e2e-target-interface')
+    const whisperModelPath = join(tmpdir(), 'rain-real-e2e-model-interface.bin')
+    const invocationCwd = mkdtempSync(join(tmpdir(), 'rain-real-e2e-plan-only-cwd-'))
+    const filesBefore = readdirSync(invocationCwd)
+    const parentPathBefore = process.env.PATH
+    const parentCargoTargetBefore = process.env.CARGO_TARGET_DIR
+    const relativeEvidenceRoot = 'evidence-plan-only-relative'
+    const nativeDriverPath = 'C:\\Program Files\\Rain Tools\\msedgedriver.exe'
+    const output = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        realE2eScript,
+        '-PlanOnly',
+        '-RepoRoot',
+        repoRoot,
+        '-ToolingRoot',
+        toolingRoot,
+        '-CudaToolkitRoot',
+        cudaToolkitRoot,
+        '-CargoTargetDir',
+        cargoTargetDir,
+        '-WhisperModelPath',
+        whisperModelPath,
+        '-EvidenceRoot',
+        relativeEvidenceRoot,
+        '-NativeDriverPath',
+        nativeDriverPath,
+      ],
+      {
+        cwd: invocationCwd,
+        encoding: 'utf8',
+        stdio: 'pipe',
+        env: { ...process.env, RAIN_WHISPER_BACKEND: '' },
+      },
+    )
+    const plan = JSON.parse(output)
 
-    expect(runner).toMatch(/\$WhisperBackend\s*=.*'cuda'/s)
-    expect(runner).toContain('cuda-12.9-redist-root\\bin\\nvcc.exe')
-    expect(runner).toContain("$env:CMAKE_GENERATOR = 'Ninja'")
-    expect(runner).toContain('$env:CMAKE_MAKE_PROGRAM = $ninja')
-    expect(runner).toContain("$npmCmd = (Get-Command 'npm.cmd'")
-    expect(runner).toContain('Invoke-BuildCommand $npmCmd $tauriBuildArgs')
-    expect(runner).not.toContain('$buildExitCode = Invoke-BuildCommand')
-    expect(runner).toContain('scripts/build-whisper-cuda-worker.ps1')
-    expect(runner).toContain('$env:RAIN_WHISPER_CUDA_WORKER')
-    expect(runner).not.toMatch(/\$tauriBuildArgs\s*\+=\s*@\('--features',\s*'cuda-whisper'\)/)
-    expect(runner).toContain('-ExpectedWhisperBackend $selectedWhisperBackend')
+    expect(plan).toMatchObject({
+      whisperBackend: 'cuda',
+      repoRoot,
+      toolingRoot,
+      cudaToolkitRoot,
+      cargoTargetDir,
+      whisperModelPath,
+      cmakeGenerator: 'Ninja',
+      expectedWhisperBackend: 'cuda',
+    })
+    expect(plan.cudaNvccCandidate).toBe(join(cudaToolkitRoot, 'bin', 'nvcc.exe'))
+    expect(plan.cudaWorkerBuildScript).toBe(join(repoRoot, 'scripts', 'build-whisper-cuda-worker.ps1'))
+    expect(plan.workingDirectory).toBe(repoRoot)
+    expect(plan.evidenceRoot).toBe(join(repoRoot, relativeEvidenceRoot))
+    expect(plan.nativeDriverPath).toBe(nativeDriverPath)
+    expect(plan.nativeDriverArguments).toBe(`--native-driver "${nativeDriverPath}"`)
+    expect(readdirSync(invocationCwd)).toEqual(filesBefore)
+    expect(process.env.PATH).toBe(parentPathBefore)
+    expect(process.env.CARGO_TARGET_DIR).toBe(parentCargoTargetBefore)
   })
 
   it('routes schema v2 evidence through capability probes and the production import controller', () => {

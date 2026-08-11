@@ -25,7 +25,15 @@ const coverage = `
 function decisionRows(overrides: Record<number, string> = {}) {
   return Array.from({ length: 99 }, (_, index) => {
     const number = index + 1
-    return overrides[number] ?? `| DEC-PRD-${String(number).padStart(3, '0')} | \`M01-positioning.md\` | Confirmed AC | \`AC-TEST-01\` | intent ${number} |`
+    const id = `DEC-PRD-${String(number).padStart(3, '0')}`
+    if (overrides[number]) return overrides[number]
+    if (number <= 72) {
+      return `| ${id} | \`M01-positioning.md\` | Confirmed AC | \`AC-TEST-01\` | intent ${number} |`
+    }
+    if (number <= 95) {
+      return `| ${id} | \`M01-positioning.md\` | Proposed | Post-release boundary | intent ${number} |`
+    }
+    return `| ${id} | \`M01-positioning.md\` | Out-of-scope | Excluded boundary | intent ${number} |`
   }).join('\n')
 }
 
@@ -40,7 +48,8 @@ function validate(overrides = {}) {
     acceptance,
     coverage,
     decisionCoverage,
-    projectState: '# State\n\n## Known defects\n\nNone.\n\n## What changed\n',
+    projectState: '# State\n\nPrimary checkout: current Git worktree.\n\n## Known defects\n\nNone.\n\n## What changed\n',
+    deliveryPlan: '# Delivery plan\n\nM3-S2 is Superseded and not a release blocker.\n',
     availableFiles: ['good.test.ts', 'M01-positioning.md'],
     ...overrides,
   })
@@ -75,7 +84,7 @@ describe('control-plane validator', () => {
   })
 
   it('rejects a current-state claim that demotes a Confirmed AC to Proposed', () => {
-    const projectState = '# State\n\n## Known defects\n\nAC-TEST-01 remains Proposed.\n\n## What changed\n'
+    const projectState = '# State\n\nPrimary checkout: current Git worktree.\n\n## Known defects\n\nAC-TEST-01 remains Proposed.\n\n## What changed\n'
 
     expect(validate({ projectState }))
       .toContain('PROJECT_STATE current facts call Confirmed AC-TEST-01 Proposed.')
@@ -140,5 +149,55 @@ describe('control-plane validator', () => {
       .toContain('DEC-PRD-001 references non-current product source: HANDOFF.md.')
     expect(validate({ decisionCoverage: missingSource }))
       .toContain('DEC-PRD-001 references missing product source: M99-missing.md.')
+  })
+
+  it('rejects product-decision disposition count drift from the user-confirmed 72/23/4 summary', () => {
+    const drifted = decisionCoverage.replace(
+      '| DEC-PRD-073 | `M01-positioning.md` | Proposed | Post-release boundary | intent 73 |',
+      '| DEC-PRD-073 | `M01-positioning.md` | Confirmed AC | `AC-TEST-01` | intent 73 |',
+    )
+
+    expect(validate({ decisionCoverage: drifted }))
+      .toContain('Product decision disposition counts are Confirmed AC=73, Proposed=22, Out-of-scope=4; expected Confirmed AC=72, Proposed=23, Out-of-scope=4.')
+  })
+
+  it('rejects an active delivery exit criterion that resurrects a Superseded AC', () => {
+    const supersededAcceptance = `${acceptance}
+
+### AC-RL-07 Historical no-NVIDIA evidence
+
+状态：\`Superseded\`
+`
+    const deliveryPlan = '# Delivery plan\n\nAC-RL-07 is a release blocker and requires no-NVIDIA Evidence before exit.\n'
+
+    expect(validate({ acceptance: supersededAcceptance, deliveryPlan }))
+      .toContain('Active delivery plan treats Superseded AC-RL-07 as an exit criterion.')
+  })
+
+  it('rejects active no-NVIDIA exit semantics even when the Superseded AC id is not on the same line', () => {
+    const supersededAcceptance = `${acceptance}
+
+### AC-RL-07 Historical no-NVIDIA evidence
+
+状态：\`Superseded\`
+`
+    const deliveryPlan = '# Delivery plan\n\n## M3 exit conditions\n\nA clean no-NVIDIA Windows Evidence remains required before release exit.\n'
+
+    expect(validate({ acceptance: supersededAcceptance, deliveryPlan }))
+      .toContain('Active delivery plan requires no-NVIDIA Evidence despite a Superseded no-NVIDIA release contract.')
+  })
+
+  it('rejects the legacy checkout path in active current facts', () => {
+    const projectState = '# State\n\nPrimary checkout: `D:\\gongju\\shengcan\\rain`\n\n## What changed\n'
+
+    expect(validate({ projectState }))
+      .toContain('PROJECT_STATE active canonical checkout still uses legacy path: D:\\gongju\\shengcan\\rain.')
+  })
+
+  it('normalizes case and slash variants before rejecting a legacy checkout path', () => {
+    const projectState = '# State\n\nPrimary checkout: `d:/GONGJU/shengcan/RAIN/`\n\n## What changed\n'
+
+    expect(validate({ projectState }))
+      .toContain('PROJECT_STATE active canonical checkout still uses legacy path: D:\\gongju\\shengcan\\rain.')
   })
 })

@@ -229,4 +229,4 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ## 7. 下一会话唯一推荐动作
 
-当前原子 Slice 是用户明确授权的 GPU-required Harness Migration：退役 `AC-RL-07`、no-NVIDIA runner 和无 NVIDIA 发布承诺，同时保留 CPU adapter/Auto fallback 实现。完成并合并后，下一唯一动作是 M3-S3：从精确合并后的 `master` 重建正式候选，在当前受支持 NVIDIA Windows 上执行 Auto/Forced CUDA、Forced CPU、取消与错误分类 Evidence；不得同时启动签名/许可、安装生命周期或真实视频 Evidence。
+当前原子 Slice 是 M3-S3 cancellation/process-observation enablement 的独立审查：runner 已通过深 module 获得 180 秒确定性 PCM fixture（仅在 `%TEMP%` 流式生成并 finally 删除）和 session-scoped Windows process-start event adapter；fake adapter 行为合同裁判精确 Rain PID/path/start-time/WebDriver ancestry、短命 worker、其他 Rain 隔离、PID 复用拒绝与订阅清理。runner 不再使用全系统进程名轮询，Forced CPU 与取消只接受本次 session 的归属事实；取消必须在 backend-selected 后且任务仍运行时进入固定窗口，否则 fail-closed。该 Slice 只建立 enablement，不构建候选、不运行 installer/GPU/model/媒体、不写 Release Evidence，也不把 `AC-RL-08` 升级。下一唯一动作是完成独立 Spec/Standards 审查；在审查、PR Clean Windows Harness 和保护合并完成前，不得重建候选或真实执行 runner，也不得同时启动签名/许可、安装生命周期、LLM 或完整真实视频 Evidence。

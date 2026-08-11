@@ -1,7 +1,7 @@
 # Rain Release Artifact Contract
 
 > 状态：`Active`
-> 更新日期：2026-08-03
+> 更新日期：2026-08-11
 > 路线图位置：M3-S1 Release artifact contract
 > 授权边界：本文件只确认正式发布产物的可执行合同。它不构建安装器、不签发 Release Evidence、不批准 CUDA runtime 许可、不修改产品代码、不运行 GPU/CPU 短样本、不生成真实视频 Evidence。
 > 支持矩阵修订：2026-08-03 用户确认 Core Release 只支持具备受支持 NVIDIA GPU + 兼容驱动的 Windows x64 主机；`AC-RL-07` 和 M3-S2 no-NVIDIA Judge 已退役。
@@ -74,6 +74,8 @@ The current approximate payload size remains about 804 MB, but size must be re-m
 
 Every RC and formal release must publish a machine-readable artifact manifest generated from the built artifact, not handwritten from intended values.
 
+M3-S3 accepts that generated manifest only with an independent `ExpectedArtifactManifestSha256` trust input. The expected hash may come **only** from the controlled merged-target build record for the exact candidate; it must not be copied from the candidate manifest itself, inferred after installation, supplied by a handwritten note, or described as a signature/attestation. The runner verifies the manifest bytes against that expected hash before it reads any claimed fields. It then requires an explicit controlled-build record whose source repository, target commit, clean-tree result, generator identity/version and build-record metadata agree with the expected target. The manifest's `targetCommit`, `installer.fileName`, `installer.sizeBytes`, `installer.sha256` and NSIS Windows x64 kind must all match the supplied candidate and expected target. Recording those values only after installation is not provenance. If the controlled merged-target build record is unavailable, the runner must fail closed and must not write a passed Evidence manifest. This is a candidate-input boundary, not a claim that signing or Release Evidence has been completed.
+
 Required minimum fields:
 
 | Field | Meaning |
@@ -83,6 +85,11 @@ Required minimum fields:
 | `version` | Must match Tauri version `0.1.0` for this release |
 | `identifier` | Must be `com.rain.app` |
 | `targetCommit` | Full Git commit SHA used to build the installer |
+| `controlledBuild.sourceRepository` | Nonblank canonical source repository recorded by the controlled merged-target build |
+| `controlledBuild.targetCommit` | Full target SHA; must equal `targetCommit` and the independently supplied expected target |
+| `controlledBuild.cleanTree` | Must be `true` for the controlled build record |
+| `controlledBuild.generator.id` / `.version` | Controlled generator identity and version |
+| `controlledBuild.buildMetadata.buildRecordId` / `.builtAt` | Controlled build-record identity and ISO-8601 build time |
 | `installer.fileName` | Public installer file name |
 | `installer.sha256` | SHA-256 of the installer bytes |
 | `installer.sizeBytes` | Installer byte length |
@@ -136,7 +143,7 @@ The next runtime Evidence Slice is M3-S3 on a supported NVIDIA Windows host. Lat
 | --- | --- |
 | M3 artifact generator | Builds from clean checkout, produces one NSIS installer, generates artifact manifest from bytes and installed files, and verifies main executable CUDA imports are absent |
 | M3-S2 no NVIDIA/CUDA Evidence | `Retired` — `AC-RL-07` and its runner were superseded by the 2026-08-03 GPU-required release migration |
-| M3-S3 NVIDIA Evidence | Uses `CONTEXT.md`'s production probe + model-memory predicate, records and signs only the exact GPU/driver/memory/protocol/package/model configuration, then proves Auto CUDA, Forced CUDA, Forced CPU no-worker, cancellation and classified worker/model failures |
+| M3-S3 NVIDIA Evidence | `scripts/run-nvidia-release-evidence.ps1` verifies an independently supplied expected artifact-manifest hash from a controlled merged-target build record, then uses `CONTEXT.md`'s production probe + model-memory predicate. The current runner deliberately fails closed before installation/desktop execution because the deterministic cancellation fixture and session-scoped process-tree adapter are not yet implemented. It therefore cannot write passed Evidence; its PowerShell external-interface behavior contract is runner coverage, not Evidence. |
 | M3 lifecycle Slices | Clean install, same-version reinstall, old-fixture upgrade, uninstall and reinstall each record file/user-data manifests separately |
 | M3-S5 signing/SBOM/legal/hygiene | Separately verifies signature, SBOM/notices, human CUDA redistribution approval and forbidden-content scan |
 | M3-S6 disclosure UX | Verifies download page and installer UI text against the artifact manifest, NVIDIA Evidence, the executable host-eligibility predicate and only the exact configurations signed by valid M3-S3 Evidence |

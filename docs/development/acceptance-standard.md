@@ -610,7 +610,7 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 实现归属：`whisper_backend`、CUDA worker、universal installer。
 
-裁判：独立 Evidence runner 记录 GPU 型号、驱动版本、总/空闲显存、worker 协议、生产 probe 结果、包/模型哈希和显存门禁结果；Auto 与 Forced CUDA 真实输出；Forced CPU 不启动 worker；取消/崩溃/模型错误 Evidence。只有记录的精确 GPU/驱动配置获得签发。Required Evidence tier：Strong + Release Evidence。
+裁判：`scripts/run-nvidia-release-evidence.ps1` 在启动安装器前必须用独立 `ExpectedArtifactManifestSha256` 核对由受控 merged-target build record 产生的 artifact manifest 字节，再核对其受控 source/target/clean-tree/generator/build metadata、目标提交、installer 名称、大小和 SHA-256；若没有该可信 build record 必须 fail-closed，不能写 passed Evidence。它还拒绝安装树与 CUDA payload manifest 的少项、多项、重复、路径逃逸、payload root 外 CUDA/driver DLL 和 bundled `nvcuda.dll`。确定性 TEMP cancellation fixture 与 session-scoped process-start adapter 的本地 enablement 已实现，runner 不再固定阻断于 `runtime-adapter-readiness`：fixture 创建、writer/stream 独立释放或删除失败必须保留聚合错误并 fail-closed；取消窗口从浏览器 progress callback 当时记录的绝对 epoch 时间与序号计算，不得在 PowerShell 轮询读到事件后重置；Forced CPU/取消只能使用本 WebDriver/Rain PID/path/start-time/ancestry 的 worker 事件，并在读取前核对唯一 subscriber、provider identity、running event job 和 Rain root identity，订阅丢失/重复/停止/失败均拒绝。禁止用全局进程名、静默空事件集或短样本写顶层 passed。安装后仍须通过生产 Tauri command/event 接口真实裁判 Auto 与 Forced CUDA 输出、Forced CPU 不启动 worker、取消、注入 worker 进程失败和模型错误不跨后端重跑，并记录 GPU 型号、驱动版本、总/空闲显存、worker 协议、生产 probe、包/模型哈希和显存门禁结果。当前 Slice 未运行 installer/GPU/model，`AC-RL-08` 仍为 Partial；只有真实记录的精确 GPU/驱动配置可获得签发。runner 的行为合同测试不是 Release Evidence；Required Evidence tier：Strong + Release Evidence。
 
 明确范围外：把本机旧 smoke 自动继承给 RC、跨所有 NVIDIA 型号承诺。
 
