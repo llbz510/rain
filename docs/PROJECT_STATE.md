@@ -2103,6 +2103,12 @@ The repair uses a streamed .NET `FileStream` plus `SHA256` helper throughout the
 
 Local post-repair verification is GREEN at NVIDIA contracts 36/36 and `npm.cmd test` 87 files / 549 tests passed with one contractually skipped live-key test; `npx.cmd tsc --noEmit`, `npm.cmd run harness:control`, `npm.cmd run build:e2e` and `npm.cmd run build` passed. This is local portability enablement only: Cargo/Rust/Whisper, installer, GPU, model and Release Evidence were not run locally, `src-tauri/target` remained absent, and a new Clean Windows Harness result is still required after the repair commit is pushed.
 
+### 2026-08-11 PR #32 Clean Windows contract-test timeout correction
+
+Clean Windows Harness run `31471790846` on portability commit `e27a2d98eb5aad0ae784aedcc775b72d8b884b13` passed control-plane validation and reached `npm test`, where 548 tests passed and one live-key test skipped. Its only failure was the success-manifest contract integration test exceeding Vitest's default 5-second timeout: the test completed its five intentionally isolated PowerShell contract processes in 8233 ms under shared Windows runner load. The workflow therefore stopped before the frontend builds and Rust/Whisper gate and is not GREEN.
+
+The correction leaves the global Vitest timeout unchanged and gives only that five-process integration test a 15-second budget. All five behavioral cases remain intact, so missing, out-of-order and duplicate phases are still rejected, the first duplicate record remains preserved, and a complete ordered phase set still writes a passed manifest. Local targeted verification completed the test in about 2 seconds and the NVIDIA contract file remained GREEN at 36/36; the full lightweight gates also passed with 87 test files / 549 tests passed and one live-key test skipped, followed by `npx.cmd tsc --noEmit`, `npm.cmd run harness:control`, `npm.cmd run build:e2e` and `npm.cmd run build`. Cargo/Rust/Whisper, installer, GPU, model and Release Evidence were not run locally; `src-tauri/target` remained absent and a new Clean Windows Harness result is required after this correction is pushed.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

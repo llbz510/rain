@@ -916,6 +916,8 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(result.output.error).not.toContain("property 'Count'")
   })
 
+  // This integration test intentionally starts five isolated PowerShell processes. The clean
+  // Windows Harness measured 8.2 s under shared-runner load, so keep the larger budget local.
   it('refuses a success manifest unless every required phase is unique, passed and in order', () => {
     const requiredPhases = ['input-validation', 'payload-validation']
     const common = {
@@ -954,7 +956,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     const complete = invokeContract({ ...common, runRoot: newTemporaryRoot(), phases: requiredPhases })
     assertContractSucceeded(complete)
     expect(JSON.parse(readFileSync(complete.output.value.manifestPath, 'utf8'))).toMatchObject({ result: 'passed' })
-  })
+  }, 15_000)
 
   it('rejects PE inspection failures and safely quotes a driver path that contains spaces', () => {
     const failedTool = invokeContract({ operation: 'pe-import-inspection', toolName: 'llvm-objdump.exe', exitCode: 1, output: 'tool error' })
