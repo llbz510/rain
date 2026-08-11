@@ -18,8 +18,12 @@ const repoRoot = join(__dirname, '..')
 const runnerPath = join(repoRoot, 'scripts', 'run-nvidia-release-evidence.ps1')
 const contractModulePath = join(repoRoot, 'scripts', 'nvidia-release-evidence-contract.psm1')
 const temporaryRoots: string[] = []
-const powerShellProcessTimeoutMs = 4_000
-const childCleanupSettlementTimeoutMs = 250
+const powerShellTestBudgets = Object.freeze({
+  contractProcessTimeoutMs: 4_000,
+  runnerProcessTimeoutMs: 12_000,
+  cleanupExitTimeoutMs: 2_000,
+  realRunnerCliTestTimeoutMs: 30_000,
+})
 
 type ChildProcessResult = {
   status: number | null
@@ -157,7 +161,11 @@ function runTrackedChildProcess(
 }
 
 function runPowerShell(arguments_: string[]) {
-  return runTrackedChildProcess(powerShellExecutable, arguments_, powerShellProcessTimeoutMs)
+  return runTrackedChildProcess(
+    powerShellExecutable,
+    arguments_,
+    powerShellTestBudgets.contractProcessTimeoutMs,
+  )
 }
 
 function newTemporaryRoot() {
@@ -702,7 +710,7 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
 }
 
 function invokeRunner(arguments_: string[]) {
-  return runPowerShell([
+  return runTrackedChildProcess(powerShellExecutable, [
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
@@ -710,7 +718,7 @@ function invokeRunner(arguments_: string[]) {
     '-File',
     runnerPath,
     ...arguments_,
-  ])
+  ], powerShellTestBudgets.runnerProcessTimeoutMs)
 }
 
 function allFileNames(root: string): string[] {
@@ -746,7 +754,7 @@ async function waitForChildExit(
 async function cleanupPowerShellTestResources(options: CleanupPowerShellTestResourcesOptions = {}) {
   const processes = options.activeProcesses ?? activeChildProcesses
   const roots = options.roots ?? temporaryRoots
-  const settlementTimeoutMs = options.settlementTimeoutMs ?? childCleanupSettlementTimeoutMs
+  const settlementTimeoutMs = options.settlementTimeoutMs ?? powerShellTestBudgets.cleanupExitTimeoutMs
   const cleanupErrors: string[] = []
   const active = Array.from(processes)
   for (const process of active) {
@@ -789,6 +797,18 @@ async function cleanupPowerShellTestResources(options: CleanupPowerShellTestReso
 afterEach(cleanupPowerShellTestResources)
 
 describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
+  it('budgets contract and real-runner PowerShell work independently within the local test ceiling', () => {
+    expect(powerShellTestBudgets.contractProcessTimeoutMs).toBe(4_000)
+    expect(powerShellTestBudgets.runnerProcessTimeoutMs).toBe(12_000)
+    expect(powerShellTestBudgets.cleanupExitTimeoutMs).toBe(2_000)
+    expect(powerShellTestBudgets.runnerProcessTimeoutMs).toBeGreaterThan(5_299 * 2)
+    expect(
+      powerShellTestBudgets.runnerProcessTimeoutMs * 2
+      + powerShellTestBudgets.cleanupExitTimeoutMs,
+    ).toBeLessThan(powerShellTestBudgets.realRunnerCliTestTimeoutMs)
+    expect(powerShellTestBudgets.realRunnerCliTestTimeoutMs).toBe(30_000)
+  })
+
   it('selects an explicit PowerShell test executable override before preferring pwsh', () => {
     expect(resolvePowerShellExecutable(
       { RAIN_TEST_POWERSHELL_EXE: 'fixture-powershell.exe' },
@@ -1600,5 +1620,5 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(persistedText).not.toContain('sk-secret')
     expect(persistedText).not.toContain('person@example.com')
     expect(persistedText).not.toContain('C:\\Users\\24627')
-  })
+  }, powerShellTestBudgets.realRunnerCliTestTimeoutMs)
 })
