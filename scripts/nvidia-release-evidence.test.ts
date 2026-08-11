@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -17,6 +18,26 @@ const repoRoot = join(__dirname, '..')
 const runnerPath = join(repoRoot, 'scripts', 'run-nvidia-release-evidence.ps1')
 const contractModulePath = join(repoRoot, 'scripts', 'nvidia-release-evidence-contract.psm1')
 const temporaryRoots: string[] = []
+
+function resolvePowerShellExecutable(
+  environment: Record<string, string | undefined> = process.env,
+  isAvailable: (candidate: string) => boolean = (candidate) => {
+    const probe = spawnSync(candidate, ['-NoProfile', '-NonInteractive', '-Command', '$null'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    return probe.status === 0
+  },
+) {
+  const override = environment.RAIN_TEST_POWERSHELL_EXE?.trim()
+  if (override) return override
+  for (const candidate of ['pwsh.exe', 'powershell.exe']) {
+    if (isAvailable(candidate)) return candidate
+  }
+  throw new Error('NVIDIA release-evidence tests require pwsh.exe or powershell.exe.')
+}
+
+const powerShellExecutable = resolvePowerShellExecutable()
 
 function newTemporaryRoot() {
   const root = mkdtempSync(join(tmpdir(), 'rain-nvidia-evidence-test-'))
@@ -60,6 +81,9 @@ try {
   $request = @'
 ${JSON.stringify(request)}
 '@ | ConvertFrom-Json
+  if ($request.PSObject.Properties.Name -contains 'shadowGetFileHash' -and [bool]$request.shadowGetFileHash) {
+    function global:Get-FileHash { throw 'Get-FileHash must not be used by the release-evidence contract.' }
+  }
   $value = switch ([string]$request.operation) {
     'provenance' {
       Assert-CandidateArtifactProvenance -InstallerPath ([string]$request.installerPath) -ExpectedTargetCommit ([string]$request.expectedTargetCommit) -ExpectedInstallerSha256 ([string]$request.expectedInstallerSha256) -ArtifactManifestPath ([string]$request.artifactManifestPath) -ExpectedArtifactManifestSha256 ([string]$request.expectedArtifactManifestSha256)
@@ -69,11 +93,19 @@ ${JSON.stringify(request)}
       Assert-InstalledCudaPayload -InstalledRoot ([string]$request.installedRoot) -PayloadManifestPath ([string]$request.payloadManifestPath)
       break
     }
+    'payload-manifest-relative-identity' {
+      Test-ReleaseEvidencePayloadManifestRelativeIdentity -RelativePath ([string]$request.relativePath) -ManifestLeafName ([string]$request.manifestLeafName)
+      break
+    }
     'writer' {
       $writer = New-ReleaseEvidenceWriter -RunRoot ([string]$request.runRoot) -EvidenceId ([string]$request.evidenceId) -ExpectedTargetCommit ([string]$request.expectedTargetCommit) -ExpectedInstallerSha256 ([string]$request.expectedInstallerSha256) -ExpectedArtifactManifestSha256 ([string]$request.expectedArtifactManifestSha256)
       Write-ReleaseEvidencePhase -Writer $writer -Phase 'input-validation' -Result 'passed' -Data @{ source = 'test' } | Out-Null
       $manifestPath = Write-ReleaseEvidenceFailureManifest -Writer $writer -Phase ([string]$request.failedPhase) -ErrorText ([string]$request.errorText)
       [ordered]@{ partialManifestPath = $writer.PartialManifestPath; manifestPath = $manifestPath }
+      break
+    }
+    'tree-redaction-scan' {
+      Assert-ReleaseEvidenceTreeRedacted -RunRoot ([string]$request.runRoot)
       break
     }
     'writer-success' {
@@ -431,7 +463,7 @@ ${JSON.stringify(request)}
   const invocationRoot = newTemporaryRoot()
   const scriptPath = join(invocationRoot, 'invoke-contract.ps1')
   writeFileSync(scriptPath, `\uFEFF${script}`, 'utf8')
-  const result = spawnSync('powershell.exe', [
+  const result = spawnSync(powerShellExecutable, [
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
@@ -549,7 +581,7 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
 }
 
 function invokeRunner(arguments_: string[]) {
-  return spawnSync('powershell.exe', [
+  return spawnSync(powerShellExecutable, [
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
@@ -574,9 +606,24 @@ afterEach(() => {
 })
 
 describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
+  it('selects an explicit PowerShell test executable override before preferring pwsh', () => {
+    expect(resolvePowerShellExecutable(
+      { RAIN_TEST_POWERSHELL_EXE: 'fixture-powershell.exe' },
+      () => true,
+    )).toBe('fixture-powershell.exe')
+    expect(resolvePowerShellExecutable(
+      {},
+      (candidate) => candidate === 'pwsh.exe' || candidate === 'powershell.exe',
+    )).toBe('pwsh.exe')
+    expect(resolvePowerShellExecutable(
+      {},
+      (candidate) => candidate === 'powershell.exe',
+    )).toBe('powershell.exe')
+  })
+
   it('requires independent installer and controlled-build artifact-manifest trust inputs', () => {
     const script = `(Get-Command -Name '${psLiteral(runnerPath)}').Parameters.Keys | ConvertTo-Json -Compress`
-    const result = spawnSync('powershell.exe', [
+    const result = spawnSync(powerShellExecutable, [
       '-NoProfile',
       '-NonInteractive',
       '-EncodedCommand',
@@ -651,6 +698,22 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     })
     expect(wrongHash.status).toBe(1)
     expect(wrongHash.output.error).toContain('Artifact manifest SHA-256 does not match the expected controlled-build record')
+  })
+
+  it('validates provenance without PowerShell module autoload or Get-FileHash', () => {
+    const root = newTemporaryRoot()
+    const candidate = createArtifactFixture(root)
+    const result = invokeContract({
+      operation: 'provenance',
+      shadowGetFileHash: true,
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: candidate.artifactManifestHash,
+    })
+    assertContractSucceeded(result)
+    expect(result.output.value.installer.sha256).toBe(candidate.installerHash)
   })
 
   it('requires every active release-artifact manifest minimum field before accepting provenance', () => {
@@ -783,6 +846,24 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     }
   }, 15_000)
 
+  it('identifies the payload manifest by root-relative leaf instead of its short or long parent path', () => {
+    const manifest = invokeContract({
+      operation: 'payload-manifest-relative-identity',
+      relativePath: 'payload-manifest.json',
+      manifestLeafName: 'PAYLOAD-MANIFEST.JSON',
+    })
+    assertContractSucceeded(manifest)
+    expect(manifest.output.value).toBe(true)
+
+    const nested = invokeContract({
+      operation: 'payload-manifest-relative-identity',
+      relativePath: 'nested\\payload-manifest.json',
+      manifestLeafName: 'payload-manifest.json',
+    })
+    assertContractSucceeded(nested)
+    expect(nested.output.value).toBe(false)
+  })
+
   it('atomically persists partial phases and redacts secret and PII diagnostics in a uniform failure manifest', () => {
     const root = newTemporaryRoot()
     const result = invokeContract({
@@ -824,6 +905,15 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(persistedText).not.toContain('C:\\Users\\carol')
     expect(allFileNames(root).some((path) => path.endsWith('.tmp'))).toBe(false)
     expect(existsSync(result.output.value.manifestPath)).toBe(true)
+  })
+
+  it('reports a single redaction finding without treating it as a scalar without Count', () => {
+    const root = newTemporaryRoot()
+    writeFileSync(join(root, 'single.txt'), 'contact person@example.com')
+    const result = invokeContract({ operation: 'tree-redaction-scan', runRoot: root })
+    expect(result.status).toBe(1)
+    expect(result.output.error).toContain('single.txt: email address')
+    expect(result.output.error).not.toContain("property 'Count'")
   })
 
   it('refuses a success manifest unless every required phase is unique, passed and in order', () => {
@@ -901,7 +991,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     const empty = newTemporaryRoot()
     const accepted = invokeContract({ operation: 'install-directory', installDir: empty })
     assertContractSucceeded(accepted)
-    expect(accepted.output.value).toMatchObject({ mode: 'custom-empty', path: empty })
+    expect(accepted.output.value).toMatchObject({ mode: 'custom-empty', path: realpathSync.native(empty) })
   })
 
   it('streams one deterministic cancellation WAV into TEMP and removes it after success or failure', () => {

@@ -61,7 +61,24 @@ function Get-ObjectProperty($Value, [string]$Name, [string]$Description) {
 }
 
 function Get-ReleaseEvidenceSha256([string]$Path) {
-  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+  $stream = $null
+  $hasher = $null
+  try {
+    $stream = [System.IO.File]::Open(
+      $Path,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Read,
+      [System.IO.FileShare]::Read
+    )
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    return ([System.BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+  } finally {
+    try {
+      if ($hasher) { $hasher.Dispose() }
+    } finally {
+      if ($stream) { $stream.Dispose() }
+    }
+  }
 }
 
 function Assert-ReleaseEvidenceTempRoot([string]$Path) {
@@ -817,6 +834,17 @@ function Test-SimplePayloadFileName([string]$Name) {
   return $Name -notmatch '[\\/]'
 }
 
+function Test-ReleaseEvidencePayloadManifestRelativeIdentity {
+  param(
+    [Parameter(Mandatory = $true)][string]$RelativePath,
+    [Parameter(Mandatory = $true)][string]$ManifestLeafName
+  )
+  if ([System.IO.Path]::IsPathRooted($RelativePath)) { return $false }
+  $normalized = $RelativePath.Replace([System.IO.Path]::AltDirectorySeparatorChar, [System.IO.Path]::DirectorySeparatorChar)
+  if ($normalized.IndexOf([System.IO.Path]::DirectorySeparatorChar) -ge 0) { return $false }
+  return $normalized.Equals($ManifestLeafName, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Test-ReleaseEvidenceCudaOrDriverDllName([AllowNull()][string]$Name) {
   return -not [string]::IsNullOrWhiteSpace($Name) -and $Name -match $script:CudaOrDriverDllNamePattern
 }
@@ -1001,13 +1029,14 @@ function Assert-InstalledCudaPayload {
     [Parameter(Mandatory = $true)][string]$PayloadManifestPath
   )
 
-  $installedRoot = Resolve-ReleaseEvidenceDirectory $InstalledRoot 'Installed application root'
-  $payloadManifestPath = Resolve-ReleaseEvidenceFile $PayloadManifestPath 'CUDA payload manifest'
+  $installedRoot = (Get-Item -LiteralPath (Resolve-ReleaseEvidenceDirectory $InstalledRoot 'Installed application root')).FullName
+  $payloadManifestItem = Get-Item -LiteralPath (Resolve-ReleaseEvidenceFile $PayloadManifestPath 'CUDA payload manifest')
+  $payloadManifestPath = $payloadManifestItem.FullName
   $manifestRelative = Get-ReleaseEvidenceRelativePath $installedRoot $payloadManifestPath
   if ($manifestRelative -eq '..' -or $manifestRelative.StartsWith("..$([System.IO.Path]::DirectorySeparatorChar)")) {
     throw 'CUDA payload manifest is outside the installed application root.'
   }
-  $payloadRoot = Split-Path -Parent $payloadManifestPath
+  $payloadRoot = $payloadManifestItem.Directory.FullName
   try {
     $manifest = Get-Content -LiteralPath $payloadManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
@@ -1078,8 +1107,8 @@ function Assert-InstalledCudaPayload {
 
   $actualByName = @{}
   foreach ($file in @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -ErrorAction Stop)) {
-    if ($file.FullName -eq $payloadManifestPath) { continue }
     $relativePath = Get-ReleaseEvidenceRelativePath $payloadRoot $file.FullName
+    if (Test-ReleaseEvidencePayloadManifestRelativeIdentity $relativePath $payloadManifestItem.Name) { continue }
     $key = $relativePath.ToLowerInvariant()
     if ($relativePath -ne $file.Name -or $actualByName.ContainsKey($key)) {
       throw "Installed CUDA payload contains files absent from its manifest: $relativePath"
@@ -1328,7 +1357,7 @@ function Assert-ReleaseEvidenceTreeRedacted([string]$RunRoot) {
   $root = Resolve-ReleaseEvidenceDirectory $RunRoot 'Evidence run root'
   $findings = @()
   foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop | Where-Object { $_.Extension -in @('.json', '.log', '.err', '.txt') })) {
-    $matches = Get-ReleaseEvidenceSensitiveFindings (Get-Content -LiteralPath $file.FullName -Raw)
+    $matches = @(Get-ReleaseEvidenceSensitiveFindings (Get-Content -LiteralPath $file.FullName -Raw))
     if ($matches.Count -gt 0) { $findings += "$($file.Name): $($matches -join ', ')" }
   }
   if ($findings.Count -gt 0) {
@@ -1532,6 +1561,8 @@ function Write-ReleaseEvidenceSuccessManifest {
 }
 
 Export-ModuleMember -Function @(
+  'Get-ReleaseEvidenceSha256',
+  'Test-ReleaseEvidencePayloadManifestRelativeIdentity',
   'Assert-CandidateArtifactProvenance',
   'Assert-InstalledCudaPayload',
   'Protect-ReleaseEvidenceDiagnosticText',

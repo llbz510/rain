@@ -338,10 +338,10 @@ function Assert-NvidiaEnvironment {
   $nvidiaSmi = Require-Command 'nvidia-smi.exe' 'Install a compatible NVIDIA display driver.'
   $smiRows = @(& $nvidiaSmi --query-gpu=name,driver_version,memory.total,memory.free --format=csv,noheader,nounits 2>&1)
   if ($LASTEXITCODE -ne 0 -or $smiRows.Count -lt 1) { throw 'nvidia-smi failed to report GPU and driver facts.' }
-  $systemNvcuda = @(
-    (Join-Path $env:SystemRoot 'System32\nvcuda.dll'),
-    (Join-Path $env:SystemRoot 'SysWOW64\nvcuda.dll')
-  ) | Where-Object { Test-Path -LiteralPath $_ }
+  $systemNvcuda = @(@(
+      (Join-Path $env:SystemRoot 'System32\nvcuda.dll'),
+      (Join-Path $env:SystemRoot 'SysWOW64\nvcuda.dll')
+    ) | Where-Object { Test-Path -LiteralPath $_ })
   if ($systemNvcuda.Count -lt 1) { throw 'Compatible NVIDIA driver nvcuda.dll was not found.' }
 
   $environment = [ordered]@{
@@ -437,7 +437,7 @@ try {
   $modelPath = (Resolve-Path -LiteralPath $WhisperModelPath).Path
   $modelItem = Get-Item -LiteralPath $modelPath
   $installerHash = [string]$provenance.installer.sha256
-  $modelHash = (Get-FileHash -LiteralPath $modelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $modelHash = Get-ReleaseEvidenceSha256 $modelPath
   Write-ReleaseEvidencePhase -Writer $evidenceWriter -Phase $phase -Result 'passed' -Data ([ordered]@{
     expectedTargetCommit = $ExpectedTargetCommit.ToLowerInvariant()
     installer = $provenance.installer
@@ -480,21 +480,21 @@ try {
   $payloadValidation = Assert-InstalledCudaPayload -InstalledRoot $installedRoot -PayloadManifestPath $payloadManifestPath
   $payloadFiles = @($payloadValidation.files)
   $workerPath = [string]$payloadValidation.workerPath
-  $workerOriginalHash = (Get-FileHash -LiteralPath $workerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $workerOriginalHash = Get-ReleaseEvidenceSha256 $workerPath
   Write-AtomicJsonFile $artifactPath ([ordered]@{
     targetCommit = $targetCommit
     installer = $provenance.installer
     artifactManifest = $provenance.artifactManifest
     installedMainExecutable = @{
       path = $installedBinary
-      sha256 = (Get-FileHash -LiteralPath $installedBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+      sha256 = Get-ReleaseEvidenceSha256 $installedBinary
       cudaImportsPresent = $false
     }
     installedRoot = $installedRoot
     payloadManifest = $payloadManifestPath
     payloadFiles = @($payloadFiles)
     driverLibraryBundled = $false
-    bundledProbeMedia = @{ path = $probeMedia; sha256 = (Get-FileHash -LiteralPath $probeMedia -Algorithm SHA256).Hash.ToLowerInvariant() }
+    bundledProbeMedia = @{ path = $probeMedia; sha256 = Get-ReleaseEvidenceSha256 $probeMedia }
     evidenceModel = @{ path = $modelPath; sizeBytes = $modelItem.Length; sha256 = $modelHash }
   })
   Write-ReleaseEvidencePhase -Writer $evidenceWriter -Phase $phase -Result 'passed' -Data @{
@@ -686,7 +686,7 @@ return Boolean(document.querySelector('[data-testid="video-list-page"]'));
   if (Test-Path -LiteralPath $workerBackupPath) { throw "Worker backup path already exists: $workerBackupPath" }
   Move-Item -LiteralPath $workerPath -Destination $workerBackupPath
   Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\where.exe') -Destination $workerPath
-  $stubHash = (Get-FileHash -LiteralPath $workerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $stubHash = Get-ReleaseEvidenceSha256 $workerPath
   $fallbackCapability = Invoke-TauriCommand $sessionId 'get_runtime_capability' @{ backendPreference = 'auto' }
   if ($fallbackCapability.whisperBackend -ne 'cpu' -or [string]::IsNullOrWhiteSpace([string]$fallbackCapability.fallbackReason)) {
     throw "Auto did not classify the injected worker failure for CPU fallback: $($fallbackCapability | ConvertTo-Json -Compress)"
@@ -712,7 +712,7 @@ return Boolean(document.querySelector('[data-testid="video-list-page"]'));
   Assert-NoBackend $forcedFailureEvents 'cpu' 'Forced CUDA worker failure'
   Move-Item -LiteralPath $workerBackupPath -Destination $workerPath -Force
   $workerBackupPath = $null
-  $restoredWorkerHash = (Get-FileHash -LiteralPath $workerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $restoredWorkerHash = Get-ReleaseEvidenceSha256 $workerPath
   if ($restoredWorkerHash -ne $workerOriginalHash) { throw 'CUDA worker restoration hash mismatch.' }
   $runtimeEvidence['workerFailure'] = @{
     injectedStubSha256 = $stubHash
@@ -743,13 +743,13 @@ return Boolean(document.querySelector('[data-testid="video-list-page"]'));
   Assert-NoBackend $modelErrorEvents 'cpu' 'Model error injection'
   $runtimeEvidence['modelError'] = @{
     result = $modelErrorResult
-    invalidModelSha256 = (Get-FileHash -LiteralPath $invalidModelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    invalidModelSha256 = Get-ReleaseEvidenceSha256 $invalidModelPath
     progressEvents = @($modelErrorEvents)
     cpuRetryObserved = $false
   }
   Write-ReleaseEvidencePhase -Writer $evidenceWriter -Phase $phase -Result 'passed' -Data @{ runtimeSection = 'modelError' } | Out-Null
 
-  $runtimeEvidence['workerRestoredAtEnd'] = ((Get-FileHash -LiteralPath $workerPath -Algorithm SHA256).Hash.ToLowerInvariant() -eq $workerOriginalHash)
+  $runtimeEvidence['workerRestoredAtEnd'] = ((Get-ReleaseEvidenceSha256 $workerPath) -eq $workerOriginalHash)
   if ($runtimeEvidence['workerRestoredAtEnd'] -ne $true) { throw 'Installed CUDA worker was not restored after failure injection.' }
   $phase = 'runtime-evidence'
   Write-AtomicJsonFile $runtimePath $runtimeEvidence
