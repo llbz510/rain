@@ -1,0 +1,538 @@
+name: Controlled GPU Artifact Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_target:
+        description: Enter BUILD-3006757838b972b511917663e4ba8328804607d6 to authorize this candidate build.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: controlled-gpu-artifact-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_TARGET_COMMIT: 3006757838b972b511917663e4ba8328804607d6
+  SOURCE_REPOSITORY: https://github.com/llbz510/rain.git
+  CORE_ARTIFACT_NAME: rain-candidate-core-${{ github.run_id }}-${{ github.run_attempt }}
+  CONTROL_ARTIFACT_NAME: rain-candidate-control-${{ github.run_id }}-${{ github.run_attempt }}
+  CUDA_INSTALLER_URL: https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe
+  CUDA_INSTALLER_SHA256: F0CA7CC7B4CEA2FAC2C4951819D2A9CAEA31E04000E9110E2048719525F8EA0E
+  LLVM_INSTALLER_URL: https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.7/LLVM-22.1.7-win64.exe
+  LLVM_INSTALLER_SHA256: e091fcf965ce589c83c0f7c5356b2fcf3e658a8ec990bfcf79cce4389a0d1eb3
+  NSIS_INSTALLER_URL: https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download
+  NSIS_INSTALLER_SHA256: 38D49F8FE09B1C332B01D0940E57B7258F4447733643273A01C59959AD9D3B0A
+  CMAKE_ARCHIVE_URL: https://github.com/Kitware/CMake/releases/download/v4.0.0/cmake-4.0.0-windows-x86_64.zip
+  CMAKE_ARCHIVE_SHA256: 89E87F3E297B70F1349EE7C5F90783CA96EFB986B70C558C799C3C9B1B716456
+  CMAKE_VERSION: 4.0.0
+  CMAKE_MINIMUM_VERSION: 4.0.0
+  CUDA_ARCHITECTURES: '120'
+  CONTROLLED_INVOCATION_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  build:
+    name: Build exact merged candidate on hosted Windows
+    if: ${{ github.repository == 'llbz510/rain' && github.ref == 'refs/heads/master' && inputs.confirm_target == 'BUILD-3006757838b972b511917663e4ba8328804607d6' }}
+    runs-on: windows-2025
+    timeout-minutes: 180
+    env:
+      CI: true
+      CMAKE_CXX_FLAGS: /utf-8
+      CMAKE_C_FLAGS: /utf-8
+
+    steps:
+      - name: Check out control tooling at this merged workflow commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the fixed merged candidate target
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3006757838b972b511917663e4ba8328804607d6
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify manual dispatch, exact control tooling, and candidate ancestry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REPOSITORY -ne 'llbz510/rain') { throw 'Controlled artifact build may run only in the canonical llbz510/rain repository.' }
+          if ($env:GITHUB_REF -ne 'refs/heads/master') { throw 'Controlled artifact build may run only from merged master.' }
+          $expectedConfirmation = "BUILD-$env:CANDIDATE_TARGET_COMMIT"
+          if ('${{ github.event.inputs.confirm_target }}' -ne $expectedConfirmation) { throw 'Manual confirmation does not match the fixed candidate target.' }
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          $canonicalOrigin = 'https://github.com/llbz510/rain.git'
+          function Invoke-ControlledGitText([string]$RepositoryRoot, [string]$Description, [string[]]$GitArguments) {
+            $output = & git -C $RepositoryRoot @GitArguments 2>&1
+            $exitCode = $LASTEXITCODE
+            $text = ($output | Out-String).Trim()
+            if ($exitCode -ne 0) {
+              throw "$Description failed with exit code ${exitCode}: $text"
+            }
+            return $text
+          }
+          function Assert-CanonicalOrigin([string]$RepositoryRoot, [string]$Label) {
+            $origin = (Invoke-ControlledGitText $RepositoryRoot "$Label origin" @('remote', 'get-url', 'origin')).TrimEnd('/')
+            if ($origin -notin @($canonicalOrigin, $canonicalOrigin.Substring(0, $canonicalOrigin.Length - 4))) {
+              throw "$Label checkout origin is not canonical: $origin"
+            }
+          }
+          Assert-CanonicalOrigin $controlRoot 'Control tooling'
+          Assert-CanonicalOrigin $candidateRoot 'Candidate'
+          $actualToolingCommit = (Invoke-ControlledGitText $controlRoot 'Control tooling HEAD' @('rev-parse', 'HEAD')).ToLowerInvariant()
+          if ($actualToolingCommit -ne $env:GITHUB_SHA.ToLowerInvariant()) { throw "Control checkout mismatch: expected $env:GITHUB_SHA, found $actualToolingCommit." }
+          $controlStatus = Invoke-ControlledGitText $controlRoot 'Control tooling status' @('status', '--porcelain', '--untracked-files=all')
+          if (-not [string]::IsNullOrWhiteSpace($controlStatus)) { throw 'Control tooling checkout is not clean.' }
+          $actualCandidateCommit = (Invoke-ControlledGitText $candidateRoot 'Candidate HEAD' @('rev-parse', 'HEAD')).ToLowerInvariant()
+          if ($actualCandidateCommit -ne $env:CANDIDATE_TARGET_COMMIT) { throw "Candidate checkout mismatch: expected $env:CANDIDATE_TARGET_COMMIT, found $actualCandidateCommit." }
+          $candidateStatus = Invoke-ControlledGitText $candidateRoot 'Candidate status' @('status', '--porcelain', '--untracked-files=all')
+          if (-not [string]::IsNullOrWhiteSpace($candidateStatus)) { throw 'Candidate checkout is not clean.' }
+          [void](Invoke-ControlledGitText $controlRoot 'Canonical master fetch for tooling reachability' @('fetch', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'))
+          [void](Invoke-ControlledGitText $controlRoot 'Control tooling reachability from canonical master' @('merge-base', '--is-ancestor', $actualToolingCommit, 'origin/master'))
+          [void](Invoke-ControlledGitText $candidateRoot 'Canonical master fetch for candidate reachability' @('fetch', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'))
+          [void](Invoke-ControlledGitText $candidateRoot 'Candidate reachability from canonical master' @('merge-base', '--is-ancestor', $env:CANDIDATE_TARGET_COMMIT, 'origin/master'))
+          $cleanupAuthorityBytes = [byte[]]::new(32)
+          $cleanupAuthorityRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+          try { $cleanupAuthorityRng.GetBytes($cleanupAuthorityBytes) } finally { $cleanupAuthorityRng.Dispose() }
+          $cleanupAuthorityToken = [Convert]::ToBase64String($cleanupAuthorityBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+          Write-Output "::add-mask::$cleanupAuthorityToken"
+          $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN = $cleanupAuthorityToken
+          "CONTROLLED_CLEANUP_AUTHORITY_TOKEN=$cleanupAuthorityToken" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
+          $coreArtifactRoot = Join-Path $env:RUNNER_TEMP ("rain-candidate-core-" + [Guid]::NewGuid().ToString('N'))
+          $coreArtifactReservation = New-RainControlledDirectoryReservation -Path $coreArtifactRoot -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          Write-Output "::add-mask::$($coreArtifactReservation.token)"
+          New-Item -ItemType Directory -Path $coreArtifactRoot -ErrorAction Stop | Out-Null
+          "CORE_ARTIFACT_ROOT=$coreArtifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CORE_ARTIFACT_ROOT_RESERVATION_TOKEN=$($coreArtifactReservation.token)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $controlArtifactRoot = Join-Path $env:RUNNER_TEMP ("rain-candidate-control-" + [Guid]::NewGuid().ToString('N'))
+          $controlArtifactReservation = New-RainControlledDirectoryReservation -Path $controlArtifactRoot -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          Write-Output "::add-mask::$($controlArtifactReservation.token)"
+          New-Item -ItemType Directory -Path $controlArtifactRoot -ErrorAction Stop | Out-Null
+          "CONTROL_ARTIFACT_ROOT=$controlArtifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONTROL_ARTIFACT_ROOT_RESERVATION_TOKEN=$($controlArtifactReservation.token)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $assemblyRoot = Join-Path $env:RUNNER_TEMP ("rain-candidate-final-assembly-" + [Guid]::NewGuid().ToString('N'))
+          $assemblyReservation = New-RainControlledDirectoryReservation -Path $assemblyRoot -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          Write-Output "::add-mask::$($assemblyReservation.token)"
+          New-Item -ItemType Directory -Path $assemblyRoot -ErrorAction Stop | Out-Null
+          "ASSEMBLY_ROOT=$assemblyRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ASSEMBLY_ROOT_RESERVATION_TOKEN=$($assemblyReservation.token)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TOOLING_COMMIT=$actualToolingCommit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WORKFLOW_RUN_URL=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify hosted Windows capacity and preinstalled build prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-build-disk.psm1') -Force
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-native-tool-probe.psm1') -Force
+          Assert-ControlledBuildPathsFreeBytes -Stage 'before-download' -Paths @($env:RUNNER_TEMP, $env:GITHUB_WORKSPACE) -MinimumBytes 24GB | Out-Null
+          foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe')) {
+            if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "Hosted Windows runner is missing required command: $command" }
+          }
+          [void](Invoke-RainControlledNativeToolProbe -Name 'node' -Path (Get-Command node.exe -ErrorAction Stop).Source -Arguments @('--version'))
+          [void](Invoke-RainControlledNativeToolProbe -Name 'npm' -Path (Get-Command npm.cmd -ErrorAction Stop).Source -Arguments @('--version'))
+          [void](Invoke-RainControlledNativeToolProbe -Name 'cargo' -Path (Get-Command cargo.exe -ErrorAction Stop).Source -Arguments @('--version'))
+          [void](Invoke-RainControlledNativeToolProbe -Name 'rustup' -Path (Get-Command rustup.exe -ErrorAction Stop).Source -Arguments @('--version'))
+          [void](Invoke-RainControlledNativeToolProbe -Name 'ninja' -Path (Get-Command ninja.exe -ErrorAction Stop).Source -Arguments @('--version'))
+
+      - name: Download and verify pinned CUDA, LLVM, NSIS, and CMake packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
+          $toolDownloads = Join-Path $env:RUNNER_TEMP 'rain-pinned-tool-downloads'
+          $downloadsReservation = New-RainControlledDirectoryReservation -Path $toolDownloads -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          New-Item -ItemType Directory -Path $toolDownloads -ErrorAction Stop | Out-Null
+          function Get-VerifiedDownload([string]$Uri, [string]$ExpectedSha256, [string]$Destination) {
+            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Destination
+            $actualSha256 = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToUpperInvariant()
+            if ($actualSha256 -ne $ExpectedSha256.ToUpperInvariant()) {
+              try {
+                Remove-Item -LiteralPath $Destination -Force -ErrorAction Stop
+              } catch {
+                throw "SHA-256 mismatch for $Uri: expected $ExpectedSha256, found $actualSha256; and failed to remove the rejected download: $($_.Exception.Message)"
+              }
+              throw "SHA-256 mismatch for $Uri: expected $ExpectedSha256, found $actualSha256."
+            }
+          }
+          try {
+            Get-VerifiedDownload $env:CUDA_INSTALLER_URL $env:CUDA_INSTALLER_SHA256 (Join-Path $toolDownloads 'cuda.exe')
+            Get-VerifiedDownload $env:LLVM_INSTALLER_URL $env:LLVM_INSTALLER_SHA256 (Join-Path $toolDownloads 'llvm.exe')
+            Get-VerifiedDownload $env:NSIS_INSTALLER_URL $env:NSIS_INSTALLER_SHA256 (Join-Path $toolDownloads 'nsis.exe')
+            Get-VerifiedDownload $env:CMAKE_ARCHIVE_URL $env:CMAKE_ARCHIVE_SHA256 (Join-Path $toolDownloads 'cmake.zip')
+            "PINNED_TOOL_DOWNLOADS=$toolDownloads" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "PINNED_DOWNLOADS_RESERVATION_TOKEN=$($downloadsReservation.token)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } catch {
+            $downloadError = $_
+            if (Test-Path -LiteralPath $toolDownloads) {
+              try {
+                Remove-RainControlledOwnedDirectory -Path $toolDownloads -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $downloadsReservation.token -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+              } catch {
+                throw "Pinned tool download failed: $($downloadError.Exception.Message); additionally, download cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            throw
+          }
+
+      - name: Install pinned remote-only native build toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-toolchain-install.psm1') -Force
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
+          $cmakeExtractRoot = Join-Path $env:RUNNER_TEMP 'rain-pinned-cmake-4.0.0'
+          $cmakeReservation = New-RainControlledDirectoryReservation -Path $cmakeExtractRoot -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          $toolchain = Invoke-RainControlledToolchainInstall -DownloadsRoot $env:PINNED_TOOL_DOWNLOADS -CmakeExtractRoot $cmakeExtractRoot -OwnershipParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -DownloadsReservationToken $env:PINNED_DOWNLOADS_RESERVATION_TOKEN -CmakeReservationToken $cmakeReservation.token -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN -ExpectedCmakeVersion $env:CMAKE_VERSION -GitHubPathFile $env:GITHUB_PATH -GitHubEnvFile $env:GITHUB_ENV
+          if (-not $toolchain.cmakeReady -or [string]::IsNullOrWhiteSpace([string]$toolchain.cmakeRoot) -or [string]::IsNullOrWhiteSpace([string]$toolchain.cmakePath)) {
+            throw 'Controlled toolchain installation did not publish a ready pinned CMake root and executable.'
+          }
+          "TOOLCHAIN_CMAKE_READY=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Make hosted Visual C++ inspection tools available to the controlled manifest generator
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-native-tool-probe.psm1') -Force
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw 'Visual Studio locator is missing from the GitHub-hosted runner.' }
+          $installationPath = (Invoke-RainControlledNativeToolProbe -Name 'vswhere' -Path $vswhere -Arguments @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath')).output
+          $msvcRoot = Join-Path $installationPath 'VC\Tools\MSVC'
+          $msvcVersion = Get-ChildItem -LiteralPath $msvcRoot -Directory -ErrorAction Stop | Sort-Object -Property Name -Descending | Select-Object -First 1
+          if (-not $msvcVersion) { throw 'Visual Studio MSVC version directory is missing.' }
+          $dumpbinDirectory = Join-Path $msvcVersion.FullName 'bin\Hostx64\x64'
+          if (-not (Test-Path -LiteralPath (Join-Path $dumpbinDirectory 'dumpbin.exe') -PathType Leaf)) { throw 'dumpbin.exe is missing from hosted Visual Studio C++ tools.' }
+          $dumpbinDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "MSVC_VERSION=$($msvcVersion.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Select the pinned Rust toolchain for this remote build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-native-tool-probe.psm1') -Force
+          rustup toolchain install 1.96.1 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "Rust toolchain installation failed with exit code $LASTEXITCODE" }
+          rustup default 1.96.1
+          if ($LASTEXITCODE -ne 0) { throw "Rust toolchain selection failed with exit code $LASTEXITCODE" }
+          [void](Invoke-RainControlledNativeToolProbe -Name 'rustc' -Path (Get-Command rustc.exe -ErrorAction Stop).Source -Arguments @('--version'))
+          [void](Invoke-RainControlledNativeToolProbe -Name 'cargo' -Path (Get-Command cargo.exe -ErrorAction Stop).Source -Arguments @('--version'))
+
+      - name: Verify CMake 4+ and record controlled remote toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-native-tool-probe.psm1') -Force
+          if ($env:TOOLCHAIN_CMAKE_READY -ne 'true') {
+            throw 'Controlled toolchain installation did not complete successfully; refusing to consume its CMake root.'
+          }
+          $cmakePath = [System.IO.Path]::GetFullPath($env:CMAKE_PATH)
+          if (-not (Test-Path -LiteralPath $cmakePath -PathType Leaf)) { throw "Pinned CMake executable is missing: $cmakePath" }
+          $cmakeText = (Invoke-RainControlledNativeToolProbe -Name 'cmake' -Path $cmakePath -Arguments @('--version')).output
+          $cmakeVersion = [regex]::Match($cmakeText, '\d+(?:\.\d+){2}').Value
+          if ([string]::IsNullOrWhiteSpace($cmakeVersion) -or $cmakeVersion -ne $env:CMAKE_VERSION -or [version]$cmakeVersion -lt [version]$env:CMAKE_MINIMUM_VERSION) {
+            throw "Pinned CMake 4 or newer is required; expected $env:CMAKE_VERSION, observed $cmakeVersion."
+          }
+          $nvcc = Join-Path $env:CUDA_ROOT 'bin\nvcc.exe'
+          $nvccText = (Invoke-RainControlledNativeToolProbe -Name 'nvcc' -Path $nvcc -Arguments @('--version')).output
+          if ($nvccText -notmatch 'release\s+12\.9') { throw "Pinned CUDA 12.9.1 nvcc verification failed: $nvccText" }
+          $ninjaVersion = (Invoke-RainControlledNativeToolProbe -Name 'ninja' -Path (Get-Command 'ninja.exe' -ErrorAction Stop).Source -Arguments @('--version')).output
+          $llvmVersion = (Invoke-RainControlledNativeToolProbe -Name 'clang' -Path (Join-Path $env:LLVM_BIN 'clang.exe') -Arguments @('--version')).output
+          $rustVersion = (Invoke-RainControlledNativeToolProbe -Name 'rustc' -Path (Get-Command rustc.exe -ErrorAction Stop).Source -Arguments @('--version')).output
+          $nodeVersion = (Invoke-RainControlledNativeToolProbe -Name 'node' -Path (Get-Command node.exe -ErrorAction Stop).Source -Arguments @('--version')).output
+          $npmVersion = (Invoke-RainControlledNativeToolProbe -Name 'npm' -Path (Get-Command npm.cmd -ErrorAction Stop).Source -Arguments @('--version')).output
+          $cargoVersion = (Invoke-RainControlledNativeToolProbe -Name 'cargo' -Path (Get-Command cargo.exe -ErrorAction Stop).Source -Arguments @('--version')).output
+          $nsisVersion = (Invoke-RainControlledNativeToolProbe -Name 'makensis' -Path (Join-Path $env:NSIS_HOME 'makensis.exe') -Arguments @('/VERSION')).output
+          if ($rustVersion -notmatch '\b1\.96\.1\b') { throw "Pinned Rust 1.96.1 verification failed: $rustVersion" }
+          $runnerOperatingSystem = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+          $runnerArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          foreach ($fact in @(
+            @{ description = 'runner image'; value = $env:ImageOS },
+            @{ description = 'runner image version'; value = $env:ImageVersion },
+            @{ description = 'runner OS caption'; value = $runnerOperatingSystem.Caption },
+            @{ description = 'runner architecture'; value = $runnerArchitecture },
+            @{ description = 'Node version'; value = $nodeVersion },
+            @{ description = 'npm version'; value = $npmVersion },
+            @{ description = 'Cargo version'; value = $cargoVersion },
+            @{ description = 'MSVC version'; value = $env:MSVC_VERSION },
+            @{ description = 'NSIS version'; value = $nsisVersion }
+          )) {
+            if ([string]::IsNullOrWhiteSpace([string]$fact.value)) { throw "Controlled toolchain $($fact.description) must not be blank." }
+          }
+          $toolchainRecordPath = Join-Path $env:RUNNER_TEMP "rain-controlled-toolchain-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.json"
+          if (Test-Path -LiteralPath $toolchainRecordPath) { throw "Refusing to overwrite controlled toolchain record: $toolchainRecordPath" }
+          $toolchainRecord = [ordered]@{
+            schemaVersion = 1
+            runner = [ordered]@{ image = $env:ImageOS; imageVersion = $env:ImageVersion; os = $runnerOperatingSystem.Caption; osVersion = $runnerOperatingSystem.Version; architecture = $runnerArchitecture }
+            cmake = [ordered]@{ version = $cmakeVersion; minimumVersion = $env:CMAKE_MINIMUM_VERSION }
+            cuda = [ordered]@{
+              toolkitVersion = '12.9.1'
+              architectures = @($env:CUDA_ARCHITECTURES)
+              architectureBasisUrl = 'https://developer.nvidia.com/cuda-gpus'
+            }
+            ninja = [ordered]@{ version = $ninjaVersion }
+            llvm = [ordered]@{ version = $llvmVersion }
+            rust = [ordered]@{ version = $rustVersion }
+            node = [ordered]@{ version = $nodeVersion }
+            npm = [ordered]@{ version = $npmVersion }
+            cargo = [ordered]@{ version = $cargoVersion }
+            msvc = [ordered]@{ version = $env:MSVC_VERSION; hostArchitecture = 'x64'; targetArchitecture = 'x64' }
+            nsis = [ordered]@{ version = $nsisVersion }
+            downloads = [ordered]@{
+              cmake = [ordered]@{ url = $env:CMAKE_ARCHIVE_URL; sha256 = $env:CMAKE_ARCHIVE_SHA256 }
+              cuda = [ordered]@{ url = $env:CUDA_INSTALLER_URL; sha256 = $env:CUDA_INSTALLER_SHA256 }
+              llvm = [ordered]@{ url = $env:LLVM_INSTALLER_URL; sha256 = $env:LLVM_INSTALLER_SHA256 }
+              nsis = [ordered]@{ url = $env:NSIS_INSTALLER_URL; sha256 = $env:NSIS_INSTALLER_SHA256 }
+            }
+          }
+          $temporaryRecordPath = Join-Path $env:RUNNER_TEMP ('.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+          $recordWriteError = $null
+          $recordCleanupError = $null
+          try {
+            [System.IO.File]::WriteAllText($temporaryRecordPath, (ConvertTo-Json -InputObject $toolchainRecord -Depth 10), [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::Move($temporaryRecordPath, $toolchainRecordPath)
+          } catch {
+            $recordWriteError = $_
+          } finally {
+            if (Test-Path -LiteralPath $temporaryRecordPath) {
+              try {
+                Remove-Item -LiteralPath $temporaryRecordPath -Force -ErrorAction Stop
+              } catch {
+                $recordCleanupError = $_
+              }
+            }
+          }
+          if ($null -ne $recordWriteError) {
+            if ($null -ne $recordCleanupError) {
+              throw "Controlled toolchain record write failed: $($recordWriteError.Exception.Message); additionally, Toolchain record temporary cleanup failed for ${temporaryRecordPath}: $($recordCleanupError.Exception.Message)"
+            }
+            throw $recordWriteError
+          }
+          if ($null -ne $recordCleanupError) {
+            throw "Toolchain record temporary cleanup failed for ${temporaryRecordPath}: $($recordCleanupError.Exception.Message)"
+          }
+          "TOOLCHAIN_RECORD_PATH=$toolchainRecordPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install candidate JavaScript dependencies without test or evidence execution
+        shell: pwsh
+        working-directory: candidate
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+
+      - name: Build CUDA worker and NSIS candidate remotely
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-build-disk.psm1') -Force
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
+          $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          $workerScript = Join-Path $controlRoot 'scripts\build-whisper-cuda-worker.ps1'
+          $workerInvocationId = "github-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $workerTarget = Join-Path $env:RUNNER_TEMP "rain-controlled-worker-target-$workerInvocationId"
+          $workerReservation = New-RainControlledDirectoryReservation -Path $workerTarget -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          $resolvedBuildCmake = (Get-Command cmake.exe -ErrorAction Stop).Source
+          if (-not [string]::Equals($resolvedBuildCmake, $env:CMAKE_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "The independent Tauri/Cargo build PATH does not resolve to pinned CMake: expected $env:CMAKE_PATH, found $resolvedBuildCmake."
+          }
+          if (-not [string]::Equals($env:CMAKE, $env:CMAKE_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The standard CMAKE environment variable is not bound to pinned CMake.'
+          }
+          Assert-ControlledBuildPathsFreeBytes -Stage 'before-cuda-worker-build' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 16GB | Out-Null
+          & $workerScript -ProjectRoot $candidateRoot -CudaRoot $env:CUDA_ROOT -NinjaPath (Get-Command ninja.exe -ErrorAction Stop).Source -CmakePath $env:CMAKE_PATH -LlvmBinPath $env:LLVM_BIN -WorkerTargetRoot $workerTarget -WorkerInvocationId $workerInvocationId
+          if ($LASTEXITCODE -ne 0) { throw "CUDA worker build failed with exit code $LASTEXITCODE" }
+          Remove-RainControlledOwnedDirectory -Path $workerTarget -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $workerReservation.token -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          Assert-ControlledBuildPathsFreeBytes -Stage 'before-tauri-package' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 12GB | Out-Null
+          Push-Location $candidateRoot
+          try {
+            npx.cmd --no-install tauri build --config src-tauri/tauri.gpu.conf.json
+            if ($LASTEXITCODE -ne 0) { throw "Tauri NSIS build failed with exit code $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Generate and freeze the core installer artifact before its upload digest exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          $installerDirectory = Join-Path $candidateRoot 'src-tauri\target\release\bundle\nsis'
+          $installers = @(Get-ChildItem -LiteralPath $installerDirectory -Filter '*.exe' -File -ErrorAction Stop)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
+          $installer = $installers[0]
+          Import-Module -Name (Join-Path $controlRoot 'scripts\nvidia-release-evidence-contract.psm1') -Force
+          Import-Module -Name (Join-Path $controlRoot 'scripts\release-artifact-generator.psm1') -Force
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
+          [void](Open-RainControlledDirectoryReservation -Path $env:CORE_ARTIFACT_ROOT -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:CORE_ARTIFACT_ROOT_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN)
+          $buildRecordId = "github-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $builtAt = [DateTimeOffset]::UtcNow.ToString('o')
+          $installedTree = $null
+          $installerArchiveRoot = Join-Path $env:RUNNER_TEMP ("rain-installer-archive-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT")
+          $archiveReservation = $null
+          $installReservationHolder = [pscustomobject]@{ reservation = $null }
+          $removeReservedInstallRoot = {
+            param([string]$path)
+            if ($null -eq $installReservationHolder.reservation) { throw 'NSIS install-root cleanup has no invocation reservation token.' }
+            Remove-RainControlledOwnedDirectory -Path $path -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $installReservationHolder.reservation.token -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          }
+          $artifactGenerationError = $null
+          $artifactCleanupErrors = [System.Collections.Generic.List[string]]::new()
+          try {
+            $archiveReservation = New-RainControlledDirectoryReservation -Path $installerArchiveRoot -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+            New-Item -ItemType Directory -Path $installerArchiveRoot -ErrorAction Stop | Out-Null
+            & 7z.exe x -y "-o$installerArchiveRoot" $installer.FullName | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Installer archive extraction failed with exit code $LASTEXITCODE" }
+            Assert-RainReleaseArtifactArchiveContents -InstallerArchiveRoot $installerArchiveRoot | Out-Null
+            $installedTree = Invoke-ReleaseEvidenceNsisInstallAndVerify -Installer $installer.FullName -TemporaryRoot $env:RUNNER_TEMP -ReserveInstallRoot { param($path) [void]($installReservationHolder.reservation = New-RainControlledDirectoryReservation -Path $path -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN) } -RemoveInstallRoot $removeReservedInstallRoot
+            New-RainControlledReleaseArtifacts -ManifestOnly -InstallerPath $installer.FullName -InstalledRoot $installedTree.installRoot -InstallerArchiveRoot $installerArchiveRoot -NsisInstallationProof $installedTree -CandidateSourceRoot $candidateRoot -ToolchainRecordPath $env:TOOLCHAIN_RECORD_PATH -OutputDirectory $env:CORE_ARTIFACT_ROOT -CandidateTargetCommit $env:CANDIDATE_TARGET_COMMIT -ToolingCommit $env:TOOLING_COMMIT -Repository $env:GITHUB_REPOSITORY -SourceRepository $env:SOURCE_REPOSITORY -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId $buildRecordId -BuiltAt $builtAt -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl $env:WORKFLOW_RUN_URL -WorkflowEvent $env:GITHUB_EVENT_NAME -WorkflowRef $env:GITHUB_REF -WorkflowRunId $env:GITHUB_RUN_ID -WorkflowRunAttempt ([int]$env:GITHUB_RUN_ATTEMPT) -WorkflowDefinitionCommit $env:TOOLING_COMMIT -CandidateMasterReachable $true -ToolingMasterReachable $true | Out-Null
+            Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $env:CORE_ARTIFACT_ROOT $installer.Name) -Force
+          } catch {
+            $artifactGenerationError = $_
+          }
+          if ($null -ne $installedTree) {
+            try {
+              Invoke-ReleaseEvidenceNsisUninstallAndVerify -Installation $installedTree -CleanupInstallRoot -RemoveInstallRoot $removeReservedInstallRoot | Out-Null
+            } catch {
+              [void]$artifactCleanupErrors.Add("Generated NSIS uninstaller cleanup failed: $($_.Exception.Message)")
+            }
+          }
+          if ($null -ne $archiveReservation -and (Test-Path -LiteralPath $installerArchiveRoot)) {
+            try {
+              Remove-RainControlledOwnedDirectory -Path $installerArchiveRoot -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $archiveReservation.token -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+            } catch {
+              [void]$artifactCleanupErrors.Add("Installer archive cleanup failed: $($_.Exception.Message)")
+            }
+          }
+          if ($null -ne $artifactGenerationError) {
+            $message = "Artifact generation failed: $($artifactGenerationError.Exception.Message)"
+            if ($artifactCleanupErrors.Count -gt 0) { $message += "; additionally, $($artifactCleanupErrors -join '; ')" }
+            throw $message
+          }
+          if ($artifactCleanupErrors.Count -gt 0) { throw "Artifact cleanup failed: $($artifactCleanupErrors -join '; ')" }
+          $checksumLines = foreach ($fileName in @($installer.Name, 'release-artifact-manifest.json')) {
+            $filePath = Join-Path $env:CORE_ARTIFACT_ROOT $fileName
+            "{0} *{1}" -f (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant(), $fileName
+          }
+          [System.IO.File]::WriteAllLines((Join-Path $env:CORE_ARTIFACT_ROOT 'SHA256SUMS.txt'), $checksumLines, [System.Text.UTF8Encoding]::new($false))
+          $actualCoreFiles = @(Get-ChildItem -LiteralPath $env:CORE_ARTIFACT_ROOT -File -Recurse | ForEach-Object { $_.Name } | Sort-Object)
+          $expectedCoreFiles = @($installer.Name, 'release-artifact-manifest.json', 'SHA256SUMS.txt') | Sort-Object
+          if (Compare-Object -ReferenceObject $expectedCoreFiles -DifferenceObject $actualCoreFiles) { throw 'Core artifact must contain only installer, manifest, and their checksums before first upload.' }
+          "INSTALLER_FILE_NAME=$($installer.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BUILD_RECORD_ID=$buildRecordId" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BUILT_AT=$builtAt" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Clean candidate build residue before immutable upload
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-build-disk.psm1') -Force
+          $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          $candidateCleanupErrors = [System.Collections.Generic.List[string]]::new()
+          try {
+            if (-not (Test-Path -LiteralPath $candidateRoot -PathType Container)) {
+              Write-Host "Candidate checkout is absent; no candidate residue can be removed: $candidateRoot"
+            } else {
+              git -C $candidateRoot clean -ffdx
+              if ($LASTEXITCODE -ne 0) { throw "Could not remove candidate untracked build residue: $LASTEXITCODE" }
+              $candidateCleanupStatusOutput = & git -C $candidateRoot status --porcelain --untracked-files=all 2>&1
+              $candidateCleanupStatusExitCode = $LASTEXITCODE
+              if ($candidateCleanupStatusExitCode -ne 0) { throw "Could not verify candidate cleanup status: $candidateCleanupStatusExitCode" }
+              $candidateStatus = ($candidateCleanupStatusOutput | Out-String).Trim()
+              if (-not [string]::IsNullOrWhiteSpace($candidateStatus)) { throw 'Candidate checkout is not clean after controlled build cleanup.' }
+            }
+          } catch {
+            [void]$candidateCleanupErrors.Add("Candidate cleanup failed: $($_.Exception.Message)")
+          }
+          try {
+            Assert-ControlledBuildPathsFreeBytes -Stage 'after-candidate-cleanup' -Paths @($env:GITHUB_WORKSPACE, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 12GB | Out-Null
+          } catch {
+            [void]$candidateCleanupErrors.Add("Post-cleanup disk gate failed: $($_.Exception.Message)")
+          }
+          if ($candidateCleanupErrors.Count -gt 0) { throw "Controlled cleanup failures: $($candidateCleanupErrors -join '; ')" }
+
+      - name: Upload immutable candidate core first
+        id: upload_core
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ env.CORE_ARTIFACT_NAME }}
+          path: ${{ env.CORE_ARTIFACT_ROOT }}
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+          retention-days: 14
+
+      - name: Bind the first upload digest into an independent record and generate the administrator launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          $assemblyRoot = $env:ASSEMBLY_ROOT
+          Import-Module -Name (Join-Path $controlRoot 'scripts\release-artifact-generator.psm1') -Force
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
+          [void](Open-RainControlledDirectoryReservation -Path $env:CORE_ARTIFACT_ROOT -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:CORE_ARTIFACT_ROOT_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN)
+          [void](Open-RainControlledDirectoryReservation -Path $env:CONTROL_ARTIFACT_ROOT -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:CONTROL_ARTIFACT_ROOT_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN)
+          [void](Open-RainControlledDirectoryReservation -Path $env:ASSEMBLY_ROOT -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:ASSEMBLY_ROOT_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN)
+          $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          New-RainControlledBuildRecord -InstallerPath (Join-Path $env:CORE_ARTIFACT_ROOT $env:INSTALLER_FILE_NAME) -ArtifactManifestPath (Join-Path $env:CORE_ARTIFACT_ROOT 'release-artifact-manifest.json') -CandidateSourceRoot $candidateRoot -ToolchainRecordPath $env:TOOLCHAIN_RECORD_PATH -OutputDirectory $env:CONTROL_ARTIFACT_ROOT -CandidateTargetCommit $env:CANDIDATE_TARGET_COMMIT -ToolingCommit $env:TOOLING_COMMIT -Repository $env:GITHUB_REPOSITORY -SourceRepository $env:SOURCE_REPOSITORY -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId $env:BUILD_RECORD_ID -BuiltAt $env:BUILT_AT -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl $env:WORKFLOW_RUN_URL -WorkflowEvent $env:GITHUB_EVENT_NAME -WorkflowRef $env:GITHUB_REF -WorkflowRunId $env:GITHUB_RUN_ID -WorkflowRunAttempt ([int]$env:GITHUB_RUN_ATTEMPT) -WorkflowDefinitionCommit $env:TOOLING_COMMIT -CandidateMasterReachable $true -ToolingMasterReachable $true -CoreArtifactName $env:CORE_ARTIFACT_NAME -CoreArtifactDigest '${{ steps.upload_core.outputs.artifact-digest }}' | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:CORE_ARTIFACT_ROOT $env:INSTALLER_FILE_NAME) -Destination $assemblyRoot -Force
+          Copy-Item -LiteralPath (Join-Path $env:CORE_ARTIFACT_ROOT 'release-artifact-manifest.json') -Destination $assemblyRoot -Force
+          Copy-Item -LiteralPath (Join-Path $env:CONTROL_ARTIFACT_ROOT 'controlled-build-record.json') -Destination $assemblyRoot -Force
+          $assemblyLauncher = Join-Path $assemblyRoot 'run-nvidia-release-evidence-as-admin.ps1'
+          & (Join-Path $controlRoot 'scripts\generate-nvidia-evidence-admin-launcher.ps1') -CandidateBundleRoot $assemblyRoot -OutputPath $assemblyLauncher
+          if ($LASTEXITCODE -ne 0) { throw "Administrator launcher generation failed with exit code $LASTEXITCODE" }
+          Copy-Item -LiteralPath $assemblyLauncher -Destination (Join-Path $env:CONTROL_ARTIFACT_ROOT 'run-nvidia-release-evidence-as-admin.ps1') -Force
+          $actualControlFiles = @(Get-ChildItem -LiteralPath $env:CONTROL_ARTIFACT_ROOT -File -Recurse | ForEach-Object { $_.Name } | Sort-Object)
+          $expectedControlFiles = @('controlled-build-record.json', 'run-nvidia-release-evidence-as-admin.ps1') | Sort-Object
+          if (Compare-Object -ReferenceObject $expectedControlFiles -DifferenceObject $actualControlFiles) { throw 'Control artifact must contain only the independent record and its launcher.' }
+
+      - name: Upload immutable control artifact second
+        id: upload_control
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ env.CONTROL_ARTIFACT_NAME }}
+          path: ${{ env.CONTROL_ARTIFACT_ROOT }}
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+          retention-days: 14
+
+      - name: Record upload digests for the human review handoff
+        shell: pwsh
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "core artifact digest: ${{ steps.upload_core.outputs.artifact-digest }}"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "control artifact digest: ${{ steps.upload_control.outputs.artifact-digest }}"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Before downloading, verify the canonical workflow run URL and second control-artifact upload digest: $env:WORKFLOW_RUN_URL"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Download both artifacts into one directory before manually running the administrator launcher.'
+
+      - name: Clean all invocation-owned runner TEMP roots
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
+          try {
+            Invoke-RainControlledDirectoryCleanup -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          } catch {
+            throw "Invocation-owned TEMP cleanup failed: $($_.Exception.Message)"
+          }

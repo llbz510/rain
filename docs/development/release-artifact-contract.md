@@ -72,9 +72,11 @@ The current approximate payload size remains about 804 MB, but size must be re-m
 
 ## 5. Release Artifact Manifest
 
-Every RC and formal release must publish a machine-readable artifact manifest generated from the built artifact, not handwritten from intended values.
+Every RC and formal release must publish a machine-readable artifact manifest generated from the built artifact, not handwritten from intended values. For the controlled NSIS path, the generator first identifies the source-derived installer filename and NSIS kind, verifies only basic MZ/PE shape (not the bootstrap stub's machine), silently installs it, and derives the manifest from the resulting installed tree. The installed `Rain.exe`, not the NSIS bootstrapper, is the x64 PE identity that must be verified.
 
 M3-S3 accepts that generated manifest only with an independent `ExpectedArtifactManifestSha256` trust input. The expected hash may come **only** from the controlled merged-target build record for the exact candidate; it must not be copied from the candidate manifest itself, inferred after installation, supplied by a handwritten note, or described as a signature/attestation. The runner verifies the manifest bytes against that expected hash before it reads any claimed fields. It then requires an explicit controlled-build record whose source repository, target commit, clean-tree result, generator identity/version and build-record metadata agree with the expected target. The manifest's `targetCommit`, `installer.fileName`, `installer.sizeBytes`, `installer.sha256` and NSIS Windows x64 kind must all match the supplied candidate and expected target. Recording those values only after installation is not provenance. If the controlled merged-target build record is unavailable, the runner must fail closed and must not write a passed Evidence manifest. This is a candidate-input boundary, not a claim that signing or Release Evidence has been completed.
+
+The controlled-build record is a separate machine-readable file, not merely the `controlledBuild` object copied into the artifact manifest. It records two different commits: `targetCommit` is the exact candidate source used to build Rain, while `toolingCommit` is the commit that supplied the dispatch workflow, generator and administrator launcher. The workflow must check out the candidate source separately and keep that checkout clean; it must not describe the newer tooling commit as the candidate source. The runner and generated launcher must verify their own clean tooling checkout against `toolingCommit`, and verify the candidate through the record/manifest `targetCommit` and installer bytes. This separation is provenance metadata, not a signature or a Release Evidence claim.
 
 Required minimum fields:
 
@@ -84,28 +86,41 @@ Required minimum fields:
 | `productName` | Must be `Rain` |
 | `version` | Must match Tauri version `0.1.0` for this release |
 | `identifier` | Must be `com.rain.app` |
-| `targetCommit` | Full Git commit SHA used to build the installer |
+| `targetCommit` | Full candidate-source Git commit SHA used to build the installer; it is not the workflow/generator commit |
 | `controlledBuild.sourceRepository` | Nonblank canonical source repository recorded by the controlled merged-target build |
 | `controlledBuild.targetCommit` | Full target SHA; must equal `targetCommit` and the independently supplied expected target |
+| `controlledBuild.toolingCommit` | Full commit SHA for the workflow/generator/launcher control checkout; it is distinct from the candidate source target |
 | `controlledBuild.cleanTree` | Must be `true` for the controlled build record |
 | `controlledBuild.generator.id` / `.version` | Controlled generator identity and version |
 | `controlledBuild.buildMetadata.buildRecordId` / `.builtAt` | Controlled build-record identity and ISO-8601 build time |
 | `installer.fileName` | Public installer file name |
 | `installer.sha256` | SHA-256 of the installer bytes |
 | `installer.sizeBytes` | Installer byte length |
-| `installer.kind` | Must identify NSIS Windows x64 |
-| `mainExecutable.path` | Installed Rain executable path observed by the Judge |
+| `installer.kind` | Must identify the NSIS Windows x64 product installer; it does not assert the bootstrap stub PE machine |
+| `controlledBuild.toolchain` | Bound hosted runner image/OS/architecture, Node/npm/Cargo/MSVC/NSIS facts, and the pinned CMake/CUDA/LLVM/NSIS download URLs and SHA-256 values |
+| `installationProof` | Logical, non-host-identifying proof of the successful silent-install mode, zero exit, installer hash binding, installed `Rain.exe` relative path/machine, and payload-manifest relative path; it must not persist the runner install root or raw `/D` absolute path |
+| `mainExecutable.path` | Canonical install-root-relative Rain executable path observed by the Judge; never a builder-machine absolute path |
 | `mainExecutable.sha256` | SHA-256 of installed main executable |
 | `mainExecutable.cudaImportsPresent` | Must be `false` |
-| `resources.cudaWorker.path` | Installed worker path |
+| `resources.cudaWorker.path` | Canonical install-root-relative worker path |
 | `resources.cudaWorker.sha256` | SHA-256 of worker executable |
 | `resources.cudaWorker.protocolVersion` | Must equal the production worker protocol version |
-| `resources.cudaRuntime.files[]` | Name, installed path, size and SHA-256 for each allowed CUDA runtime DLL |
+| `resources.cudaRuntime.files[]` | Name, install-root-relative path, size and SHA-256 for each allowed CUDA runtime DLL |
 | `resources.cudaRuntime.driverLibraryBundled` | Must be `false` |
 | `resources.cudaRuntime.distributionApproval` | Reference to human legal approval; may be `pending` for RC-internal candidates but must be approved before public release |
+| `resources.cudaPayloadManifest.configuration` | Must be `release` |
 | `forbiddenFindings` | Results for secret/path/user-data/E2E/debug/driver-DLL scans |
+| `hygieneScopes` | Must record both additive scanner inputs: `installed-tree` and `installer-archive` |
 | `generatedAt` | Generation timestamp |
 | `generator` | Script/tool identity and version |
+
+Before a generator may declare the `installer-archive` scope clean, the 7-Zip extraction must be nonempty and structurally prove one AMD64 `Rain.exe` plus the canonical `resources/whisper-backends/payload-manifest.json`. That manifest must declare the release protocol and hash/size-match every required CUDA payload file. An empty extraction, a bootstrapper-only extraction, or an archive without that valid Rain payload is a failed Judge, not a clean scope.
+
+The accompanying `controlled-build-record.json` must contain its own schema version, canonical source repository, `targetCommit`, `toolingCommit`, `cleanTree=true`, generator identity/version, build record id/time, workflow file/definition commit/run id/run attempt, the bound hosted runner and toolchain facts, pinned download URLs/SHA-256 values, the first core-upload artifact name/digest, and the exact installer plus artifact-manifest names, sizes and SHA-256 values. The record's artifact-manifest SHA-256 is the sole acceptable origin for `ExpectedArtifactManifestSha256`. The record, manifest, installer and generated administrator launcher are one candidate bundle; none is a public release asset.
+
+The build avoids a record/launcher digest cycle with two immutable workflow artifacts. The first **core** upload contains only the installer, `release-artifact-manifest.json`, and `SHA256SUMS.txt`; it contains neither record nor launcher. Only after the upload action returns its `artifact-digest` may the generator write `controlled-build-record.json` with `coreArtifact.name` and `coreArtifact.digest`, and may the launcher be generated with the resulting record SHA-256. The second **control** upload contains only that record and launcher. A human later downloads and extracts both artifacts into one directory before manually running the launcher. The control-upload digest is review metadata only and is not written back into the record.
+
+Human handoff is fail-closed in this order: first confirm that the GitHub Actions run URL is exactly the canonical `llbz510/rain` run URL recorded by the control record; then compare the Actions summary's second control-artifact upload digest with the reviewed upload; finally download and extract both immutable artifacts into the same empty directory. The generated administrator launcher rechecks the record, installer and manifest hashes, canonical run provenance, and its supplied clean control-tooling checkout before it can invoke the Evidence runner. It deliberately does not mistake the candidate `targetCommit` for the newer control `toolingCommit`, and it cannot internally attest the external control-upload digest, so the reviewer must complete that comparison before launch.
 
 The manifest is not a substitute for the separate SBOM, notices, signature verification, CPU/GPU runtime Evidence or release notes. It is the common artifact identity that those records must reference.
 
@@ -130,7 +145,7 @@ This contract deliberately keeps current coverage conservative:
 - `AC-RL-07` is Superseded by the 2026-08-03 GPU-required release migration; no no-NVIDIA Release Evidence is required.
 - `AC-RL-08` remains Partial until the same installer passes an NVIDIA Windows Auto/Forced/CPU/cancel/error Judge.
 - `AC-RL-10` remains Gap until the artifact manifest, SBOM and notices are generated from the same target SHA.
-- `AC-RL-12` remains Partial until an unpacked-installer hygiene scanner proves the forbidden contents are absent.
+- `AC-RL-12` remains Partial until one hosted controlled build proves the forbidden contents are absent in both the additively unpacked installer archive and the real installed tree after a silent install. The archive Judge is retained; it is not replaced by installed-tree inspection.
 - `AC-RL-18` remains Gap until public download and installer UI text are judged against the actual artifact manifest and runtime Evidence.
 
 No existing local GPU smoke, historical schema v2 video Evidence or clean Windows Harness run can be promoted into these Release Evidence slots.
@@ -141,9 +156,9 @@ The next runtime Evidence Slice is M3-S3 on a supported NVIDIA Windows host. Lat
 
 | Future Slice | Required Judge |
 | --- | --- |
-| M3 artifact generator | Builds from clean checkout, produces one NSIS installer, generates artifact manifest from bytes and installed files, and verifies main executable CUDA imports are absent |
+| M3 controlled artifact build | From a reviewed control-workflow commit, separately checks out the exact clean candidate source, produces one NSIS installer on hosted Windows, silently installs it, generates the artifact manifest and independent build record from the installed files, then silently invokes the generated uninstaller and verifies cleanup. It verifies main executable CUDA imports are absent. It does not create a GitHub Release or Release Evidence. |
 | M3-S2 no NVIDIA/CUDA Evidence | `Retired` — `AC-RL-07` and its runner were superseded by the 2026-08-03 GPU-required release migration |
-| M3-S3 NVIDIA Evidence | `scripts/run-nvidia-release-evidence.ps1` verifies an independently supplied expected artifact-manifest hash from a controlled merged-target build record, then uses `CONTEXT.md`'s production probe + model-memory predicate. The current runner deliberately fails closed before installation/desktop execution because the deterministic cancellation fixture and session-scoped process-tree adapter are not yet implemented. It therefore cannot write passed Evidence; its PowerShell external-interface behavior contract is runner coverage, not Evidence. |
+| M3-S3 NVIDIA Evidence | `scripts/run-nvidia-release-evidence.ps1` verifies an independently supplied expected artifact-manifest hash and independent controlled-build record before installation, then uses `CONTEXT.md`'s production probe + model-memory predicate. The deterministic cancellation fixture and session-scoped process-tree adapter are implemented, but this host's provider subscription is known to fail closed until an elevated, permitted Evidence session proves readiness. A generated launcher must be run manually from an elevated PowerShell; Codex must not elevate it. No implementation or behavior-contract test is Release Evidence. |
 | M3 lifecycle Slices | Clean install, same-version reinstall, old-fixture upgrade, uninstall and reinstall each record file/user-data manifests separately |
 | M3-S5 signing/SBOM/legal/hygiene | Separately verifies signature, SBOM/notices, human CUDA redistribution approval and forbidden-content scan |
 | M3-S6 disclosure UX | Verifies download page and installer UI text against the artifact manifest, NVIDIA Evidence, the executable host-eligibility predicate and only the exact configurations signed by valid M3-S3 Evidence |

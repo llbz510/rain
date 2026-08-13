@@ -112,6 +112,8 @@
 
 以下 50 条 AC 最初于 2026-08-02 确认产品语义。2026-08-03 Harness Migration 将 `AC-RL-07` 标为 `Superseded`，其余 49 条继续 Confirmed；本行保留退役 AC 的覆盖记录以便审计。`Partial`/`Gap` 是正式开发队列，`Retired` 不是完成或 Evidence 升级。
 
+2026-08-11 的 controlled merged-target artifact-build Slice 正在为 `AC-RL-01/02/08/10/12` 建立生成器、独立 build record 和 hosted workflow；`release-artifact-generator.test.ts`、`generate-nvidia-evidence-admin-launcher.test.ts` 和 `controlled-gpu-artifact-build.workflow.test.ts` 只裁判 fake bytes、provenance、两次上传顺序与安全门。真实目标 workflow 成功、其 output 被独立审查前，本表等级保持不变，尤其不能把行为合同或 workflow 静态检查写成 Release Evidence。
+
 | AC | 当前裁判 | 等级 | 当前结论与缺口 |
 | --- | --- | --- | --- |
 | AC-RL-01 | `release-artifact-contract.md`；尚无可信发布 Judge | Gap | M3-S1 已定义目标 `0.1.0` 单一公开 NSIS、commit/installer manifest 和唯一 GitHub Release asset 合同；尚未生成目标安装器或执行公开资产/SHA 对账 |
@@ -125,7 +127,7 @@
 | AC-RL-09 | 尚无正式签名 Judge | Gap | 缺受信任证书、时间戳、目标 installer/主程序验证和人类 security 批准 |
 | AC-RL-10 | `release-artifact-contract.md`；尚无 release manifest/SBOM Judge | Gap | M3-S1 定义了 release artifact manifest 最小字段；缺同一目标 SHA 生成的 installer SHA、机器 manifest、SBOM 与 notices 对账 |
 | AC-RL-11 | 尚无人类 legal 批准 | Gap | CUDA runtime DLL/版本/来源/许可证清单尚未取得书面批准 |
-| AC-RL-12 | `release-artifact-contract.md`、普通/E2E 构建隔离扫描 | Partial | 已拒绝 E2E 标记进入普通前端产物；M3-S1 定义 installer/installed tree 禁止项；尚无解包 installer 的 secret/path/DLL/用户数据完整 hygiene scanner |
+| AC-RL-12 | `release-artifact-contract.md`、普通/E2E 构建隔离扫描、controlled artifact generator/workflow 双树 scanner | Partial | 已拒绝 E2E 标记进入普通前端产物；controlled workflow 现在保留原解包 Judge，以 7-Zip 解包 installer archive，并与真实 silent-install 后的 installed tree 分别执行 secret/path/DLL/用户数据/调试产物扫描。fake-tree 与静态 workflow 合同已覆盖，但在精确 target 上的 hosted run 尚未执行，因此不得升级为 Strong 或 Release Evidence |
 | AC-RL-13 | Rust persistence tests、`database-architecture-policy.test.ts` | Partial | 当前专用事务与架构边界有覆盖；缺冻结旧 SQLite fixture 的生产启动迁移、备份、逐步故障和幂等重启 |
 | AC-RL-14 | `validate-evidence.test.ts`、`validate-evidence.ps1` | Partial | 现有 Evidence schema 校验部分指纹；尚未把目标 installer hash、全部配置/硬件和影响边界的 commit 变化作为统一失效门 |
 | AC-RL-15 | 本迁移的缺陷政策文档 | Gap | 尚无可执行严重度 fixture、发布阻断器和人类签署例外记录 |

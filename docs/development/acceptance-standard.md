@@ -658,7 +658,7 @@ CUDA runtime 再分发在公开发布前取得人类 release/legal owner 的书�
 
 实现归属：artifact hygiene scanner、release owner。
 
-裁判：解包 installer 扫描；secret/path/denylist；允许资源 manifest 精确白名单。Required Evidence tier：Strong + Release Evidence。
+裁判：保留解包 installer archive 扫描，并以真实 silent install 后的 installed tree 扫描作为增量 Judge；两者均执行 secret/path/denylist，允许资源 manifest 精确白名单，且任何一侧不得替代另一侧。未经 Harness Migration 不得退役原解包 Judge。Required Evidence tier：Strong + Release Evidence。
 
 明确范围外：证明业务行为、替代代码审查。
 

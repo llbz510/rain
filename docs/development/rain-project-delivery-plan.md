@@ -224,7 +224,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M3-S3 NVIDIA Windows Evidence
 
-状态：`Blocked — runner safety enablement`。当前原子 Slice 只提交可复放 runner、非锁定 PowerShell 外部接口行为合同和入口；安装器必须先由受控 merged-target build record 提供的独立 manifest SHA-256 绑定目标提交与实际字节，installed CUDA payload 必须通过双向集合校验。由于确定性取消 fixture 和 session-scoped process-tree adapter 尚未实现，runner 在安装器和桌面进程启动前 fail-closed，不能写 passed Evidence。它不构建候选、不执行短样本、不生成 Release Evidence。下一 Slice 必须先以确定性 fake adapter/fixture 关闭上述安全边界，不能通过保护合并直接重建候选或执行下列 Judge。
+状态：`In progress — controlled artifact-build prerequisite`。runner safety enablement 已合并；确定性取消 fixture 和 session-scoped process-tree adapter 已存在，但未经权限验证的 provider subscription 继续 fail-closed。当前原子 Slice 从精确 candidate source target `3006757838b972b511917663e4ba8328804607d6` 建立独立 `windows-2025` hosted controlled build、artifact manifest、build record 和手工管理员 launcher。target source SHA 与 workflow/generator tooling SHA 必须分别记录和验证；workflow 按 `RUNNER_TEMP`、`GITHUB_WORKSPACE`、下载根和两个 target 根实际所在卷分别执行阶段磁盘门禁。native CUDA/LLVM/NSIS 和固定 CMake 4.0.0 的安装/下载清理/磁盘错误由一个深 module 聚合，只有 `cmakeReady` 后 workflow 才能消费 CMake root；展开目录必须贯穿 CUDA worker 与独立 Tauri/Cargo 主构建，之后在 always/finally cleanup 中删除。installer archive 解包根必须保留到 archive/installed-tree 双扫描完成后再聚合清理，且只有非空并含 AMD64 Rain 和 hash-matched release payload 的 7-Zip tree 才能声明 archive hygiene scope。它不 dispatch workflow、不构建本机候选、不执行短样本、不生成 Release Evidence，且不能通过保护合并直接重建候选或执行下列 Judge。
 
 - 安装精确目标提交的正式 GPU 增强候选包。
 - 按 `CONTEXT.md` 的唯一资格谓词记录生产 worker probe、模型显存门禁、GPU/驱动/显存/协议和包/模型哈希；只签发该精确配置，不外推未验证型号。
@@ -685,6 +685,6 @@ Next single action:
 3. M2-S1：`Complete` — workflow_dispatch run `30756311932` 已对精确 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 重放通过。
 4. M2-S2：`Complete` — schema v2 包保留为 408b6db-era 历史 Evidence；独立 Spec/Standards gate 已通过。
 5. M3-S1：`Complete` — [`release-artifact-contract.md`](release-artifact-contract.md) 已定义正式产物合同，并通过独立 Spec + Standards review。
-6. M3-S2：`Superseded` — PR #29 runner 与 PR #30 NSIS prerequisite 保留历史；2026-08-03 GPU-required migration 退役无 NVIDIA 发布 Evidence。下一原子动作是 M3-S3 受支持 NVIDIA Windows Evidence。
+6. M3-S2：`Superseded` — PR #29 runner 与 PR #30 NSIS prerequisite 保留历史；2026-08-03 GPU-required migration 退役无 NVIDIA 发布 Evidence。当前原子动作是 M3 controlled merged-target artifact build：hosted Windows 从精确、clean candidate source 构建，真实静默安装后从 installed tree 生成 manifest，并在读取完成后以生成的 uninstaller `/S` 清理；它仍不是 M3-S3 NVIDIA Windows Evidence。
 
 完成上述六个工作包所需的原子 Slice 前，不并行启动翻译、Vision 或高级树编辑。M3 之后依赖图允许 M4 和经确认的产品工作流并行，但每个独立 worktree 仍只承载一个可验证 Slice，并在合并前重新基于最新主线运行 Harness 与独立审查。
