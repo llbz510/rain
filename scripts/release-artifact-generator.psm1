@@ -46,14 +46,37 @@ function Resolve-RainReleaseArtifactFile([string]$Path, [string]$Description) {
   if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     throw "$Description does not exist: $Path"
   }
-  return (Resolve-Path -LiteralPath $Path).Path
+  # DirectoryInfo/FileInfo.FullName expands a Windows 8.3 alias to the same long path used
+  # by the hosted runner, while Resolve-Path preserves the caller's lexical alias.
+  return (Get-Item -LiteralPath $Path -Force).FullName
 }
 
 function Resolve-RainReleaseArtifactDirectory([string]$Path, [string]$Description) {
   if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Container)) {
     throw "$Description does not exist: $Path"
   }
-  return (Resolve-Path -LiteralPath $Path).Path
+  return (Get-Item -LiteralPath $Path -Force).FullName
+}
+
+function Test-RainReleaseArtifactSameExistingPath([string]$Left, [string]$Right, [bool]$Directory) {
+  try {
+    $leftIdentity = if ($Directory) {
+      Resolve-RainReleaseArtifactDirectory $Left 'Compared directory'
+    } else {
+      Resolve-RainReleaseArtifactFile $Left 'Compared file'
+    }
+    $rightIdentity = if ($Directory) {
+      Resolve-RainReleaseArtifactDirectory $Right 'Compared directory'
+    } else {
+      Resolve-RainReleaseArtifactFile $Right 'Compared file'
+    }
+    return [string]::Equals($leftIdentity, $rightIdentity, [System.StringComparison]::OrdinalIgnoreCase)
+  } catch {
+    return [string]::Equals(
+      [System.IO.Path]::GetFullPath($Left),
+      [System.IO.Path]::GetFullPath($Right),
+      [System.StringComparison]::OrdinalIgnoreCase)
+  }
 }
 
 function Get-RainReleaseArtifactSha256([string]$Path) {
@@ -437,32 +460,35 @@ function Assert-RainNsisInstallationProof {
 
   $installer = Resolve-RainReleaseArtifactFile $InstallerPath 'Installer'
   $installed = Resolve-RainReleaseArtifactDirectory $InstalledRoot 'Installed root'
-  $proofInstallerPath = [System.IO.Path]::GetFullPath([string](Get-RainReleaseArtifactProperty $Proof 'installerPath' 'NSIS installation proof'))
-  if (-not [string]::Equals($proofInstallerPath, [System.IO.Path]::GetFullPath($installer), [System.StringComparison]::OrdinalIgnoreCase)) {
+  $proofInstallerPath = [string](Get-RainReleaseArtifactProperty $Proof 'installerPath' 'NSIS installation proof')
+  if (-not (Test-RainReleaseArtifactSameExistingPath $proofInstallerPath $installer $false)) {
     throw 'NSIS installation proof is not bound to the supplied installer path.'
   }
   if ([string](Get-RainReleaseArtifactProperty $Proof 'installerSha256' 'NSIS installation proof') -ne (Get-RainReleaseArtifactSha256 $installer)) {
     throw 'NSIS installation proof is not bound to the supplied installer bytes.'
   }
-  $proofInstalledRoot = [System.IO.Path]::GetFullPath([string](Get-RainReleaseArtifactProperty $Proof 'installRoot' 'NSIS installation proof'))
-  if (-not [string]::Equals($proofInstalledRoot, [System.IO.Path]::GetFullPath($installed), [System.StringComparison]::OrdinalIgnoreCase)) {
+  $proofInstalledRoot = [string](Get-RainReleaseArtifactProperty $Proof 'installRoot' 'NSIS installation proof')
+  if (-not (Test-RainReleaseArtifactSameExistingPath $proofInstalledRoot $installed $true)) {
     throw 'NSIS installation proof is not bound to the supplied installed root.'
   }
   $expectedMainExecutable = Join-Path $installed 'rain.exe'
-  $proofMainExecutable = [System.IO.Path]::GetFullPath([string](Get-RainReleaseArtifactProperty $Proof 'mainExecutable' 'NSIS installation proof'))
-  if (-not [string]::Equals($proofMainExecutable, [System.IO.Path]::GetFullPath($expectedMainExecutable), [System.StringComparison]::OrdinalIgnoreCase) -or
+  $proofMainExecutable = [string](Get-RainReleaseArtifactProperty $Proof 'mainExecutable' 'NSIS installation proof')
+  if (-not (Test-RainReleaseArtifactSameExistingPath $proofMainExecutable $expectedMainExecutable $false) -or
       [int](Get-RainReleaseArtifactProperty $Proof 'mainExecutableMachine' 'NSIS installation proof') -ne 0x8664) {
     throw 'NSIS installation proof does not establish an AMD64 Rain.exe at the exact application-root layout.'
   }
   $expectedPayloadManifest = Join-Path $installed 'resources\whisper-backends\payload-manifest.json'
-  $proofPayloadManifest = [System.IO.Path]::GetFullPath([string](Get-RainReleaseArtifactProperty $Proof 'payloadManifestPath' 'NSIS installation proof'))
-  if (-not [string]::Equals($proofPayloadManifest, [System.IO.Path]::GetFullPath($expectedPayloadManifest), [System.StringComparison]::OrdinalIgnoreCase)) {
+  $proofPayloadManifest = [string](Get-RainReleaseArtifactProperty $Proof 'payloadManifestPath' 'NSIS installation proof')
+  if (-not (Test-RainReleaseArtifactSameExistingPath $proofPayloadManifest $expectedPayloadManifest $false)) {
     throw 'NSIS installation proof does not establish the exact CUDA payload layout.'
   }
   $silentInstall = Get-RainReleaseArtifactProperty $Proof 'silentInstall' 'NSIS installation proof'
   $arguments = @((Get-RainReleaseArtifactProperty $silentInstall 'arguments' 'NSIS installation proof silentInstall') | ForEach-Object { [string]$_ })
-  $expectedArguments = @('/S', ('/D=' + [System.IO.Path]::GetFullPath($installed)))
-  if ($arguments.Count -ne $expectedArguments.Count -or ($arguments -join "`0") -ne ($expectedArguments -join "`0") -or
+  $hasBoundSilentDestination = $false
+  if ($arguments.Count -eq 2 -and $arguments[0] -ceq '/S' -and $arguments[1].StartsWith('/D=', [System.StringComparison]::Ordinal)) {
+    $hasBoundSilentDestination = Test-RainReleaseArtifactSameExistingPath $arguments[1].Substring(3) $installed $true
+  }
+  if (-not $hasBoundSilentDestination -or
       (Get-RainReleaseArtifactProperty $silentInstall 'waited' 'NSIS installation proof silentInstall') -ne $true -or
       [int](Get-RainReleaseArtifactProperty $silentInstall 'exitCode' 'NSIS installation proof silentInstall') -ne 0) {
     throw 'NSIS installation proof must record a successful waited /S installation into the exact root.'

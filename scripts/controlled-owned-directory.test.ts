@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -62,7 +62,7 @@ describe('controlled build owned-directory lifecycle', () => {
     mkdirSync(target)
     writeFileSync(join(target, 'keep.txt'), 'foreign')
     const marker = join(parent, '.foreign.rain-controlled-owned.json')
-    writeFileSync(marker, JSON.stringify({ schemaVersion: 2, ownerId: 'run-123-1', targetPath: target, tokenSha256: '0'.repeat(64), authorityHmac: '0'.repeat(64) }))
+    writeFileSync(marker, JSON.stringify({ schemaVersion: 2, ownerId: 'run-123-1', targetPath: realpathSync.native(target), tokenSha256: '0'.repeat(64), authorityHmac: '0'.repeat(64) }))
     const command = [
       "$ErrorActionPreference = 'Stop'",
       `Import-Module ${psQuoted(modulePath)} -Force`,

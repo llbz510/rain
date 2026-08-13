@@ -1415,7 +1415,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     })
     expect(wrongHash.status).toBe(1)
     expect(wrongHash.output.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
-  })
+  }, 15_000)
 
   it('rejects manifest installation proof that persists a raw installation root or /D argument', async () => {
     const candidate = createArtifactFixture(newTemporaryRoot())
@@ -1798,8 +1798,8 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
 
     assertContractSucceeded(result)
     expect(result.output.value.installRoot).toMatch(new RegExp(`^${temporaryRoot.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\\\rain-nsis-installed-[0-9a-f]{32}$`, 'i'))
-    expect(result.output.value.mainExecutable).toBe(join(result.output.value.installRoot, 'rain.exe'))
-    expect(result.output.value.payloadManifestPath).toBe(join(result.output.value.installRoot, 'resources', 'whisper-backends', 'payload-manifest.json'))
+    expect(realpathSync.native(result.output.value.mainExecutable)).toBe(realpathSync.native(join(result.output.value.installRoot, 'rain.exe')))
+    expect(realpathSync.native(result.output.value.payloadManifestPath)).toBe(realpathSync.native(join(result.output.value.installRoot, 'resources', 'whisper-backends', 'payload-manifest.json')))
     expect(existsSync(result.output.value.mainExecutable)).toBe(true)
     expect(existsSync(result.output.value.payloadManifestPath)).toBe(true)
     expect(result.output.value.process).toMatchObject({

@@ -33,6 +33,18 @@ function sha256(path: string) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
+function windowsShortPath(path: string) {
+  const command = `(New-Object -ComObject Scripting.FileSystemObject).GetFolder(${psQuoted(path)}).ShortPath`
+  return execFileSync(powerShellExecutable, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    command,
+  ], { encoding: 'utf8', windowsHide: true }).trim()
+}
+
 function newTemporaryRoot() {
   const root = mkdtempSync(join(tmpdir(), 'rain-release-artifact-generator-test-'))
   temporaryRoots.push(root)
@@ -226,6 +238,7 @@ function runGenerator({
   sourceRepository = 'https://github.com/llbz510/rain.git',
   manifestOnly = false,
   omitInstallationProof = false,
+  installationProof,
 }: {
   installerPath: string
   installRoot: string
@@ -238,10 +251,11 @@ function runGenerator({
   sourceRepository?: string
   manifestOnly?: boolean
   omitInstallationProof?: boolean
+  installationProof?: ReturnType<typeof createNsisInstallationProof>
 }) {
   const candidateTarget = '3006757838b972b511917663e4ba8328804607d6'
   const toolingCommit = '1111111111111111111111111111111111111111'
-  const proof = createNsisInstallationProof(installerPath, installRoot)
+  const proof = installationProof ?? createNsisInstallationProof(installerPath, installRoot)
   const proofBase64 = Buffer.from(JSON.stringify(proof), 'utf8').toString('base64')
   const proofPreamble = omitInstallationProof
     ? ''
@@ -270,6 +284,34 @@ afterEach(() => {
 })
 
 describe('controlled release artifact generator', () => {
+  it('accepts a bound NSIS proof expressed through the real Windows 8.3 alias but still rejects a different existing path', () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath } = createInstalledTreeFixture(root)
+    const shortRoot = windowsShortPath(root)
+    expect(shortRoot.toLowerCase()).not.toBe(root.toLowerCase())
+
+    const shortInstallerPath = installerPath.replace(root, shortRoot)
+    const shortInstallRoot = installRoot.replace(root, shortRoot)
+    const aliasedProof = createNsisInstallationProof(shortInstallerPath, shortInstallRoot)
+    expect(() => runGenerator({
+      installerPath,
+      installRoot,
+      outputRoot: join(root, 'candidate-output'),
+      installationProof: aliasedProof,
+      manifestOnly: true,
+    })).not.toThrow()
+
+    const escapedProof = createNsisInstallationProof(shortInstallerPath, shortInstallRoot)
+    escapedProof.mainExecutable = shortInstallerPath
+    expect(() => runGenerator({
+      installerPath,
+      installRoot,
+      outputRoot: join(root, 'escaped-output'),
+      installationProof: escapedProof,
+      manifestOnly: true,
+    })).toThrow(/exact application-root layout/i)
+  })
+
   it('serializes the normalized remote toolchain record into the core manifest', () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)

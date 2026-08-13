@@ -11,6 +11,10 @@ const candidateTargetCommit = '3006757838b972b511917663e4ba8328804607d6'
 const checkoutAction = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683'
 const uploadArtifactAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 
+function readWorkflow() {
+  return readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n')
+}
+
 function requiredIndex(source: string, needle: string) {
   const index = source.indexOf(needle)
   expect(index, `missing workflow contract text: ${needle}`).toBeGreaterThanOrEqual(0)
@@ -51,7 +55,7 @@ function assertNativeGitFailureClosed(workflow: string) {
 describe('controlled GPU artifact build workflow contract', () => {
   it('is a manual, two-artifact hosted build that binds the exact merged candidate before evidence can exist', () => {
     expect(existsSync(workflowPath), 'controlled build workflow must exist').toBe(true)
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
     const toolchainModule = readFileSync(toolchainInstallModulePath, 'utf8')
 
     expect(workflow).toContain('workflow_dispatch:')
@@ -157,7 +161,7 @@ describe('controlled GPU artifact build workflow contract', () => {
   })
 
   it('rejects job eligibility gates that use an illegal env context before a hosted build can be scheduled', () => {
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
     const canonicalExpression = buildJobEligibilityExpression(workflow)
     const illegalEnvFixture = workflow.replace(
       canonicalExpression,
@@ -169,7 +173,7 @@ describe('controlled GPU artifact build workflow contract', () => {
   })
 
   it('pins CMake, records the complete hosted toolchain, and guarantees installed-tree and candidate cleanup', () => {
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
     const toolchainModule = readFileSync(toolchainInstallModulePath, 'utf8')
     const cmakeUrl = 'https://github.com/Kitware/CMake/releases/download/v4.0.0/cmake-4.0.0-windows-x86_64.zip'
     const cmakeSha256 = '89E87F3E297B70F1349EE7C5F90783CA96EFB986B70C558C799C3C9B1B716456'
@@ -220,7 +224,7 @@ describe('controlled GPU artifact build workflow contract', () => {
   })
 
   it('rejects a workflow fixture that exposes pinned CMake only to the worker build', () => {
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
     const toolchainModule = readFileSync(toolchainInstallModulePath, 'utf8')
     const workerOnlyFixture = toolchainModule.replace(
       'foreach ($pathLine in @($llvmBin, $nsisHome, $cmakeBin))',
@@ -231,7 +235,7 @@ describe('controlled GPU artifact build workflow contract', () => {
   })
 
   it('rejects a workflow fixture that can interpret a failed native git status as clean', () => {
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
     const uncheckedStatusFixture = workflow.replace(
       "$controlStatus = Invoke-ControlledGitText $controlRoot 'Control tooling status' @('status', '--porcelain', '--untracked-files=all')",
       '$controlStatus = (& git -C $controlRoot status --porcelain --untracked-files=all | Out-String).Trim()',
@@ -241,7 +245,7 @@ describe('controlled GPU artifact build workflow contract', () => {
   })
 
   it('keeps native-tool installation inside the tested toolchain transaction and rejects a hollow 7z archive scope', () => {
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
 
     expect(workflow).toContain("Import-Module -Name (Join-Path $controlRoot 'scripts\\controlled-toolchain-install.psm1')")
     expect(workflow).toContain('Invoke-RainControlledToolchainInstall')
@@ -252,7 +256,7 @@ describe('controlled GPU artifact build workflow contract', () => {
   })
 
   it('reserves every interruptible TEMP root and delegates always cleanup to the ownership-checked module', () => {
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
     const ownedDirectoryModule = readFileSync(ownedDirectoryModulePath, 'utf8')
 
     expect(workflow).toContain('CONTROLLED_INVOCATION_ID: github-${{ github.run_id }}-${{ github.run_attempt }}')
@@ -282,7 +286,7 @@ describe('controlled GPU artifact build workflow contract', () => {
   })
 
   it('routes every native version fact through the exit-code-checking probe module before record creation', () => {
-    const workflow = readFileSync(workflowPath, 'utf8')
+    const workflow = readWorkflow()
     expect(workflow).toContain("Import-Module -Name (Join-Path $controlRoot 'scripts\\controlled-native-tool-probe.psm1') -Force")
     for (const name of ['node', 'npm', 'cargo', 'rustup', 'ninja', 'vswhere', 'cmake', 'nvcc', 'clang', 'rustc', 'makensis']) {
       expect(workflow).toContain(`Invoke-RainControlledNativeToolProbe -Name '${name}'`)
