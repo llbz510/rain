@@ -119,6 +119,8 @@ describe('controlled toolchain install transaction', () => {
     const parent = newTemporaryRoot()
     const downloads = join(parent, 'downloads')
     const cmake = join(parent, 'cmake')
+    const cmakePackageRoot = join(cmake, 'cmake-4.0.0-windows-x86_64')
+    const cmakePath = join(cmakePackageRoot, 'bin', 'cmake.exe')
     const result = invokeScript([
       "$ErrorActionPreference = 'Stop'",
       'Import-Module ' + psQuoted(modulePath) + ' -Force',
@@ -129,7 +131,7 @@ describe('controlled toolchain install transaction', () => {
       '[ordered]@{ toolchain = $toolchain; cudaDeleteAttempts = $state.cudaDeleteAttempts; events = @($state.events); delays = @($state.delays) } | ConvertTo-Json -Depth 5 -Compress',
     ])
 
-    expect(result.toolchain).toMatchObject({ cmakeReady: true, cmakeRoot: cmake })
+    expect(result.toolchain).toMatchObject({ cmakeReady: true, cmakeRoot: cmakePackageRoot, cmakePath })
     expect(result.cudaDeleteAttempts).toBe(2)
     expect(result.delays).toEqual([250])
     expect(result.events).toEqual([
@@ -218,6 +220,8 @@ describe('controlled toolchain install transaction', () => {
     const parent = newTemporaryRoot()
     const downloads = join(parent, 'downloads')
     const cmake = join(parent, 'cmake')
+    const cmakePackageRoot = join(cmake, 'cmake-4.0.0-windows-x86_64')
+    const cmakePath = join(cmakePackageRoot, 'bin', 'cmake.exe')
     const result = invokeScript([
       "$ErrorActionPreference = 'Stop'",
       `Import-Module ${psQuoted(modulePath)} -Force`,
@@ -227,13 +231,16 @@ describe('controlled toolchain install transaction', () => {
       `$toolchain = Invoke-RainControlledToolchainInstall -DownloadsRoot ${psQuoted(downloads)} -CmakeExtractRoot ${psQuoted(cmake)} -OwnershipParent ${psQuoted(parent)} -OwnerId 'run-123-1' -DownloadsReservationToken $downloadsReservation.token -CmakeReservationToken $cmakeReservation.token -CleanupAuthorityToken 'authority-secret' -ExpectedCmakeVersion '4.0.0' -GitHubPathFile 'C:\\fixture\\github-path' -GitHubEnvFile 'C:\\fixture\\github-env' -Adapter $adapter`,
       '[ordered]@{ toolchain = $toolchain; installs = @($state.installs); removed = @($state.removed); events = @($state.events); envLines = @($state.envLines); beforePaths = @($state.beforePaths) } | ConvertTo-Json -Depth 5 -Compress',
     ])
-    expect(result.toolchain).toMatchObject({ cmakeReady: true, cmakeRoot: cmake })
+    expect(result.toolchain).toMatchObject({ cmakeReady: true, cmakeRoot: cmakePackageRoot, cmakePath })
     expect(result.removed).not.toContain(downloads)
     expect(result.removed).not.toContain(cmake)
     expect(result.installs).toEqual(['CUDA:cuda.exe:-s', 'LLVM:llvm.exe:/S', 'NSIS:nsis.exe:/S'])
     expect(result.removed.map((path: string) => path.split(/[\\/]/).at(-1))).toEqual(['cuda.exe', 'llvm.exe', 'nsis.exe', 'cmake.zip'])
     expect(result.events).toEqual(['install:CUDA', 'remove:cuda.exe', 'install:LLVM', 'remove:llvm.exe', 'install:NSIS', 'remove:nsis.exe', 'expand', 'remove:cmake.zip'])
-    expect(result.envLines.at(-1)).toBe(`CMAKE_ROOT=${cmake}`)
+    expect(result.envLines).toContain(`CMAKE_PATH=${cmakePath}`)
+    expect(result.envLines).toContain(`CMAKE=${cmakePath}`)
+    expect(result.envLines).not.toContain(`CMAKE_ROOT=${cmake}`)
+    expect(result.envLines.some((line: string) => line.startsWith('CMAKE_ROOT='))).toBe(false)
     expect(result.beforePaths).toEqual([downloads, cmake, 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.9', 'C:\\Program Files\\LLVM', 'C:\\Program Files (x86)\\NSIS'])
     expect(existsSync(downloads)).toBe(false)
   })

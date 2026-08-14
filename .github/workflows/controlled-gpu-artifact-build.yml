@@ -248,6 +248,12 @@ jobs:
           }
           $cmakePath = [System.IO.Path]::GetFullPath($env:CMAKE_PATH)
           if (-not (Test-Path -LiteralPath $cmakePath -PathType Leaf)) { throw "Pinned CMake executable is missing: $cmakePath" }
+          $cmakeRoot = Split-Path -Parent (Split-Path -Parent $cmakePath)
+          if (-not (Test-Path -LiteralPath $cmakeRoot -PathType Container)) { throw "Pinned CMake package root is missing: $cmakeRoot" }
+          $expectedCmakePath = Join-Path $cmakeRoot 'bin\cmake.exe'
+          if (-not [string]::Equals($cmakePath, $expectedCmakePath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Pinned CMake executable is not bound to its package root: executable $cmakePath, root $cmakeRoot."
+          }
           $cmakeText = (Invoke-RainControlledNativeToolProbe -Name 'cmake' -Path $cmakePath -Arguments @('--version')).output
           $cmakeVersion = [regex]::Match($cmakeText, '\d+(?:\.\d+){2}').Value
           if ([string]::IsNullOrWhiteSpace($cmakeVersion) -or $cmakeVersion -ne $env:CMAKE_VERSION -or [version]$cmakeVersion -lt [version]$env:CMAKE_MINIMUM_VERSION) {
@@ -284,7 +290,7 @@ jobs:
           $toolchainRecord = [ordered]@{
             schemaVersion = 1
             runner = [ordered]@{ image = $env:ImageOS; imageVersion = $env:ImageVersion; os = $runnerOperatingSystem.Caption; osVersion = $runnerOperatingSystem.Version; architecture = $runnerArchitecture }
-            cmake = [ordered]@{ version = $cmakeVersion; minimumVersion = $env:CMAKE_MINIMUM_VERSION }
+            cmake = [ordered]@{ version = $cmakeVersion; minimumVersion = $env:CMAKE_MINIMUM_VERSION; executable = $cmakePath; root = $cmakeRoot }
             cuda = [ordered]@{
               toolkitVersion = '12.9.1'
               architectures = @($env:CUDA_ARCHITECTURES)
@@ -367,6 +373,7 @@ jobs:
           Assert-ControlledBuildPathsFreeBytes -Stage 'before-tauri-package' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 12GB | Out-Null
           Push-Location $candidateRoot
           try {
+            Remove-Item -LiteralPath Env:CMAKE_ROOT -ErrorAction SilentlyContinue
             npx.cmd --no-install tauri build --config src-tauri/tauri.gpu.conf.json
             if ($LASTEXITCODE -ne 0) { throw "Tauri NSIS build failed with exit code $LASTEXITCODE" }
           } finally {

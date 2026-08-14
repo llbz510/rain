@@ -89,11 +89,30 @@ function assertCanonicalDispatchEligibility(workflow: string) {
 function assertPinnedCmakeConsumers(workflow: string, toolchainModule: string) {
   expect(toolchainModule).toContain('foreach ($pathLine in @($llvmBin, $nsisHome, $cmakeBin))')
   expect(toolchainModule).toContain('& $adapterToUse.appendLine $GitHubPathFile $pathLine')
-  expect(toolchainModule).toContain('"CMAKE=$cmakePath",')
+  expect(toolchainModule).toContain('"CMAKE=$cmakePath"')
   expect(workflow).toContain("if ($env:TOOLCHAIN_CMAKE_READY -ne 'true')")
   expect(workflow).toContain('$resolvedBuildCmake = (Get-Command cmake.exe -ErrorAction Stop).Source')
   expect(workflow).toContain("if (-not [string]::Equals($resolvedBuildCmake, $env:CMAKE_PATH, [System.StringComparison]::OrdinalIgnoreCase))")
   expect(workflow).toContain('-CmakePath $env:CMAKE_PATH')
+}
+
+function assertReservedCmakeRootIsolatedFromBuildChildren(workflow: string, toolchainModule: string, workerBuildScript: string) {
+  const buildBlock = workflowRunBlock(workflow, 'Build CUDA worker and NSIS candidate remotely')
+  const workerInvocation = requiredIndex(buildBlock, '& $workerScript -ProjectRoot $candidateRoot')
+  const tauriInvocation = requiredIndex(buildBlock, 'npx.cmd --no-install tauri build --config src-tauri/tauri.gpu.conf.json')
+  const removal = 'Remove-Item -LiteralPath Env:CMAKE_ROOT -ErrorAction SilentlyContinue'
+  const workerRemoval = requiredIndex(workerBuildScript, removal)
+  const workerCargoInvocation = requiredIndex(workerBuildScript, '& cmd.exe /d /s /c $commandLine')
+  const tauriRemoval = buildBlock.lastIndexOf(removal, tauriInvocation)
+
+  expect(toolchainModule).not.toMatch(/"CMAKE_ROOT=/)
+  expect(toolchainModule).toContain('$cmakePackageRoot = Split-Path -Parent $cmakeBin')
+  expect(toolchainModule).toContain('cmakeRoot = $cmakePackageRoot')
+  expect(workerRemoval).toBeLessThan(workerCargoInvocation)
+  expect(tauriRemoval).toBeGreaterThan(workerInvocation)
+  expect(tauriRemoval).toBeLessThan(tauriInvocation)
+  expect(workflow).toContain('$cmakeRoot = Split-Path -Parent (Split-Path -Parent $cmakePath)')
+  expect(workflow).toContain('cmake = [ordered]@{ version = $cmakeVersion; minimumVersion = $env:CMAKE_MINIMUM_VERSION; executable = $cmakePath; root = $cmakeRoot }')
 }
 
 function assertNativeGitFailureClosed(workflow: string) {
@@ -307,6 +326,20 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(installIndex).toBeLessThan(generatorIndex)
     expect(generatorIndex).toBeLessThan(uninstallIndex)
     expect(workflow.slice(generatorIndex, uninstallIndex)).toContain('Copy-Item -LiteralPath $installer.FullName')
+  })
+
+  it('keeps CMake internal root out of worker and Tauri children while recording the actual pinned executable and package root', () => {
+    const workflow = readWorkflow()
+    const toolchainModule = readFileSync(toolchainInstallModulePath, 'utf8')
+    const workerBuildScript = readFileSync(workerBuildScriptPath, 'utf8')
+
+    expect(() => assertReservedCmakeRootIsolatedFromBuildChildren(workflow, toolchainModule, workerBuildScript)).not.toThrow()
+
+    const reinjectedModuleFixture = toolchainModule.replace(
+      '"CMAKE=$cmakePath"',
+      '"CMAKE=$cmakePath",\n      "CMAKE_ROOT=$CmakeExtractRoot",',
+    )
+    expect(() => assertReservedCmakeRootIsolatedFromBuildChildren(workflow, reinjectedModuleFixture, workerBuildScript)).toThrow()
   })
 
   it('rejects a workflow fixture that exposes pinned CMake only to the worker build', () => {

@@ -333,6 +333,8 @@ $env:CMAKE_CUDA_ARCHITECTURES = '120'
 $env:LIBCLANG_PATH = $llvmBin
 $env:CMAKE_CXX_FLAGS = '/utf-8'
 $env:CMAKE_C_FLAGS = '/utf-8'
+# CMAKE_ROOT is CMake's internal module root; the cmake crate maps CMAKE_* environment values to -D arguments.
+Remove-Item -LiteralPath Env:CMAKE_ROOT -ErrorAction SilentlyContinue
 
 $pathEntries = @($cudaBin, (Join-Path $cudaRoot 'lib\x64'), (Join-Path $cudaRoot 'nvvm\bin'), (Split-Path -Parent $ninja), (Split-Path -Parent $cmake), $llvmBin) |
   Where-Object { Test-Path -LiteralPath $_ }
