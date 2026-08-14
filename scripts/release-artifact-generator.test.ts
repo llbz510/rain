@@ -279,6 +279,39 @@ function runGenerator({
   return JSON.parse(stdout)
 }
 
+function runControlledBuildRecord({
+  installerPath,
+  artifactManifestPath,
+  sourceRoot,
+  outputRoot,
+  manifestReadAdapter,
+}: {
+  installerPath: string
+  artifactManifestPath: string
+  sourceRoot: string
+  outputRoot: string
+  manifestReadAdapter: string
+}) {
+  const candidateTarget = '3006757838b972b511917663e4ba8328804607d6'
+  const toolingCommit = '1111111111111111111111111111111111111111'
+  const command = [
+    "$ErrorActionPreference = 'Stop'",
+    `Import-Module -Name ${psQuoted(generatorModulePath)} -Force`,
+    `$manifestReadAdapter = ${manifestReadAdapter}`,
+    `$result = New-RainControlledBuildRecord -InstallerPath ${psQuoted(installerPath)} -ArtifactManifestPath ${psQuoted(artifactManifestPath)} -CandidateSourceRoot ${psQuoted(sourceRoot)} -ToolchainRecordPath (Join-Path ${psQuoted(sourceRoot)} 'controlled-toolchain-record.json') -OutputDirectory ${psQuoted(outputRoot)} -CandidateTargetCommit ${psQuoted(candidateTarget)} -ToolingCommit ${psQuoted(toolingCommit)} -Repository 'llbz510/rain' -SourceRepository 'https://github.com/llbz510/rain.git' -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId 'test-build-001' -BuiltAt '2026-08-11T12:00:00.0000000+00:00' -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl 'https://github.com/llbz510/rain/actions/runs/123/attempts/1' -WorkflowEvent 'workflow_dispatch' -WorkflowRef 'refs/heads/master' -WorkflowRunId '123' -WorkflowRunAttempt 1 -WorkflowDefinitionCommit ${psQuoted(toolingCommit)} -CandidateMasterReachable $true -ToolingMasterReachable $true -CoreArtifactName 'rain-candidate-core' -CoreArtifactDigest '${'2'.repeat(64)}' -ManifestReadAdapter $manifestReadAdapter`,
+    '$result | ConvertTo-Json -Depth 30 -Compress',
+  ].join('; ')
+  const stdout = execFileSync(powerShellExecutable, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    command,
+  ], { encoding: 'utf8', windowsHide: true })
+  return JSON.parse(stdout)
+}
+
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -765,7 +798,8 @@ describe('controlled release artifact generator', () => {
       `$nsisInstallationProof = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${proofBase64}')) | ConvertFrom-Json`,
       `$manifestResult = New-RainControlledReleaseArtifacts -ManifestOnly -InstallerPath ${psQuoted(installerPath)} -InstalledRoot ${psQuoted(installRoot)} -InstallerArchiveRoot (Join-Path ${psQuoted(root)} 'installer-archive') -CandidateSourceRoot ${psQuoted(root)} -ToolchainRecordPath (Join-Path ${psQuoted(root)} 'controlled-toolchain-record.json') -OutputDirectory ${psQuoted(outputRoot)} -CandidateTargetCommit ${psQuoted(candidateTarget)} -ToolingCommit ${psQuoted(toolingCommit)} -Repository 'llbz510/rain' -SourceRepository 'https://github.com/llbz510/rain.git' -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId 'test-build-001' -BuiltAt '2026-08-11T12:00:00.0000000+00:00' -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl 'https://github.com/llbz510/rain/actions/runs/123/attempts/1' -WorkflowEvent 'workflow_dispatch' -WorkflowRef 'refs/heads/master' -WorkflowRunId '123' -WorkflowRunAttempt 1 -WorkflowDefinitionCommit ${psQuoted(toolingCommit)} -CandidateMasterReachable $true -ToolingMasterReachable $true -GetPeImportText ${importReader} -NsisInstallationProof $nsisInstallationProof`,
       `$noRecordBeforeCoreUploadDigest = -not (Test-Path -LiteralPath (Join-Path ${psQuoted(outputRoot)} 'controlled-build-record.json'))`,
-      `$recordResult = New-RainControlledBuildRecord -InstallerPath ${psQuoted(installerPath)} -ArtifactManifestPath $manifestResult.artifactManifestPath -CandidateSourceRoot ${psQuoted(root)} -ToolchainRecordPath (Join-Path ${psQuoted(root)} 'controlled-toolchain-record.json') -OutputDirectory ${psQuoted(outputRoot)} -CandidateTargetCommit ${psQuoted(candidateTarget)} -ToolingCommit ${psQuoted(toolingCommit)} -Repository 'llbz510/rain' -SourceRepository 'https://github.com/llbz510/rain.git' -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId 'test-build-001' -BuiltAt '2026-08-11T12:00:00.0000000+00:00' -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl 'https://github.com/llbz510/rain/actions/runs/123/attempts/1' -WorkflowEvent 'workflow_dispatch' -WorkflowRef 'refs/heads/master' -WorkflowRunId '123' -WorkflowRunAttempt 1 -WorkflowDefinitionCommit ${psQuoted(toolingCommit)} -CandidateMasterReachable $true -ToolingMasterReachable $true -CoreArtifactName 'rain-candidate-core' -CoreArtifactDigest ${psQuoted(coreDigest)}`,
+      `$manifestReadAdapter = { param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = [DateTime]::Parse([string]$value.controlledBuild.buildMetadata.builtAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); return $value }`,
+      `$recordResult = New-RainControlledBuildRecord -InstallerPath ${psQuoted(installerPath)} -ArtifactManifestPath $manifestResult.artifactManifestPath -CandidateSourceRoot ${psQuoted(root)} -ToolchainRecordPath (Join-Path ${psQuoted(root)} 'controlled-toolchain-record.json') -OutputDirectory ${psQuoted(outputRoot)} -CandidateTargetCommit ${psQuoted(candidateTarget)} -ToolingCommit ${psQuoted(toolingCommit)} -Repository 'llbz510/rain' -SourceRepository 'https://github.com/llbz510/rain.git' -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId 'test-build-001' -BuiltAt '2026-08-11T12:00:00.0000000+00:00' -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl 'https://github.com/llbz510/rain/actions/runs/123/attempts/1' -WorkflowEvent 'workflow_dispatch' -WorkflowRef 'refs/heads/master' -WorkflowRunId '123' -WorkflowRunAttempt 1 -WorkflowDefinitionCommit ${psQuoted(toolingCommit)} -CandidateMasterReachable $true -ToolingMasterReachable $true -CoreArtifactName 'rain-candidate-core' -CoreArtifactDigest ${psQuoted(coreDigest)} -ManifestReadAdapter $manifestReadAdapter`,
       `[ordered]@{ manifestPath = $manifestResult.artifactManifestPath; recordPath = $recordResult.controlledBuildRecordPath; noRecordBeforeCoreUploadDigest = $noRecordBeforeCoreUploadDigest } | ConvertTo-Json -Compress`,
     ].join('; ')
 
@@ -783,6 +817,55 @@ describe('controlled release artifact generator', () => {
     expect(result.noRecordBeforeCoreUploadDigest).toBe(true)
     const record = JSON.parse(readFileSync(result.recordPath, 'utf8'))
     expect(record.coreArtifact).toEqual({ name: 'rain-candidate-core', digest: coreDigest })
+  })
+
+  it('accepts the same instant parsed as DateTime but fails closed for different, invalid, or missing manifest builtAt metadata', () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath } = createInstalledTreeFixture(root)
+    const sourceRoot = root
+    const manifestResult = runGenerator({
+      installerPath,
+      installRoot,
+      outputRoot: join(root, 'manifest-output'),
+      manifestOnly: true,
+    })
+    const readAsDateTime = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = [DateTime]::Parse([string]$value.controlledBuild.buildMetadata.builtAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); return $value }"
+
+    const accepted = runControlledBuildRecord({
+      installerPath,
+      artifactManifestPath: manifestResult.artifactManifestPath,
+      sourceRoot,
+      outputRoot: join(root, 'same-instant-record'),
+      manifestReadAdapter: readAsDateTime,
+    })
+    expect(accepted.controlledBuildRecordPath).toBe(join(root, 'same-instant-record', 'controlled-build-record.json'))
+
+    const readDifferentDateTime = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = [DateTime]::Parse('2026-08-11T12:00:01.0000000+00:00', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); return $value }"
+    expect(() => runControlledBuildRecord({
+      installerPath,
+      artifactManifestPath: manifestResult.artifactManifestPath,
+      sourceRoot,
+      outputRoot: join(root, 'different-instant-record'),
+      manifestReadAdapter: readDifferentDateTime,
+    })).toThrow(/controlled-build metadata does not match/i)
+
+    const readInvalidTimestamp = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = 'not-an-iso-8601-timestamp'; return $value }"
+    expect(() => runControlledBuildRecord({
+      installerPath,
+      artifactManifestPath: manifestResult.artifactManifestPath,
+      sourceRoot,
+      outputRoot: join(root, 'invalid-timestamp-record'),
+      manifestReadAdapter: readInvalidTimestamp,
+    })).toThrow(/controlled-build metadata does not match/i)
+
+    const readMissingTimestamp = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; [void]$value.controlledBuild.buildMetadata.PSObject.Properties.Remove('builtAt'); return $value }"
+    expect(() => runControlledBuildRecord({
+      installerPath,
+      artifactManifestPath: manifestResult.artifactManifestPath,
+      sourceRoot,
+      outputRoot: join(root, 'missing-timestamp-record'),
+      manifestReadAdapter: readMissingTimestamp,
+    })).toThrow(/builtAt/i)
   })
 
   it('retries atomic manifest and record publication without leaving a partial temporary file', () => {

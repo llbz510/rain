@@ -1802,12 +1802,12 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(realpathSync.native(result.output.value.payloadManifestPath)).toBe(realpathSync.native(join(result.output.value.installRoot, 'resources', 'whisper-backends', 'payload-manifest.json')))
     expect(existsSync(result.output.value.mainExecutable)).toBe(true)
     expect(existsSync(result.output.value.payloadManifestPath)).toBe(true)
-    expect(result.output.value.process).toMatchObject({
-      argumentList: ['/S', `/D=${result.output.value.installRoot}`],
-      wait: true,
-      passThru: true,
-      windowStyle: 'Hidden',
-    })
+    expect(result.output.value.process).toMatchObject({ wait: true, passThru: true, windowStyle: 'Hidden' })
+    expect(result.output.value.process.argumentList).toHaveLength(2)
+    expect(result.output.value.process.argumentList[0]).toBe('/S')
+    expect(result.output.value.process.argumentList[1]).toMatch(/^\/D=.+/)
+    const processInstallRoot = result.output.value.process.argumentList[1].slice(3)
+    expect(realpathSync.native(processInstallRoot)).toBe(realpathSync.native(result.output.value.installRoot))
   })
 
   it('removes a partial NSIS install tree when post-install payload verification fails', async () => {

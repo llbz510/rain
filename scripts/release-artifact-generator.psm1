@@ -1214,7 +1214,8 @@ function New-RainControlledBuildRecord {
     [Parameter(Mandatory = $true)][bool]$ToolingMasterReachable,
     [Parameter(Mandatory = $true)][string]$CoreArtifactName,
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$CoreArtifactDigest,
-    $AtomicWriteAdapter
+    $AtomicWriteAdapter,
+    [scriptblock]$ManifestReadAdapter = { param([string]$Path) Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json }
   )
 
   Assert-RainControlledCanonicalBuildContext -Repository $Repository -SourceRepository $SourceRepository -WorkflowFile $WorkflowFile -WorkflowRunUrl $WorkflowRunUrl -WorkflowEvent $WorkflowEvent -WorkflowRef $WorkflowRef -WorkflowRunId $WorkflowRunId -WorkflowRunAttempt $WorkflowRunAttempt -CandidateMasterReachable $CandidateMasterReachable -ToolingMasterReachable $ToolingMasterReachable
@@ -1239,7 +1240,7 @@ function New-RainControlledBuildRecord {
   $output = [System.IO.Path]::GetFullPath($OutputDirectory)
   [void][System.IO.Directory]::CreateDirectory($output)
   try {
-    $manifest = Get-Content -LiteralPath $artifactManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+    $manifest = & $ManifestReadAdapter $artifactManifest
   } catch {
     throw "Artifact manifest is not valid JSON: $($_.Exception.Message)"
   }
@@ -1281,8 +1282,24 @@ function New-RainControlledBuildRecord {
     throw 'Artifact manifest controlled-build generator does not match the requested controlled-build record.'
   }
   $manifestMetadata = Get-RainReleaseArtifactProperty $controlledBuild 'buildMetadata' 'Artifact manifest controlledBuild'
+  $manifestBuiltAtValue = Get-RainReleaseArtifactProperty $manifestMetadata 'builtAt' 'Artifact manifest controlled-build metadata'
+  $manifestBuiltAt = [DateTimeOffset]::MinValue
+  $manifestBuiltAtParsed = if ($manifestBuiltAtValue -is [DateTimeOffset]) {
+    $manifestBuiltAt = [DateTimeOffset]$manifestBuiltAtValue
+    $true
+  } elseif ($manifestBuiltAtValue -is [DateTime]) {
+    $manifestBuiltAt = [DateTimeOffset]([DateTime]$manifestBuiltAtValue)
+    $true
+  } else {
+    [DateTimeOffset]::TryParse(
+      [string]$manifestBuiltAtValue,
+      [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::RoundtripKind,
+      [ref]$manifestBuiltAt)
+  }
+  $manifestBuiltAtMatches = $manifestBuiltAtParsed -and $manifestBuiltAt.Equals($parsedBuiltAt)
   if ([string](Get-RainReleaseArtifactProperty $manifestMetadata 'buildRecordId' 'Artifact manifest controlled-build metadata') -ne $BuildRecordId -or
-      [string](Get-RainReleaseArtifactProperty $manifestMetadata 'builtAt' 'Artifact manifest controlled-build metadata') -ne $parsedBuiltAt.ToString('o')) {
+      -not $manifestBuiltAtMatches) {
     throw 'Artifact manifest controlled-build metadata does not match the requested controlled-build record.'
   }
 
