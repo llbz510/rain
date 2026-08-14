@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFile, spawnSync, type ChildProcess } from 'node:child_process'
 import {
   existsSync,
   mkdtempSync,
@@ -16,6 +16,53 @@ import { afterEach, describe, expect, it } from 'vitest'
 const repoRoot = join(__dirname, '..')
 const generatorModulePath = join(repoRoot, 'scripts', 'release-artifact-generator.psm1')
 const temporaryRoots: string[] = []
+const powerShellTestBudgets = Object.freeze({
+  generatorProcessTimeoutMs: 10_000,
+  cleanupExitTimeoutMs: 2_000,
+})
+
+type ChildProcessResult = {
+  status: number | null
+  stdout: string
+  stderr: string
+  error?: string
+  timedOut: boolean
+}
+
+type ActiveChildProcess = {
+  child: ChildProcess
+  exited: Promise<void>
+  terminateForCleanup: () => void
+}
+
+type ChildProcessCompletion = (
+  error: (Error & { code?: string | number }) | null,
+  stdout: string,
+  stderr: string,
+) => void
+
+type ChildProcessStart = (
+  executable: string,
+  arguments_: string[],
+  completion: ChildProcessCompletion,
+) => Pick<ChildProcess, 'pid' | 'kill'>
+
+type TimeoutAdapter = {
+  schedule: (callback: () => void, timeoutMs: number) => ReturnType<typeof setTimeout>
+  clear: (timeoutHandle: ReturnType<typeof setTimeout>) => void
+}
+
+type TrackedPowerShellOptions = {
+  startChild?: ChildProcessStart
+  timeoutAdapter?: TimeoutAdapter
+  timeoutMs?: number
+}
+
+const activePowerShellProcesses = new Set<ActiveChildProcess>()
+const defaultTimeoutAdapter: TimeoutAdapter = {
+  schedule: (callback, timeoutMs) => setTimeout(callback, timeoutMs),
+  clear: (timeoutHandle) => clearTimeout(timeoutHandle),
+}
 
 function resolvePowerShellExecutable() {
   for (const candidate of ['pwsh.exe', 'powershell.exe']) {
@@ -30,6 +77,172 @@ function resolvePowerShellExecutable() {
 
 const powerShellExecutable = resolvePowerShellExecutable()
 
+function runTrackedPowerShell(arguments_: string[], options: TrackedPowerShellOptions = {}) {
+  const timeoutMs = options.timeoutMs ?? powerShellTestBudgets.generatorProcessTimeoutMs
+  const startChild: ChildProcessStart = options.startChild ?? ((file, args, completion) => execFile(file, args, {
+    encoding: 'utf8',
+    windowsHide: true,
+  }, completion))
+  const timeoutAdapter = options.timeoutAdapter ?? defaultTimeoutAdapter
+  let active!: ActiveChildProcess
+  let termination: { kind: 'timeout'; timeoutMs: number } | { kind: 'cleanup' } | undefined
+  let terminationFailure: Error | undefined
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  let resultWasSettled = false
+  let resolveResult!: (result: ChildProcessResult) => void
+  let resolveExited!: () => void
+  const result = new Promise<ChildProcessResult>((resolve) => {
+    resolveResult = resolve
+  })
+  const exited = new Promise<void>((resolve) => {
+    resolveExited = resolve
+  })
+  const settleResult = (value: ChildProcessResult) => {
+    if (resultWasSettled) return
+    resultWasSettled = true
+    resolveResult(value)
+  }
+  const clearTrackedTimeout = () => {
+    if (timeoutHandle === undefined) return
+    const scheduledTimeout = timeoutHandle
+    timeoutHandle = undefined
+    timeoutAdapter.clear(scheduledTimeout)
+  }
+  const child = startChild(powerShellExecutable, arguments_, (error, stdout, stderr) => {
+    let callbackFailure: Error | undefined
+    try {
+      clearTrackedTimeout()
+    } catch (callbackError) {
+      callbackFailure = callbackError instanceof Error ? callbackError : new Error(String(callbackError))
+    }
+    activePowerShellProcesses.delete(active)
+    resolveExited()
+    const timedOut = termination?.kind === 'timeout'
+    settleResult({
+      status: termination ? null : error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+      stdout: String(stdout),
+      stderr: String(stderr),
+      error: callbackFailure
+        ? `PowerShell process completion cleanup failed: ${callbackFailure.message}`
+        : timedOut
+        ? `PowerShell process timed out after ${termination.timeoutMs} ms and was terminated: ${powerShellExecutable}`
+        : termination?.kind === 'cleanup'
+          ? `PowerShell process was terminated during test cleanup: ${powerShellExecutable}`
+          : error?.message,
+      timedOut,
+    })
+  })
+  const terminate = (reason: typeof termination) => {
+    if (termination) return terminationFailure
+    termination = reason
+    if (reason?.kind === 'cleanup') clearTrackedTimeout()
+    try {
+      if (!child.kill('SIGKILL')) {
+        throw new Error('the PowerShell child process rejected SIGKILL')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      terminationFailure = error instanceof Error ? error : new Error(message)
+      settleResult({
+        status: null,
+        stdout: '',
+        stderr: '',
+        error: reason?.kind === 'timeout'
+          ? `PowerShell process timed out after ${reason.timeoutMs} ms but termination failed: ${message}`
+          : `PowerShell process cleanup termination failed: ${message}`,
+        timedOut: reason?.kind === 'timeout',
+      })
+      return terminationFailure
+    }
+  }
+  active = {
+    child: child as ChildProcess,
+    exited,
+    terminateForCleanup: () => {
+      const cleanupFailure = terminate({ kind: 'cleanup' })
+      if (cleanupFailure) throw cleanupFailure
+    },
+  }
+  activePowerShellProcesses.add(active)
+  timeoutHandle = timeoutAdapter.schedule(() => {
+    try {
+      terminate({ kind: 'timeout', timeoutMs })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      settleResult({
+        status: null,
+        stdout: '',
+        stderr: '',
+        error: `PowerShell timeout callback failed: ${message}`,
+        timedOut: true,
+      })
+    }
+  }, timeoutMs)
+  return result
+}
+
+async function runPowerShell(arguments_: string[], options?: TrackedPowerShellOptions) {
+  const result = await runTrackedPowerShell(arguments_, options)
+  if (result.status === 0 && !result.timedOut) return result.stdout
+  const message = [result.error, result.stderr.trim()].filter((value): value is string => Boolean(value)).join('\n')
+  throw new Error(message || `PowerShell process failed without a diagnostic: ${powerShellExecutable}`)
+}
+
+async function waitForChildExit(
+  process: ActiveChildProcess,
+  timeoutMs: number,
+): Promise<{ kind: 'exited' } | { kind: 'failed'; error: unknown } | { kind: 'timeout' }> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<{ kind: 'timeout' }>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs)
+  })
+  const exit = process.exited.then(
+    () => ({ kind: 'exited' as const }),
+    (error: unknown) => ({ kind: 'failed' as const, error }),
+  )
+  const outcome = await Promise.race([exit, timeout])
+  if (timeoutHandle) clearTimeout(timeoutHandle)
+  return outcome
+}
+
+async function cleanupPowerShellTestResources(cleanupExitTimeoutMs = powerShellTestBudgets.cleanupExitTimeoutMs) {
+  const cleanupErrors: string[] = []
+  const active = Array.from(activePowerShellProcesses)
+  for (const process of active) {
+    try {
+      process.terminateForCleanup()
+    } catch (error) {
+      cleanupErrors.push(`terminate child ${process.child.pid ?? 'unknown'}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  const exits = await Promise.all(active.map(async (process) => ({
+    process,
+    outcome: await waitForChildExit(process, cleanupExitTimeoutMs),
+  })))
+  for (const { process, outcome } of exits) {
+    if (outcome.kind === 'timeout') {
+      cleanupErrors.push(`child ${process.child.pid ?? 'unknown'} did not exit within ${cleanupExitTimeoutMs} ms`)
+    } else if (outcome.kind === 'failed') {
+      cleanupErrors.push(`observe child ${process.child.pid ?? 'unknown'} exit: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`)
+    }
+  }
+  if (activePowerShellProcesses.size > 0) {
+    cleanupErrors.push(`${activePowerShellProcesses.size} PowerShell child process(es) remained active after cleanup`)
+    for (const root of temporaryRoots) cleanupErrors.push(`preserved TEMP root ${root} because a child process may still access it`)
+  } else {
+    for (const root of temporaryRoots.splice(0)) {
+      try {
+        rmSync(root, { recursive: true, force: true })
+      } catch (error) {
+        cleanupErrors.push(`remove TEMP root ${root}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new Error(`PowerShell test cleanup failed: ${cleanupErrors.join('; ')}`)
+  }
+}
+
 function sha256(path: string) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
@@ -41,16 +254,30 @@ function expectSameExistingFile(actualPath: string, expectedPath: string) {
   expect(readFileSync(actualPath)).toEqual(readFileSync(expectedPath))
 }
 
-function windowsShortPath(path: string) {
+async function observeEventLoopWhileRunning<T>(operation: () => T | Promise<T>) {
+  let timerAdvanced = false
+  const timer = new Promise<void>((resolve) => {
+    setTimeout(() => {
+      timerAdvanced = true
+      resolve()
+    }, 0)
+  })
+  const value = await operation()
+  const timerAdvancedBeforeCompletion = timerAdvanced
+  await timer
+  return { value, timerAdvancedBeforeCompletion }
+}
+
+async function windowsShortPath(path: string) {
   const command = `(New-Object -ComObject Scripting.FileSystemObject).GetFolder(${psQuoted(path)}).ShortPath`
-  return execFileSync(powerShellExecutable, [
+  return (await runPowerShell([
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
     'Bypass',
     '-Command',
     command,
-  ], { encoding: 'utf8', windowsHide: true }).trim()
+  ])).trim()
 }
 
 function newTemporaryRoot() {
@@ -234,7 +461,7 @@ function createNsisInstallationProof(installerPath: string, installRoot: string)
   }
 }
 
-function runGenerator({
+async function runGenerator({
   installerPath,
   installRoot,
   outputRoot,
@@ -276,18 +503,18 @@ function runGenerator({
     `$result = New-RainControlledReleaseArtifacts ${manifestOnly ? '-ManifestOnly ' : ''}-InstallerPath ${psQuoted(installerPath)} -InstalledRoot ${psQuoted(installRoot)} -InstallerArchiveRoot ${psQuoted(archiveRoot)} -CandidateSourceRoot ${psQuoted(sourceRoot)} -ToolchainRecordPath ${psQuoted(toolchainRecordPath)} -OutputDirectory ${psQuoted(outputRoot)} -CandidateTargetCommit ${psQuoted(candidateTarget)} -ToolingCommit ${psQuoted(toolingCommit)} -Repository ${psQuoted(repository)} -SourceRepository ${psQuoted(sourceRepository)} -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId 'test-build-001' -BuiltAt '2026-08-11T12:00:00.0000000+00:00' -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl 'https://github.com/llbz510/rain/actions/runs/123/attempts/1' -WorkflowEvent 'workflow_dispatch' -WorkflowRef 'refs/heads/master' -WorkflowRunId '123' -WorkflowRunAttempt 1 -WorkflowDefinitionCommit ${psQuoted(toolingCommit)} -CandidateMasterReachable $true -ToolingMasterReachable $true -CoreArtifactName 'rain-candidate-core' -CoreArtifactDigest '${'2'.repeat(64)}' -GetPeImportText ${importReader}${proofArgument}`,
     '$result | ConvertTo-Json -Depth 30 -Compress',
   ].join('; ')
-  const stdout = execFileSync(powerShellExecutable, [
+  const stdout = await runPowerShell([
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
     'Bypass',
     '-Command',
     command,
-  ], { encoding: 'utf8', windowsHide: true })
+  ])
   return JSON.parse(stdout)
 }
 
-function runControlledBuildRecord({
+async function runControlledBuildRecord({
   installerPath,
   artifactManifestPath,
   sourceRoot,
@@ -309,56 +536,118 @@ function runControlledBuildRecord({
     `$result = New-RainControlledBuildRecord -InstallerPath ${psQuoted(installerPath)} -ArtifactManifestPath ${psQuoted(artifactManifestPath)} -CandidateSourceRoot ${psQuoted(sourceRoot)} -ToolchainRecordPath (Join-Path ${psQuoted(sourceRoot)} 'controlled-toolchain-record.json') -OutputDirectory ${psQuoted(outputRoot)} -CandidateTargetCommit ${psQuoted(candidateTarget)} -ToolingCommit ${psQuoted(toolingCommit)} -Repository 'llbz510/rain' -SourceRepository 'https://github.com/llbz510/rain.git' -GeneratorId 'rain-controlled-artifact-generator' -GeneratorVersion '1' -BuildRecordId 'test-build-001' -BuiltAt '2026-08-11T12:00:00.0000000+00:00' -WorkflowFile '.github/workflows/controlled-gpu-artifact-build.yml' -WorkflowRunUrl 'https://github.com/llbz510/rain/actions/runs/123/attempts/1' -WorkflowEvent 'workflow_dispatch' -WorkflowRef 'refs/heads/master' -WorkflowRunId '123' -WorkflowRunAttempt 1 -WorkflowDefinitionCommit ${psQuoted(toolingCommit)} -CandidateMasterReachable $true -ToolingMasterReachable $true -CoreArtifactName 'rain-candidate-core' -CoreArtifactDigest '${'2'.repeat(64)}' -ManifestReadAdapter $manifestReadAdapter`,
     '$result | ConvertTo-Json -Depth 30 -Compress',
   ].join('; ')
-  const stdout = execFileSync(powerShellExecutable, [
+  const stdout = await runPowerShell([
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
     'Bypass',
     '-Command',
     command,
-  ], { encoding: 'utf8', windowsHide: true })
+  ])
   return JSON.parse(stdout)
 }
 
-afterEach(() => {
-  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
-})
+afterEach(() => cleanupPowerShellTestResources())
 
 describe('controlled release artifact generator', () => {
+  it('settles and reports a cleanup-denied PowerShell child without a later timer throw', async () => {
+    const root = newTemporaryRoot()
+    let completion!: ChildProcessCompletion
+    let capturedTimeout: (() => void) | undefined
+    let timeoutCleared = false
+    const invocation = runPowerShell(['-NoProfile'], {
+      timeoutMs: 10,
+      startChild: (_executable, _arguments, callback) => {
+        completion = callback
+        return {
+          pid: 12345,
+          kill: () => {
+            throw new Error('simulated cleanup kill denial')
+          },
+        }
+      },
+      timeoutAdapter: {
+        schedule: (callback) => {
+          capturedTimeout = callback
+          return {} as ReturnType<typeof setTimeout>
+        },
+        clear: () => {
+          timeoutCleared = true
+        },
+      },
+    })
+    const invocationOutcomePromise = invocation.then(
+      () => ({ kind: 'resolved' as const }),
+      (error: unknown) => ({ kind: 'rejected' as const, message: error instanceof Error ? error.message : String(error) }),
+    )
+
+    let cleanupError: Error | undefined
+    try {
+      await cleanupPowerShellTestResources(20)
+    } catch (error) {
+      cleanupError = error instanceof Error ? error : new Error(String(error))
+    }
+    const invocationOutcome = await Promise.race([
+      invocationOutcomePromise,
+      new Promise<{ kind: 'pending' }>((resolve) => setTimeout(() => resolve({ kind: 'pending' }), 0)),
+    ])
+    let laterTimerError: unknown
+    try {
+      capturedTimeout?.()
+    } catch (error) {
+      laterTimerError = error
+    }
+    completion(new Error('simulated child callback after cleanup'), '', '')
+
+    expect(cleanupError?.message).toMatch(/terminate child 12345: simulated cleanup kill denial/i)
+    expect(cleanupError?.message).toMatch(/did not exit within 20 ms/i)
+    expect(cleanupError?.message).toMatch(/remained active after cleanup/i)
+    expect(cleanupError?.message).toMatch(/preserved TEMP root/i)
+    expect(existsSync(root)).toBe(true)
+    expect(invocationOutcome).toMatchObject({ kind: 'rejected' })
+    if (invocationOutcome.kind === 'rejected') {
+      expect(invocationOutcome.message).toMatch(/cleanup termination failed: simulated cleanup kill denial/i)
+    }
+    expect(timeoutCleared).toBe(true)
+    expect(laterTimerError).toBeUndefined()
+  })
+
   // Clean Windows Harness run 31806779813 exceeded Vitest's default 5 s while
   // this test exercised two isolated generator subprocesses (one pass, one rejection).
-  it('accepts a bound NSIS proof expressed through the real Windows 8.3 alias but still rejects a different existing path', () => {
+  it('accepts a bound NSIS proof expressed through the real Windows 8.3 alias but still rejects a different existing path', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
-    const shortRoot = windowsShortPath(root)
+    const shortRoot = await windowsShortPath(root)
     expect(shortRoot.toLowerCase()).not.toBe(root.toLowerCase())
 
     const shortInstallerPath = installerPath.replace(root, shortRoot)
     const shortInstallRoot = installRoot.replace(root, shortRoot)
     const aliasedProof = createNsisInstallationProof(shortInstallerPath, shortInstallRoot)
-    expect(() => runGenerator({
+    const accepted = await observeEventLoopWhileRunning(() => runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
       installationProof: aliasedProof,
       manifestOnly: true,
-    })).not.toThrow()
+    }))
+    expect(accepted.timerAdvancedBeforeCompletion).toBe(true)
 
     const escapedProof = createNsisInstallationProof(shortInstallerPath, shortInstallRoot)
     escapedProof.mainExecutable = shortInstallerPath
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'escaped-output'),
       installationProof: escapedProof,
       manifestOnly: true,
-    })).toThrow(/exact application-root layout/i)
+    })).rejects.toThrow(/exact application-root layout/i)
+    expect(activePowerShellProcesses.size).toBe(0)
   }, 15_000)
 
-  it('serializes the normalized remote toolchain record into the core manifest', () => {
+  it('serializes the normalized remote toolchain record into the core manifest', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
-    const result = runGenerator({
+    const result = await runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
@@ -383,41 +672,41 @@ describe('controlled release artifact generator', () => {
     })
   })
 
-  it('fails closed when a controlled toolchain record omits a pinned download hash', () => {
+  it('fails closed when a controlled toolchain record omits a pinned download hash', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, toolchainRecordPath } = createInstalledTreeFixture(root)
     const toolchain = JSON.parse(readFileSync(toolchainRecordPath, 'utf8'))
     delete toolchain.downloads.nsis.sha256
     writeFixtureFile(toolchainRecordPath, JSON.stringify(toolchain))
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/downloads nsis sha256/i)
+    })).rejects.toThrow(/downloads nsis sha256/i)
   })
 
-  it('refuses a remote toolchain record that omits the explicit Blackwell-compatible CUDA architecture', () => {
+  it('refuses a remote toolchain record that omits the explicit Blackwell-compatible CUDA architecture', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, toolchainRecordPath } = createInstalledTreeFixture(root)
     const toolchain = JSON.parse(readFileSync(toolchainRecordPath, 'utf8'))
     toolchain.cuda.architectures = ['89']
     writeFixtureFile(toolchainRecordPath, JSON.stringify(toolchain))
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/cuda\.architectures must be exactly 120/i)
+    })).rejects.toThrow(/cuda\.architectures must be exactly 120/i)
   })
 
-  it('derives a target-bound manifest and independent record from actual candidate bytes', () => {
+  it('derives a target-bound manifest and independent record from actual candidate bytes', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     const outputRoot = join(root, 'candidate-output')
     const candidateTarget = '3006757838b972b511917663e4ba8328804607d6'
     const toolingCommit = '1111111111111111111111111111111111111111'
-    const result = runGenerator({ installerPath, installRoot, outputRoot })
+    const result = await runGenerator({ installerPath, installRoot, outputRoot })
     const manifestPath = result.artifactManifestPath as string
     const recordPath = result.controlledBuildRecordPath as string
     expect(existsSync(manifestPath)).toBe(true)
@@ -481,131 +770,131 @@ describe('controlled release artifact generator', () => {
     expect(record.installer.sha256).toBe(sha256(installerPath))
   })
 
-  it('keeps installer archive/unpack hygiene scanning as an additive release judge', () => {
+  it('keeps installer archive/unpack hygiene scanning as an additive release judge', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
     writeFixtureFile(join(archiveRoot, '.env.production'), 'SECRET_TOKEN=fixture-value')
-    expect(() => runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
-      .toThrow(/installer-archive.*secret|secret.*installer-archive/i)
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/installer-archive.*secret|secret.*installer-archive/i)
   })
 
-  it('rejects an empty installer archive extraction instead of declaring an unscanned scope clean', () => {
+  it('rejects an empty installer archive extraction instead of declaring an unscanned scope clean', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
     rmSync(archiveRoot, { recursive: true, force: true })
     mkdirSync(archiveRoot, { recursive: true })
 
-    expect(() => runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
-      .toThrow(/installer archive.*empty|archive.*no files/i)
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/installer archive.*empty|archive.*no files/i)
   })
 
-  it('rejects an installer archive extraction that lacks the Rain executable or CUDA payload manifest', () => {
+  it('rejects an installer archive extraction that lacks the Rain executable or CUDA payload manifest', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
     rmSync(archiveRoot, { recursive: true, force: true })
     writeFixtureFile(join(archiveRoot, 'unrelated-file.txt'), 'not a Rain payload')
 
-    expect(() => runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
-      .toThrow(/installer archive.*AMD64 Rain executable|archive.*CUDA payload/i)
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/installer archive.*AMD64 Rain executable|archive.*CUDA payload/i)
   })
 
-  it('rejects a controlled toolchain record whose CMake version drifts above the pinned 4.0.0', () => {
+  it('rejects a controlled toolchain record whose CMake version drifts above the pinned 4.0.0', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, toolchainRecordPath } = createInstalledTreeFixture(root)
     const toolchain = JSON.parse(readFileSync(toolchainRecordPath, 'utf8'))
     toolchain.cmake.version = '4.0.1'
     writeFixtureFile(toolchainRecordPath, JSON.stringify(toolchain))
 
-    expect(() => runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
-      .toThrow(/cmake\.version must be exactly 4\.0\.0/i)
+    await expect(runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/cmake\.version must be exactly 4\.0\.0/i)
   })
 
-  it('rejects a text file that merely has an .exe name instead of a PE/NSIS installer artifact', () => {
+  it('rejects a text file that merely has an .exe name instead of a PE/NSIS installer artifact', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeFixtureFile(installerPath, 'this is not an NSIS installer')
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/basic PE artifact/i)
+    })).rejects.toThrow(/basic PE artifact/i)
   })
 
-  it('rejects an installer whose source-derived product metadata does not match the expected NSIS artifact name', () => {
+  it('rejects an installer whose source-derived product metadata does not match the expected NSIS artifact name', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeTauriMetadataFixture(root, { productName: 'Different Product' })
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/source-derived NSIS installer file name/i)
+    })).rejects.toThrow(/source-derived NSIS installer file name/i)
   })
 
-  it('accepts an I386 NSIS bootstrapper when the installed Rain executable is AMD64', () => {
+  it('accepts an I386 NSIS bootstrapper when the installed Rain executable is AMD64', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeNsisInstallerFixture(installerPath, 0x14c)
 
-    expect(() => runGenerator({
+    await runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).not.toThrow()
+    })
   })
 
-  it('does not accept a name-matched random PE without a successful bound NSIS installation proof', () => {
+  it('does not accept a name-matched random PE without a successful bound NSIS installation proof', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writePeFixture(installerPath, 0x14c)
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
       omitInstallationProof: true,
-    })).toThrow(/successful bound NSIS installation proof/i)
+    })).rejects.toThrow(/successful bound NSIS installation proof/i)
   })
 
-  it('rejects an installed Rain executable outside the exact application-root layout', () => {
+  it('rejects an installed Rain executable outside the exact application-root layout', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     rmSync(join(installRoot, 'rain.exe'))
     writePeFixture(join(installRoot, 'unexpected', 'rain.exe'), 0x8664)
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/Rain main executable must be installed at rain\.exe/i)
+    })).rejects.toThrow(/Rain main executable must be installed at rain\.exe/i)
   })
 
-  it('rejects an installed NVIDIA driver DLL that is outside the approved CUDA payload', () => {
+  it('rejects an installed NVIDIA driver DLL that is outside the approved CUDA payload', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, payloadRoot } = createInstalledTreeFixture(root)
     writeFixtureFile(join(installRoot, 'resources', 'nvcuda.dll'), 'fixture driver dll')
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/forbidden DLL/i)
+    })).rejects.toThrow(/forbidden DLL/i)
   })
 
-  it('rejects installed text that exposes an absolute builder path', () => {
+  it('rejects installed text that exposes an absolute builder path', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, payloadRoot } = createInstalledTreeFixture(root)
     writeFixtureFile(join(installRoot, 'resources', 'build-metadata.json'), JSON.stringify({
       sourceRoot: 'D:\\agent\\_work\\rain',
     }))
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/absolute builder path/i)
+    })).rejects.toThrow(/absolute builder path/i)
   })
 
   it.each([
@@ -613,16 +902,16 @@ describe('controlled release artifact generator', () => {
     ['a Bearer credential', 'Authorization: Bearer rain-fixture-token-value', /secret/i],
     ['a JSON quoted API secret', '{"apiSecret":"rain-fixture-secret-value"}', /secret/i],
     ['a Windows user-profile path', '{"cache":"C:\\Users\\fixture-user\\AppData\\Local\\Rain"}', /absolute builder path/i],
-  ])('rejects installed text that exposes %s', (_label, contents, expectedError) => {
+  ])('rejects installed text that exposes %s', async (_label, contents, expectedError) => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeFixtureFile(join(installRoot, 'resources', 'fixture-config.json'), contents)
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(expectedError)
+    })).rejects.toThrow(expectedError)
   })
 
   it.each([
@@ -634,126 +923,125 @@ describe('controlled release artifact generator', () => {
     ['a PEM private-key body in unknown readable text', 'fixture.bundle', '-----BEGIN PRIVATE KEY-----\nfixture-private-material', /secret/i],
     ['an unknown readable text artifact', 'fixture.bundle', 'readable text with no known extension', /unscanned text artifact/i],
     ['a debug symbol', 'rain.pdb', 'fixture debug symbols', /debug artifact/i],
-  ])('rejects installed artifact hygiene risk: %s', (_label, name, contents, expectedError) => {
+  ])('rejects installed artifact hygiene risk: %s', async (_label, name, contents, expectedError) => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeFixtureFile(join(installRoot, 'resources', name), contents)
-    expect(() => runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
-      .toThrow(expectedError)
+    await expect(runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(expectedError)
   })
 
   it.each([
     ['ASCII', Buffer.from('MZ\0\0fixture ASIA1234567890ABCDEF payload', 'ascii')],
     ['UTF-16LE', Buffer.from('MZ fixture -----BEGIN PRIVATE KEY----- payload', 'utf16le')],
-  ])('rejects a PE-like binary that embeds a %s secret token without treating ordinary PE bytes as text', (_encoding, bytes) => {
+  ])('rejects a PE-like binary that embeds a %s secret token without treating ordinary PE bytes as text', async (_encoding, bytes) => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     const binaryPath = join(installRoot, 'resources', 'fixture-helper.dll')
     mkdirSync(join(binaryPath, '..'), { recursive: true })
     writeFileSync(binaryPath, bytes)
 
-    expect(() => runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
-      .toThrow(/secret/i)
+    await expect(runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/secret/i)
   })
 
-  it('accepts ordinary PE-like binary bytes that do not contain a sensitive token', () => {
+  it('accepts ordinary PE-like binary bytes that do not contain a sensitive token', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writePeFixture(join(installRoot, 'resources', 'ordinary-helper.dll'), 0x8664)
 
-    expect(() => runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
-      .not.toThrow()
+    await runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') })
   })
 
-  it('requires the CUDA payload manifest to declare release configuration', () => {
+  it('requires the CUDA payload manifest to declare release configuration', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, payloadRoot } = createInstalledTreeFixture(root)
     const manifestPath = join(payloadRoot, 'payload-manifest.json')
     const payloadManifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     payloadManifest.configuration = 'debug'
     writeFixtureFile(manifestPath, JSON.stringify(payloadManifest))
-    expect(() => runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
-      .toThrow(/configuration must be release/i)
+    await expect(runGenerator({ installerPath, installRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/configuration must be release/i)
   })
 
-  it('rejects an installed E2E automation marker', () => {
+  it('rejects an installed E2E automation marker', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeFixtureFile(join(installRoot, 'resources', 'frontend.js'), 'window.__RAIN_E2E_READY__ = true')
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/E2E marker/i)
+    })).rejects.toThrow(/E2E marker/i)
   })
 
-  it('rejects an installed model payload file', () => {
+  it('rejects an installed model payload file', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeFixtureFile(join(installRoot, 'resources', 'whisper-models', 'ggml-large-v3.bin'), 'not a real model')
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/model file/i)
+    })).rejects.toThrow(/model file/i)
   })
 
-  it('requires whisper-backends to contain exactly the declared worker, CUDA runtime, and payload manifest', () => {
+  it('requires whisper-backends to contain exactly the declared worker, CUDA runtime, and payload manifest', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, payloadRoot } = createInstalledTreeFixture(root)
     writeFixtureFile(join(payloadRoot, 'unexpected-worker-note.txt'), 'unexpected payload file')
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/exact declared payload set/i)
+    })).rejects.toThrow(/exact declared payload set/i)
   })
 
-  it('rejects a second CUDA worker or allowed CUDA runtime DLL outside whisper-backends', () => {
+  it('rejects a second CUDA worker or allowed CUDA runtime DLL outside whisper-backends', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     writeFixtureFile(join(installRoot, 'resources', 'duplicate', 'rain-whisper-cuda.exe'), 'duplicate worker')
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
-    })).toThrow(/must occur exactly once in whisper-backends/i)
+    })).rejects.toThrow(/must occur exactly once in whisper-backends/i)
   })
 
-  it('rejects source maps and RAIN_WHISPER_CUDA_WORKER release-build markers from the installed tree', () => {
+  it('rejects source maps and RAIN_WHISPER_CUDA_WORKER release-build markers from the installed tree', async () => {
     const sourceMapRoot = newTemporaryRoot()
     const sourceMapFixture = createInstalledTreeFixture(sourceMapRoot)
     writeFixtureFile(join(sourceMapFixture.installRoot, 'resources', 'frontend.js.map'), '{"sources":["src/main.tsx"]}')
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath: sourceMapFixture.installerPath,
       installRoot: sourceMapFixture.installRoot,
       outputRoot: join(sourceMapRoot, 'candidate-output'),
-    })).toThrow(/source map/i)
+    })).rejects.toThrow(/source map/i)
 
     const markerRoot = newTemporaryRoot()
     const markerFixture = createInstalledTreeFixture(markerRoot)
     writeFixtureFile(join(markerFixture.installRoot, 'resources', 'frontend.js'), 'window.RAIN_WHISPER_CUDA_WORKER = true')
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath: markerFixture.installerPath,
       installRoot: markerFixture.installRoot,
       outputRoot: join(markerRoot, 'candidate-output'),
-    })).toThrow(/E2E marker/i)
+    })).rejects.toThrow(/E2E marker/i)
   })
 
-  it('rejects a CUDA import in the CPU-safe main executable', () => {
+  it('rejects a CUDA import in the CPU-safe main executable', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
       importReader: "{ param([string]$Path) 'DLL Name: cudart64_12.dll' }",
-    })).toThrow(/CUDA or NVIDIA driver DLL/i)
+    })).rejects.toThrow(/CUDA or NVIDIA driver DLL/i)
   })
 
   it.each([
@@ -769,31 +1057,31 @@ describe('controlled release artifact generator', () => {
     'nvToolsExt64_1.dll',
     'nvopencl64.dll',
     'nppif64_12.dll',
-  ])('rejects every shared CUDA/NVIDIA runtime-family import: %s', (dllName) => {
+  ])('rejects every shared CUDA/NVIDIA runtime-family import: %s', async (dllName) => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
       importReader: `{ param([string]$Path) 'DLL Name: ${dllName}' }`,
-    })).toThrow(/CUDA or NVIDIA driver DLL/i)
+    })).rejects.toThrow(/CUDA or NVIDIA driver DLL/i)
   })
 
-  it('rejects a fork repository before it can generate a controlled artifact record', () => {
+  it('rejects a fork repository before it can generate a controlled artifact record', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
 
-    expect(() => runGenerator({
+    await expect(runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'candidate-output'),
       repository: 'untrusted-fork/rain',
-    })).toThrow(/Repository must be llbz510\/rain/i)
+    })).rejects.toThrow(/Repository must be llbz510\/rain/i)
   })
 
-  it('defers the controlled-build record until a first core-upload digest is available', () => {
+  it('defers the controlled-build record until a first core-upload digest is available', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     const outputRoot = join(root, 'candidate-output')
@@ -813,14 +1101,14 @@ describe('controlled release artifact generator', () => {
       `[ordered]@{ manifestPath = $manifestResult.artifactManifestPath; recordPath = $recordResult.controlledBuildRecordPath; noRecordBeforeCoreUploadDigest = $noRecordBeforeCoreUploadDigest } | ConvertTo-Json -Compress`,
     ].join('; ')
 
-    const stdout = execFileSync(powerShellExecutable, [
+    const stdout = await runPowerShell([
       '-NoProfile',
       '-NonInteractive',
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
       command,
-    ], { encoding: 'utf8', windowsHide: true })
+    ])
     const result = JSON.parse(stdout)
     expectSameExistingFile(result.manifestPath, join(outputRoot, 'release-artifact-manifest.json'))
     expectSameExistingFile(result.recordPath, join(outputRoot, 'controlled-build-record.json'))
@@ -831,11 +1119,11 @@ describe('controlled release artifact generator', () => {
 
   // Clean Windows Harness run 31806779813 exceeded Vitest's default 5 s while
   // this test exercised one manifest plus four isolated controlled-record subprocesses.
-  it('accepts the same instant parsed as DateTime but fails closed for different, invalid, or missing manifest builtAt metadata', () => {
+  it('accepts the same instant parsed as DateTime but fails closed for different, invalid, or missing manifest builtAt metadata', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     const sourceRoot = root
-    const manifestResult = runGenerator({
+    const manifestResult = await runGenerator({
       installerPath,
       installRoot,
       outputRoot: join(root, 'manifest-output'),
@@ -843,7 +1131,7 @@ describe('controlled release artifact generator', () => {
     })
     const readAsDateTime = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = [DateTime]::Parse([string]$value.controlledBuild.buildMetadata.builtAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); return $value }"
 
-    const accepted = runControlledBuildRecord({
+    const accepted = await runControlledBuildRecord({
       installerPath,
       artifactManifestPath: manifestResult.artifactManifestPath,
       sourceRoot,
@@ -853,34 +1141,34 @@ describe('controlled release artifact generator', () => {
     expectSameExistingFile(accepted.controlledBuildRecordPath, join(root, 'same-instant-record', 'controlled-build-record.json'))
 
     const readDifferentDateTime = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = [DateTime]::Parse('2026-08-11T12:00:01.0000000+00:00', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); return $value }"
-    expect(() => runControlledBuildRecord({
+    await expect(runControlledBuildRecord({
       installerPath,
       artifactManifestPath: manifestResult.artifactManifestPath,
       sourceRoot,
       outputRoot: join(root, 'different-instant-record'),
       manifestReadAdapter: readDifferentDateTime,
-    })).toThrow(/controlled-build metadata does not match/i)
+    })).rejects.toThrow(/controlled-build metadata does not match/i)
 
     const readInvalidTimestamp = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = 'not-an-iso-8601-timestamp'; return $value }"
-    expect(() => runControlledBuildRecord({
+    await expect(runControlledBuildRecord({
       installerPath,
       artifactManifestPath: manifestResult.artifactManifestPath,
       sourceRoot,
       outputRoot: join(root, 'invalid-timestamp-record'),
       manifestReadAdapter: readInvalidTimestamp,
-    })).toThrow(/controlled-build metadata does not match/i)
+    })).rejects.toThrow(/controlled-build metadata does not match/i)
 
     const readMissingTimestamp = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; [void]$value.controlledBuild.buildMetadata.PSObject.Properties.Remove('builtAt'); return $value }"
-    expect(() => runControlledBuildRecord({
+    await expect(runControlledBuildRecord({
       installerPath,
       artifactManifestPath: manifestResult.artifactManifestPath,
       sourceRoot,
       outputRoot: join(root, 'missing-timestamp-record'),
       manifestReadAdapter: readMissingTimestamp,
-    })).toThrow(/builtAt/i)
+    })).rejects.toThrow(/builtAt/i)
   }, 30_000)
 
-  it('retries atomic manifest and record publication without leaving a partial temporary file', () => {
+  it('retries atomic manifest and record publication without leaving a partial temporary file', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
     const outputRoot = join(root, 'candidate-output')
@@ -897,9 +1185,9 @@ describe('controlled release artifact generator', () => {
       `$temporaryFiles = @(Get-ChildItem -LiteralPath ${psQuoted(outputRoot)} -Force -Filter '*.tmp' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)`,
       '[ordered]@{ attempts = $state.attempts; manifest = $result.artifactManifestPath; record = $result.controlledBuildRecordPath; temporaryFiles = @($temporaryFiles) } | ConvertTo-Json -Compress',
     ].join('; ')
-    const stdout = execFileSync(powerShellExecutable, [
+    const stdout = await runPowerShell([
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command,
-    ], { encoding: 'utf8', windowsHide: true })
+    ])
     const result = JSON.parse(stdout)
 
     expect(result.attempts).toBe(3)
@@ -908,7 +1196,7 @@ describe('controlled release artifact generator', () => {
     expect(result.temporaryFiles).toEqual([])
   })
 
-  it('fails explicitly instead of swallowing a release-artifact temporary cleanup failure', () => {
+  it('fails explicitly instead of swallowing a release-artifact temporary cleanup failure', async () => {
     const root = newTemporaryRoot()
     const outputPath = join(root, 'candidate-output', 'release-artifact-manifest.json')
     const command = [
@@ -918,8 +1206,8 @@ describe('controlled release artifact generator', () => {
       `& $module { param($path, $adapter) Write-RainReleaseArtifactJson -Path $path -Value ([ordered]@{ fixture = $true }) -AtomicWriteAdapter $adapter } ${psQuoted(outputPath)} $adapter`,
     ].join('; ')
 
-    expect(() => execFileSync(powerShellExecutable, [
+    await expect(runPowerShell([
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command,
-    ], { encoding: 'utf8', windowsHide: true })).toThrow(/release artifact temporary cleanup failed/i)
+    ])).rejects.toThrow(/release artifact temporary cleanup failed/i)
   })
 })
