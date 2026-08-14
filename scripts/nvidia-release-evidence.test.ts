@@ -77,6 +77,8 @@ function resolvePowerShellExecutable(
 }
 
 const powerShellExecutable = resolvePowerShellExecutable()
+const pinnedNsisDirectUrl = 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe'
+const legacyNsisDownloadPageUrl = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
 
 function runTrackedChildProcess(
   executable: string,
@@ -916,7 +918,7 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
         sha256: 'e091fcf965ce589c83c0f7c5356b2fcf3e658a8ec990bfcf79cce4389a0d1eb3',
       },
       nsis: {
-        url: 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download',
+        url: pinnedNsisDirectUrl,
         sha256: '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a',
       },
     },
@@ -1349,6 +1351,10 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
             nsis: { version: 'v3.11' },
             downloads: {
               cmake: { sha256: '89e87f3e297b70f1349ee7c5f90783ca96efb986b70c558c799c3c9b1b716456' },
+              nsis: {
+                url: pinnedNsisDirectUrl,
+                sha256: '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a',
+              },
             },
           },
         },
@@ -1416,6 +1422,29 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(wrongHash.status).toBe(1)
     expect(wrongHash.output.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
   }, 15_000)
+
+  it('rejects the legacy NSIS HTML download page even when both provenance records retain the pinned SHA-256', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+    const record = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
+    manifest.controlledBuild.toolchain.downloads.nsis.url = legacyNsisDownloadPageUrl
+    record.toolchain.downloads.nsis.url = legacyNsisDownloadPageUrl
+    writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+    writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(record))
+    syncArtifactFixtureRecordManifestIdentity(candidate)
+
+    const rejected = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toMatch(/downloads nsis.*url.*pinned download URL/i)
+  })
 
   it('rejects manifest installation proof that persists a raw installation root or /D argument', async () => {
     const candidate = createArtifactFixture(newTemporaryRoot())

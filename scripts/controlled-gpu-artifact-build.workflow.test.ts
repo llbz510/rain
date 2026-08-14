@@ -11,6 +11,8 @@ const ownedDirectoryModulePath = join(repoRoot, 'scripts', 'controlled-owned-dir
 const candidateTargetCommit = '3006757838b972b511917663e4ba8328804607d6'
 const checkoutAction = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683'
 const uploadArtifactAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
+const pinnedNsisDirectUrl = 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe'
+const legacyNsisDownloadPageUrl = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
 
 function resolvePowerShellExecutable() {
   for (const candidate of ['pwsh.exe', 'powershell.exe']) {
@@ -172,7 +174,8 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(workflow).toContain('F0CA7CC7B4CEA2FAC2C4951819D2A9CAEA31E04000E9110E2048719525F8EA0E')
     expect(workflow).toContain('https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.7/LLVM-22.1.7-win64.exe')
     expect(workflow).toContain('e091fcf965ce589c83c0f7c5356b2fcf3e658a8ec990bfcf79cce4389a0d1eb3')
-    expect(workflow).toContain('https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download')
+    expect(workflow).toContain(pinnedNsisDirectUrl)
+    expect(workflow).not.toContain(legacyNsisDownloadPageUrl)
     expect(workflow).toContain('38D49F8FE09B1C332B01D0940E57B7258F4447733643273A01C59959AD9D3B0A')
     expect(workflow).toMatch(/Get-FileHash -LiteralPath \$\w+ -Algorithm SHA256/)
     expect(workflow).toContain("Invoke-RainControlledNativeToolProbe -Name 'cargo'")

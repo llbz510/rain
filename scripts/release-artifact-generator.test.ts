@@ -76,6 +76,8 @@ function resolvePowerShellExecutable() {
 }
 
 const powerShellExecutable = resolvePowerShellExecutable()
+const pinnedNsisDirectUrl = 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe'
+const legacyNsisDownloadPageUrl = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
 
 function runTrackedPowerShell(arguments_: string[], options: TrackedPowerShellOptions = {}) {
   const timeoutMs = options.timeoutMs ?? powerShellTestBudgets.generatorProcessTimeoutMs
@@ -377,7 +379,7 @@ function writeControlledToolchainRecordFixture(root: string) {
         sha256: 'e091fcf965ce589c83c0f7c5356b2fcf3e658a8ec990bfcf79cce4389a0d1eb3',
       },
       nsis: {
-        url: 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download',
+        url: pinnedNsisDirectUrl,
         sha256: '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a',
       },
     },
@@ -667,9 +669,27 @@ describe('controlled release artifact generator', () => {
         cmake: expect.objectContaining({ sha256: '89e87f3e297b70f1349ee7c5f90783ca96efb986b70c558c799c3c9b1b716456' }),
         cuda: expect.objectContaining({ sha256: 'f0ca7cc7b4cea2fac2c4951819d2a9caea31e04000e9110e2048719525f8ea0e' }),
         llvm: expect.objectContaining({ sha256: 'e091fcf965ce589c83c0f7c5356b2fcf3e658a8ec990bfcf79cce4389a0d1eb3' }),
-        nsis: expect.objectContaining({ sha256: '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a' }),
+        nsis: expect.objectContaining({
+          url: pinnedNsisDirectUrl,
+          sha256: '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a',
+        }),
       }),
     })
+  })
+
+  it('rejects the legacy NSIS HTML download page even when the pinned SHA-256 is retained', async () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath, toolchainRecordPath } = createInstalledTreeFixture(root)
+    const toolchain = JSON.parse(readFileSync(toolchainRecordPath, 'utf8'))
+    toolchain.downloads.nsis.url = legacyNsisDownloadPageUrl
+    writeFixtureFile(toolchainRecordPath, JSON.stringify(toolchain))
+
+    await expect(runGenerator({
+      installerPath,
+      installRoot,
+      outputRoot: join(root, 'candidate-output'),
+      manifestOnly: true,
+    })).rejects.toThrow(/downloads nsis url must be the pinned download URL/i)
   })
 
   it('fails closed when a controlled toolchain record omits a pinned download hash', async () => {
