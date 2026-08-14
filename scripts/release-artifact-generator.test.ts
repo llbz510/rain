@@ -325,6 +325,8 @@ afterEach(() => {
 })
 
 describe('controlled release artifact generator', () => {
+  // Clean Windows Harness run 31806779813 exceeded Vitest's default 5 s while
+  // this test exercised two isolated generator subprocesses (one pass, one rejection).
   it('accepts a bound NSIS proof expressed through the real Windows 8.3 alias but still rejects a different existing path', () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
@@ -351,7 +353,7 @@ describe('controlled release artifact generator', () => {
       installationProof: escapedProof,
       manifestOnly: true,
     })).toThrow(/exact application-root layout/i)
-  })
+  }, 15_000)
 
   it('serializes the normalized remote toolchain record into the core manifest', () => {
     const root = newTemporaryRoot()
@@ -827,6 +829,8 @@ describe('controlled release artifact generator', () => {
     expect(record.coreArtifact).toEqual({ name: 'rain-candidate-core', digest: coreDigest })
   })
 
+  // Clean Windows Harness run 31806779813 exceeded Vitest's default 5 s while
+  // this test exercised one manifest plus four isolated controlled-record subprocesses.
   it('accepts the same instant parsed as DateTime but fails closed for different, invalid, or missing manifest builtAt metadata', () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath } = createInstalledTreeFixture(root)
@@ -874,7 +878,7 @@ describe('controlled release artifact generator', () => {
       outputRoot: join(root, 'missing-timestamp-record'),
       manifestReadAdapter: readMissingTimestamp,
     })).toThrow(/builtAt/i)
-  })
+  }, 30_000)
 
   it('retries atomic manifest and record publication without leaving a partial temporary file', () => {
     const root = newTemporaryRoot()
