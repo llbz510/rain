@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 const repoRoot = join(__dirname, '..')
 const workflowPath = join(repoRoot, '.github', 'workflows', 'controlled-gpu-artifact-build.yml')
@@ -13,6 +14,7 @@ const checkoutAction = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af68
 const uploadArtifactAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 const pinnedNsisDirectUrl = 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe'
 const legacyNsisDownloadPageUrl = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
+const temporaryRoots: string[] = []
 
 function resolvePowerShellExecutable() {
   for (const candidate of ['pwsh.exe', 'powershell.exe']) {
@@ -30,6 +32,46 @@ const powerShellExecutable = resolvePowerShellExecutable()
 function readWorkflow() {
   return readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n')
 }
+
+function newTemporaryRoot() {
+  const root = mkdtempSync(join(tmpdir(), 'rain-controlled-workflow-test-'))
+  temporaryRoots.push(root)
+  return root
+}
+
+function psQuoted(value: string) {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function runGit(repositoryRoot: string, arguments_: string[]) {
+  const result = spawnSync('git', ['-C', repositoryRoot, ...arguments_], { encoding: 'utf8', windowsHide: true })
+  if (result.status !== 0) throw new Error(`git ${arguments_.join(' ')} failed: ${result.stderr || result.stdout}`)
+  return result.stdout.trim()
+}
+
+function invokeCandidateCleanup(workflow: string, workspace: string) {
+  const cleanupBlock = workflowRunBlock(workflow, 'Clean candidate build residue before immutable upload').replace(
+    "Import-Module -Name (Join-Path $controlRoot 'scripts\\controlled-build-disk.psm1') -Force",
+    'function Assert-ControlledBuildPathsFreeBytes { param([string]$Stage, [string[]]$Paths, [int64]$MinimumBytes) return [pscustomobject]@{} }',
+  )
+  const command = [
+    "$ErrorActionPreference = 'Stop'",
+    `$env:GITHUB_WORKSPACE = ${psQuoted(workspace)}`,
+    '$errorText = $null',
+    `try { & { ${cleanupBlock} } } catch { $errorText = $_.Exception.Message }`,
+    '[ordered]@{ error = $errorText } | ConvertTo-Json -Compress',
+  ].join('\n')
+  const result = spawnSync(powerShellExecutable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  if (result.status !== 0) throw new Error(`workflow cleanup harness failed: ${result.stderr || result.stdout}`)
+  return JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1)!)
+}
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
 
 function workflowRunBlock(workflow: string, stepName: string) {
   const stepStart = requiredIndex(workflow, `      - name: ${stepName}\n`)
@@ -275,6 +317,51 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(downloadBlock).toContain('throw "Pinned download failed for ${Uri}: curl.exe exited with code $curlExitCode."')
     expect(downloadBlock).toMatch(/Get-FileHash -LiteralPath \$\w+ -Algorithm SHA256/)
     expect(requiredIndex(downloadBlock, curlCommand)).toBeLessThan(requiredIndex(downloadBlock, '$actualSha256 ='))
+  })
+
+  it('selects only a Visual Studio 2022 instance and passes its exact vcvars64 path to the CUDA worker', () => {
+    const workflow = readWorkflow()
+    const visualStudioBlock = workflowRunBlock(workflow, 'Make hosted Visual C++ inspection tools available to the controlled manifest generator')
+    const workerBuildBlock = workflowRunBlock(workflow, 'Build CUDA worker and NSIS candidate remotely')
+
+    expect(visualStudioBlock).toContain("'-version', '[17.0,18.0)'")
+    expect(visualStudioBlock).toContain("-Arguments ($vswhereSelectionArguments + @('-property', 'installationPath'))")
+    expect(visualStudioBlock).toContain("-Arguments ($vswhereSelectionArguments + @('-property', 'installationVersion'))")
+    expect(visualStudioBlock).toContain('$visualStudioMajor = ([version]$installationVersion).Major')
+    expect(visualStudioBlock).toContain('if ($visualStudioMajor -ne 17)')
+    expect(visualStudioBlock).toContain("$vcVarsPath = Join-Path $visualStudioRoot 'VC\\Auxiliary\\Build\\vcvars64.bat'")
+    expect(visualStudioBlock).toContain("MSVC_VCVARS64_PATH=$vcVarsPath")
+    expect(visualStudioBlock).toContain('Sort-Object -Property Name -Descending | Select-Object -First 1')
+    expect(workerBuildBlock).toContain('-VcVarsPath $env:MSVC_VCVARS64_PATH')
+    expect(workflow).toContain('MSVC_VERSION=$($msvcVersion.Name)')
+    expect(workflow).toContain('msvc = [ordered]@{ version = $env:MSVC_VERSION; hostArchitecture = \'x64\'; targetArchitecture = \'x64\' }')
+  })
+
+  it('fails closed after cleanup when tracked dirt remains and reports a finite relative porcelain diagnostic', () => {
+    const workspace = newTemporaryRoot()
+    const candidateRoot = join(workspace, 'candidate')
+    mkdirSync(candidateRoot, { recursive: true })
+    runGit(candidateRoot, ['init'])
+    runGit(candidateRoot, ['config', 'user.email', 'rain-test@example.invalid'])
+    runGit(candidateRoot, ['config', 'user.name', 'Rain Test'])
+    const trackedFiles = Array.from({ length: 21 }, (_, index) => join(candidateRoot, `tracked-${index.toString().padStart(2, '0')}.txt`))
+    for (const path of trackedFiles) writeFileSync(path, 'committed')
+    runGit(candidateRoot, ['add', '.'])
+    runGit(candidateRoot, ['commit', '-m', 'fixture'])
+    for (const path of trackedFiles) writeFileSync(path, 'dirty')
+    const untrackedPath = join(candidateRoot, 'untracked-build-output.txt')
+    writeFileSync(untrackedPath, 'removable build residue')
+
+    const result = invokeCandidateCleanup(readWorkflow(), workspace)
+
+    expect(result.error).toContain('Candidate checkout is not clean after controlled build cleanup')
+    expect(result.error).toContain('Remaining relative porcelain entries (first 20 of 21)')
+    expect(result.error).toContain('tracked-00.txt')
+    expect(result.error).not.toContain('tracked-20.txt')
+    expect(result.error).not.toContain(candidateRoot)
+    expect(readFileSync(trackedFiles[0], 'utf8')).toBe('dirty')
+    expect(existsSync(untrackedPath)).toBe(false)
+    expect(runGit(candidateRoot, ['status', '--porcelain', '--untracked-files=all'])).toContain('M tracked-00.txt')
   })
 
   it('pins CMake, records the complete hosted toolchain, and guarantees installed-tree and candidate cleanup', () => {

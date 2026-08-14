@@ -215,14 +215,27 @@ jobs:
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-native-tool-probe.psm1') -Force
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw 'Visual Studio locator is missing from the GitHub-hosted runner.' }
-          $installationPath = (Invoke-RainControlledNativeToolProbe -Name 'vswhere' -Path $vswhere -Arguments @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath')).output
-          $msvcRoot = Join-Path $installationPath 'VC\Tools\MSVC'
+          $vswhereSelectionArguments = @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-version', '[17.0,18.0)')
+          $installationPath = (Invoke-RainControlledNativeToolProbe -Name 'vswhere' -Path $vswhere -Arguments ($vswhereSelectionArguments + @('-property', 'installationPath'))).output
+          $installationVersion = (Invoke-RainControlledNativeToolProbe -Name 'vswhere' -Path $vswhere -Arguments ($vswhereSelectionArguments + @('-property', 'installationVersion'))).output
+          try {
+            $visualStudioMajor = ([version]$installationVersion).Major
+          } catch {
+            throw "Visual Studio locator returned an invalid installation version: $installationVersion"
+          }
+          if ($visualStudioMajor -ne 17) { throw "Visual Studio locator must select Visual Studio 2022 (major 17), found $installationVersion." }
+          $visualStudioRoot = [System.IO.Path]::GetFullPath($installationPath)
+          if (-not (Test-Path -LiteralPath $visualStudioRoot -PathType Container)) { throw "Visual Studio locator returned a missing installation root: $visualStudioRoot" }
+          $msvcRoot = Join-Path $visualStudioRoot 'VC\Tools\MSVC'
           $msvcVersion = Get-ChildItem -LiteralPath $msvcRoot -Directory -ErrorAction Stop | Sort-Object -Property Name -Descending | Select-Object -First 1
           if (-not $msvcVersion) { throw 'Visual Studio MSVC version directory is missing.' }
           $dumpbinDirectory = Join-Path $msvcVersion.FullName 'bin\Hostx64\x64'
           if (-not (Test-Path -LiteralPath (Join-Path $dumpbinDirectory 'dumpbin.exe') -PathType Leaf)) { throw 'dumpbin.exe is missing from hosted Visual Studio C++ tools.' }
+          $vcVarsPath = Join-Path $visualStudioRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path -LiteralPath $vcVarsPath -PathType Leaf)) { throw 'vcvars64.bat is missing from hosted Visual Studio C++ tools.' }
           $dumpbinDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           "MSVC_VERSION=$($msvcVersion.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MSVC_VCVARS64_PATH=$vcVarsPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Select the pinned Rust toolchain for this remote build
         shell: pwsh
@@ -367,7 +380,7 @@ jobs:
             throw 'The standard CMAKE environment variable is not bound to pinned CMake.'
           }
           Assert-ControlledBuildPathsFreeBytes -Stage 'before-cuda-worker-build' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 16GB | Out-Null
-          & $workerScript -ProjectRoot $candidateRoot -CudaRoot $env:CUDA_ROOT -NinjaPath (Get-Command ninja.exe -ErrorAction Stop).Source -CmakePath $env:CMAKE_PATH -LlvmBinPath $env:LLVM_BIN -WorkerTargetRoot $workerTarget -WorkerInvocationId $workerInvocationId
+          & $workerScript -ProjectRoot $candidateRoot -CudaRoot $env:CUDA_ROOT -NinjaPath (Get-Command ninja.exe -ErrorAction Stop).Source -CmakePath $env:CMAKE_PATH -LlvmBinPath $env:LLVM_BIN -VcVarsPath $env:MSVC_VCVARS64_PATH -WorkerTargetRoot $workerTarget -WorkerInvocationId $workerInvocationId
           if ($LASTEXITCODE -ne 0) { throw "CUDA worker build failed with exit code $LASTEXITCODE" }
           Remove-RainControlledOwnedDirectory -Path $workerTarget -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $workerReservation.token -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
           Assert-ControlledBuildPathsFreeBytes -Stage 'before-tauri-package' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 12GB | Out-Null
@@ -469,8 +482,12 @@ jobs:
               $candidateCleanupStatusOutput = & git -C $candidateRoot status --porcelain --untracked-files=all 2>&1
               $candidateCleanupStatusExitCode = $LASTEXITCODE
               if ($candidateCleanupStatusExitCode -ne 0) { throw "Could not verify candidate cleanup status: $candidateCleanupStatusExitCode" }
-              $candidateStatus = ($candidateCleanupStatusOutput | Out-String).Trim()
-              if (-not [string]::IsNullOrWhiteSpace($candidateStatus)) { throw 'Candidate checkout is not clean after controlled build cleanup.' }
+              $candidateStatusEntries = @($candidateCleanupStatusOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+              if ($candidateStatusEntries.Count -gt 0) {
+                $candidateStatusDiagnosticLimit = 20
+                $candidateStatusDiagnosticEntries = @($candidateStatusEntries | Select-Object -First $candidateStatusDiagnosticLimit)
+                throw "Candidate checkout is not clean after controlled build cleanup. Remaining relative porcelain entries (first $($candidateStatusDiagnosticEntries.Count) of $($candidateStatusEntries.Count)): $($candidateStatusDiagnosticEntries -join '; ')"
+              }
             }
           } catch {
             [void]$candidateCleanupErrors.Add("Candidate cleanup failed: $($_.Exception.Message)")
