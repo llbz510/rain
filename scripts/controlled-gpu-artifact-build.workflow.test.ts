@@ -241,6 +241,23 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(unbracedVariableColonReferences).toEqual([])
   })
 
+  it('uses hosted curl redirect and exit handling before the existing pinned-download hash gate', () => {
+    const workflow = readWorkflow()
+    const preflightBlock = workflowRunBlock(workflow, 'Verify hosted Windows capacity and preinstalled build prerequisites')
+    const downloadBlock = workflowRunBlock(workflow, 'Download and verify pinned CUDA, LLVM, NSIS, and CMake packages')
+    const curlCommand = '& curl.exe --location --fail --silent --show-error --output $Destination --url $Uri'
+
+    expect(preflightBlock).toContain("foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe', 'curl.exe'))")
+    expect(preflightBlock).toContain("Invoke-RainControlledNativeToolProbe -Name 'curl' -Path (Get-Command curl.exe -ErrorAction Stop).Source -Arguments @('--version')")
+    expect(workflow).not.toContain('curl = [ordered]@{')
+    expect(downloadBlock).not.toContain('Invoke-WebRequest')
+    expect(downloadBlock).toContain(curlCommand)
+    expect(downloadBlock).toMatch(/& curl\.exe --location --fail --silent --show-error --output \$Destination --url \$Uri\n\s*\$curlExitCode = \$LASTEXITCODE\n\s*if \(\$curlExitCode -ne 0\)/)
+    expect(downloadBlock).toContain('throw "Pinned download failed for ${Uri}: curl.exe exited with code $curlExitCode."')
+    expect(downloadBlock).toMatch(/Get-FileHash -LiteralPath \$\w+ -Algorithm SHA256/)
+    expect(requiredIndex(downloadBlock, curlCommand)).toBeLessThan(requiredIndex(downloadBlock, '$actualSha256 ='))
+  })
+
   it('pins CMake, records the complete hosted toolchain, and guarantees installed-tree and candidate cleanup', () => {
     const workflow = readWorkflow()
     const toolchainModule = readFileSync(toolchainInstallModulePath, 'utf8')
