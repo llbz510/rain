@@ -4,22 +4,48 @@ $ErrorActionPreference = 'Stop'
 Import-Module -Name (Join-Path $PSScriptRoot 'controlled-build-disk.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'controlled-owned-directory.psm1') -Force -ErrorAction Stop
 
+$script:RainControlledToolchainInstallerDeleteMaximumAttempts = 5
+$script:RainControlledToolchainInstallerDeleteRetryDelayMilliseconds = 250
+
 function New-RainControlledToolchainInstallAdapter {
-  return [pscustomobject]@{
-    install = {
-      param([string]$Path, [string[]]$Arguments, [string]$Description)
-      $previousErrorActionPreference = $ErrorActionPreference
-      try {
-        $ErrorActionPreference = 'Continue'
-        $output = & $Path @Arguments 2>&1
-        $exitCode = $LASTEXITCODE
-      } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-      }
-      if ($exitCode -ne 0) {
-        throw "$Description installation failed with exit code ${exitCode}: $([string]($output | Out-String).Trim())"
-      }
+  param([scriptblock]$ProcessAdapter = $null)
+
+  $install = {
+    param([string]$Path, [string[]]$Arguments, [string]$Description)
+    if ($null -ne $ProcessAdapter) {
+      $process = & $ProcessAdapter -FilePath $Path -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
+    } else {
+      $process = Start-Process -FilePath $Path -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
     }
+    if ($null -eq $process -or $null -eq $process.PSObject.Properties['ExitCode']) {
+      throw "$Description installer did not return an exit code."
+    }
+    $exitCodeValue = $process.ExitCode
+    $isIntegralExitCode = (
+      $exitCodeValue -is [System.SByte] -or
+      $exitCodeValue -is [System.Byte] -or
+      $exitCodeValue -is [System.Int16] -or
+      $exitCodeValue -is [System.UInt16] -or
+      $exitCodeValue -is [System.Int32] -or
+      $exitCodeValue -is [System.UInt32] -or
+      $exitCodeValue -is [System.Int64] -or
+      $exitCodeValue -is [System.UInt64]
+    )
+    if (-not $isIntegralExitCode) {
+      throw "$Description installer returned an invalid exit code."
+    }
+    $exitCodeAsDecimal = [decimal]$exitCodeValue
+    if ($exitCodeAsDecimal -lt [decimal][int]::MinValue -or $exitCodeAsDecimal -gt [decimal][int]::MaxValue) {
+      throw "$Description installer returned an invalid exit code."
+    }
+    $exitCode = [int]$exitCodeAsDecimal
+    if ($exitCode -ne 0) {
+      throw "$Description installation failed with exit code $exitCode."
+    }
+  }.GetNewClosure()
+
+  return [pscustomobject]@{
+    install = $install
     remove = {
       param([string]$Path, [bool]$Recurse)
       if (Test-Path -LiteralPath $Path) {
@@ -57,6 +83,10 @@ function New-RainControlledToolchainInstallAdapter {
       param([string]$Stage, [string[]]$Paths, [int64]$MinimumBytes)
       Assert-ControlledBuildPathsFreeBytes -Stage $Stage -Paths $Paths -MinimumBytes $MinimumBytes | Out-Null
     }
+    sleep = {
+      param([int]$Milliseconds)
+      Start-Sleep -Milliseconds $Milliseconds
+    }
   }
 }
 
@@ -68,6 +98,41 @@ function Assert-RainControlledToolchainInstallAdapter($Adapter) {
     }
   }
   return $Adapter
+}
+
+function Remove-RainControlledToolchainPackageFile {
+  param(
+    [Parameter(Mandatory = $true)]$Adapter,
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Description
+  )
+
+  $attemptFailures = [System.Collections.Generic.List[string]]::new()
+  $attemptsCompleted = 0
+  for ($attempt = 1; $attempt -le $script:RainControlledToolchainInstallerDeleteMaximumAttempts; $attempt++) {
+    $attemptsCompleted = $attempt
+    try {
+      & $Adapter.remove $Path $false
+      return
+    } catch {
+      [void]$attemptFailures.Add("attempt $attempt/$($script:RainControlledToolchainInstallerDeleteMaximumAttempts): $($_.Exception.Message)")
+    }
+
+    if ($attempt -lt $script:RainControlledToolchainInstallerDeleteMaximumAttempts) {
+      try {
+        if (($Adapter.PSObject.Properties.Name -contains 'sleep') -and $Adapter.sleep -is [scriptblock]) {
+          & $Adapter.sleep $script:RainControlledToolchainInstallerDeleteRetryDelayMilliseconds
+        } else {
+          Start-Sleep -Milliseconds $script:RainControlledToolchainInstallerDeleteRetryDelayMilliseconds
+        }
+      } catch {
+        [void]$attemptFailures.Add("retry delay after attempt $attempt/$($script:RainControlledToolchainInstallerDeleteMaximumAttempts): $($_.Exception.Message)")
+        break
+      }
+    }
+  }
+
+  throw "$Description toolchain package cleanup failed after $attemptsCompleted attempt(s) (maximum $($script:RainControlledToolchainInstallerDeleteMaximumAttempts)): $($attemptFailures -join '; ')"
 }
 
 function Invoke-RainControlledToolchainInstall {
@@ -113,14 +178,14 @@ function Invoke-RainControlledToolchainInstall {
       throw "Refusing to reuse an existing pinned CMake directory: $CmakeExtractRoot"
     }
     & $adapterToUse.install (Join-Path $DownloadsRoot 'cuda.exe') @('-s') 'CUDA'
-    & $adapterToUse.remove (Join-Path $DownloadsRoot 'cuda.exe') $false
+    Remove-RainControlledToolchainPackageFile -Adapter $adapterToUse -Path (Join-Path $DownloadsRoot 'cuda.exe') -Description 'CUDA'
     & $adapterToUse.install (Join-Path $DownloadsRoot 'llvm.exe') @('/S') 'LLVM'
-    & $adapterToUse.remove (Join-Path $DownloadsRoot 'llvm.exe') $false
+    Remove-RainControlledToolchainPackageFile -Adapter $adapterToUse -Path (Join-Path $DownloadsRoot 'llvm.exe') -Description 'LLVM'
     & $adapterToUse.install (Join-Path $DownloadsRoot 'nsis.exe') @('/S') 'NSIS'
-    & $adapterToUse.remove (Join-Path $DownloadsRoot 'nsis.exe') $false
+    Remove-RainControlledToolchainPackageFile -Adapter $adapterToUse -Path (Join-Path $DownloadsRoot 'nsis.exe') -Description 'NSIS'
     $cmakeRootOwnedByInvocation = $true
     & $adapterToUse.expand (Join-Path $DownloadsRoot 'cmake.zip') $CmakeExtractRoot
-    & $adapterToUse.remove (Join-Path $DownloadsRoot 'cmake.zip') $false
+    Remove-RainControlledToolchainPackageFile -Adapter $adapterToUse -Path (Join-Path $DownloadsRoot 'cmake.zip') -Description 'CMake'
     if (-not (& $adapterToUse.pathExists $cmakePath 'leaf')) { throw "Pinned CMake was not extracted: $cmakePath" }
     $cmakeVersion = [string](& $adapterToUse.cmakeVersion $cmakePath)
     if ($cmakeVersion -ne $ExpectedCmakeVersion) {
@@ -181,5 +246,6 @@ function Invoke-RainControlledToolchainInstall {
 }
 
 Export-ModuleMember -Function @(
+  'New-RainControlledToolchainInstallAdapter',
   'Invoke-RainControlledToolchainInstall'
 )

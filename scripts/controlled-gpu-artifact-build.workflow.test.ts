@@ -268,7 +268,7 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(workflow).toContain(`CMAKE_ARCHIVE_SHA256: ${cmakeSha256}`)
     expect(workflow).toContain("Get-VerifiedDownload $env:CMAKE_ARCHIVE_URL $env:CMAKE_ARCHIVE_SHA256 (Join-Path $toolDownloads 'cmake.zip')")
     expect(toolchainModule).toContain("& $adapterToUse.expand (Join-Path $DownloadsRoot 'cmake.zip') $CmakeExtractRoot")
-    expect(toolchainModule).toContain("& $adapterToUse.remove (Join-Path $DownloadsRoot 'cmake.zip') $false")
+    expect(toolchainModule).toContain("Remove-RainControlledToolchainPackageFile -Adapter $adapterToUse -Path (Join-Path $DownloadsRoot 'cmake.zip') -Description 'CMake'")
     expect(toolchainModule).toContain('"CMAKE_PATH=$cmakePath"')
     assertPinnedCmakeConsumers(workflow, toolchainModule)
     expect(workflow).not.toContain("foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', 'cmake.exe'))")
