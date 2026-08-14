@@ -75,6 +75,19 @@ describe('CUDA worker controlled-build portability contract', () => {
     expect(workerBuildScript).toContain("$env:CMAKE_CUDA_ARCHITECTURES = '120'")
   })
 
+  it('uses only a checked Visual Studio 2022 fallback and never opts CUDA into an unsupported compiler mode', () => {
+    const fallbackStart = workerBuildScript.indexOf('function Find-VcVars64')
+    const fallbackEnd = workerBuildScript.indexOf('function Find-Cargo', fallbackStart)
+    const fallback = workerBuildScript.slice(fallbackStart, fallbackEnd)
+
+    expect(fallback).toContain("-version '[17.0,18.0)'")
+    expect(fallback).toContain('$vswhereExitCode = $LASTEXITCODE')
+    expect(fallback).toContain('if ($vswhereExitCode -ne 0)')
+    expect(fallback).toContain('$installation = ($vswhereOutput | Out-String).Trim()')
+    expect(fallback).toContain('if ([string]::IsNullOrWhiteSpace($installation))')
+    expect(fallback).not.toContain('-allow-unsupported-compiler')
+  })
+
   it('aggregates ownership-marker publication and cleanup failures while removing the owned target', () => {
     const root = newTemporaryRoot()
     const workerTarget = join(root, 'owned-worker-target')

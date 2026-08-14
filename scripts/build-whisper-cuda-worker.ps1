@@ -100,11 +100,14 @@ function Find-VcVars64([string]$ConfiguredVcVarsPath) {
   }
   $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
   if (Test-Path -LiteralPath $vswhere) {
-    $installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($installation)) {
-      $candidate = Join-Path ([string]$installation) 'VC\Auxiliary\Build\vcvars64.bat'
-      if (Test-Path -LiteralPath $candidate) { return $candidate }
-    }
+    $vswhereOutput = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -version '[17.0,18.0)' -property installationPath 2>&1
+    $vswhereExitCode = $LASTEXITCODE
+    if ($vswhereExitCode -ne 0) { throw "Visual Studio locator failed with exit code $vswhereExitCode." }
+    $installation = ($vswhereOutput | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($installation)) { throw 'Visual Studio locator did not return a supported Visual Studio 2022 installation path.' }
+    $candidate = Join-Path $installation 'VC\Auxiliary\Build\vcvars64.bat'
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw "Visual Studio locator returned an installation without vcvars64.bat: $installation" }
+    return $candidate
   }
   return $null
 }
