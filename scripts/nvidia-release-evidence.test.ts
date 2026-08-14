@@ -11,7 +11,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execFile, spawnSync, type ChildProcess } from 'node:child_process'
+import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const repoRoot = join(__dirname, '..')
@@ -174,6 +174,24 @@ function newTemporaryRoot() {
   return root
 }
 
+function createCanonicalToolingCheckout(root: string) {
+  const checkout = join(root, 'control-tooling-checkout')
+  mkdirSync(checkout, { recursive: true })
+  const runGit = (arguments_: string[]) => execFileSync('git', arguments_, {
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  runGit(['-C', checkout, 'init'])
+  runGit(['-C', checkout, 'config', 'user.email', 'rain-fixture@example.invalid'])
+  runGit(['-C', checkout, 'config', 'user.name', 'Rain fixture'])
+  writeFileSync(join(checkout, 'tooling.txt'), 'controlled tooling fixture')
+  runGit(['-C', checkout, 'add', 'tooling.txt'])
+  runGit(['-C', checkout, 'commit', '-m', 'controlled tooling fixture'])
+  runGit(['-C', checkout, 'remote', 'add', 'origin', 'https://github.com/llbz510/rain.git'])
+  const commit = runGit(['-C', checkout, 'rev-parse', 'HEAD']).trim()
+  return { checkout, commit, runGit }
+}
+
 function sha256(path: string) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
@@ -210,16 +228,46 @@ try {
   $request = @'
 ${JSON.stringify(request)}
 '@ | ConvertFrom-Json
+  function Write-FakePe([string]$Path, [UInt16]$Machine) {
+    $directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    $bytes = [byte[]]::new(512)
+    $bytes[0] = [byte][char]'M'
+    $bytes[1] = [byte][char]'Z'
+    [BitConverter]::GetBytes([int]0x80).CopyTo($bytes, 0x3c)
+    $bytes[0x80] = [byte][char]'P'
+    $bytes[0x81] = [byte][char]'E'
+    [BitConverter]::GetBytes($Machine).CopyTo($bytes, 0x84)
+    [System.IO.File]::WriteAllBytes($Path, $bytes)
+  }
   if ($request.PSObject.Properties.Name -contains 'shadowGetFileHash' -and [bool]$request.shadowGetFileHash) {
     function global:Get-FileHash { throw 'Get-FileHash must not be used by the release-evidence contract.' }
   }
   $value = switch ([string]$request.operation) {
     'provenance' {
-      Assert-CandidateArtifactProvenance -InstallerPath ([string]$request.installerPath) -ExpectedTargetCommit ([string]$request.expectedTargetCommit) -ExpectedInstallerSha256 ([string]$request.expectedInstallerSha256) -ArtifactManifestPath ([string]$request.artifactManifestPath) -ExpectedArtifactManifestSha256 ([string]$request.expectedArtifactManifestSha256)
+      $provenanceArguments = @{
+        InstallerPath = [string]$request.installerPath
+        ExpectedTargetCommit = [string]$request.expectedTargetCommit
+        ExpectedInstallerSha256 = [string]$request.expectedInstallerSha256
+        ArtifactManifestPath = [string]$request.artifactManifestPath
+        ExpectedArtifactManifestSha256 = [string]$request.expectedArtifactManifestSha256
+      }
+      if ($request.PSObject.Properties.Name -contains 'controlledBuildRecordPath') {
+        $provenanceArguments.ControlledBuildRecordPath = [string]$request.controlledBuildRecordPath
+      }
+      Assert-CandidateArtifactProvenance @provenanceArguments
+      break
+    }
+    'control-tooling-checkout' {
+      Assert-ReleaseEvidenceControlToolingCheckout -RepoRoot ([string]$request.repoRoot) -ExpectedCommit ([string]$request.expectedCommit)
       break
     }
     'payload' {
       Assert-InstalledCudaPayload -InstalledRoot ([string]$request.installedRoot) -PayloadManifestPath ([string]$request.payloadManifestPath)
+      break
+    }
+    'installed-artifact-reconciliation' {
+      Assert-InstalledArtifactManifest -InstalledRoot ([string]$request.installedRoot) -ArtifactManifestPath ([string]$request.artifactManifestPath)
       break
     }
     'payload-manifest-relative-identity' {
@@ -284,6 +332,152 @@ ${JSON.stringify(request)}
           windowStyle = $WindowStyle
         }
       }
+      break
+    }
+    'nsis-install-and-verify' {
+      Invoke-ReleaseEvidenceNsisInstallAndVerify -Installer 'C:\\fixture\\Rain_0.1.0_x64-setup.exe' -TemporaryRoot ([string]$request.temporaryRoot) -ProcessAdapter {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        $destinationArgument = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })
+        if ($destinationArgument.Count -ne 1 -or $ArgumentList[$ArgumentList.Count - 1] -ne $destinationArgument[0]) {
+          throw 'The fake installer received an invalid NSIS /D argument.'
+        }
+        $installedRoot = $destinationArgument[0].Substring(3)
+        $payloadRoot = Join-Path $installedRoot 'resources\\whisper-backends'
+        New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
+        Write-FakePe (Join-Path $installedRoot 'rain.exe') 0x8664
+        [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
+        [System.IO.File]::WriteAllText((Join-Path $installedRoot 'uninstall.exe'), 'fake generated uninstaller')
+        [pscustomobject]@{
+          ExitCode = 0
+          filePath = $FilePath
+          argumentList = @($ArgumentList)
+          wait = $Wait.IsPresent
+          passThru = $PassThru.IsPresent
+          windowStyle = $WindowStyle
+        }
+      }
+      break
+    }
+    'nsis-install-and-verify-i386-main' {
+      Invoke-ReleaseEvidenceNsisInstallAndVerify -Installer 'C:\\fixture\\Rain_0.1.0_x64-setup.exe' -TemporaryRoot ([string]$request.temporaryRoot) -ProcessAdapter {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        $installedRoot = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })[0].Substring(3)
+        $payloadRoot = Join-Path $installedRoot 'resources\\whisper-backends'
+        New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
+        Write-FakePe (Join-Path $installedRoot 'rain.exe') 0x14c
+        [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
+        [pscustomobject]@{ ExitCode = 0 }
+      }
+      break
+    }
+    'nsis-install-uninstall-and-verify' {
+      $state = [pscustomobject]@{ install = $null; uninstall = $null; sideEffects = [System.Collections.Generic.List[string]]::new() }
+      $sideEffectProbe = {
+        param([string]$Phase, [string]$InstallRoot)
+        [void]$state.sideEffects.Add($Phase)
+        [ordered]@{ uninstallRegistryEntries = @(); shortcuts = @() }
+      }.GetNewClosure()
+      $adapter = {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        if ($FilePath -match '(?i)uninstall\.exe$') {
+          $state.uninstall = [pscustomobject]@{ filePath = $FilePath; argumentList = @($ArgumentList); wait = $Wait.IsPresent; passThru = $PassThru.IsPresent; windowStyle = $WindowStyle }
+          Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $FilePath) 'rain.exe') -Force
+          Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $FilePath) 'resources') -Recurse -Force
+          Remove-Item -LiteralPath $FilePath -Force
+          return [pscustomobject]@{ ExitCode = 0 }
+        }
+        $state.install = [pscustomobject]@{ filePath = $FilePath; argumentList = @($ArgumentList); wait = $Wait.IsPresent; passThru = $PassThru.IsPresent; windowStyle = $WindowStyle }
+        $installedRoot = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })[0].Substring(3)
+        $payloadRoot = Join-Path $installedRoot 'resources\\whisper-backends'
+        New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
+        Write-FakePe (Join-Path $installedRoot 'rain.exe') 0x8664
+        [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
+        [System.IO.File]::WriteAllText((Join-Path $installedRoot 'uninstall.exe'), 'fake generated uninstaller')
+        [pscustomobject]@{ ExitCode = 0 }
+      }.GetNewClosure()
+      $installation = Invoke-ReleaseEvidenceNsisInstallAndVerify -Installer 'C:\\fixture\\Rain_0.1.0_x64-setup.exe' -TemporaryRoot ([string]$request.temporaryRoot) -ProcessAdapter $adapter -SystemSideEffectProbe $sideEffectProbe
+      $uninstallation = Invoke-ReleaseEvidenceNsisUninstallAndVerify -Installation $installation -ProcessAdapter $adapter -SystemSideEffectProbe $sideEffectProbe
+      [pscustomobject]@{ installation = $installation; uninstallation = $uninstallation; state = $state }
+      break
+    }
+    'nsis-uninstall-failure' {
+      $installation = [pscustomobject]@{
+        installRoot = [string]$request.installRoot
+        uninstallerPath = (Join-Path ([string]$request.installRoot) 'uninstall.exe')
+      }
+      New-Item -ItemType Directory -Force -Path ([string]$request.installRoot) | Out-Null
+      [System.IO.File]::WriteAllText($installation.uninstallerPath, 'fake generated uninstaller')
+      Invoke-ReleaseEvidenceNsisUninstallAndVerify -Installation $installation -ProcessAdapter {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        [pscustomobject]@{ ExitCode = 7 }
+      }
+      break
+    }
+    'nsis-install-and-verify-missing-payload' {
+      Invoke-ReleaseEvidenceNsisInstallAndVerify -Installer 'C:\\fixture\\Rain_0.1.0_x64-setup.exe' -TemporaryRoot ([string]$request.temporaryRoot) -ProcessAdapter {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        $installedRoot = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })[0].Substring(3)
+        New-Item -ItemType Directory -Force -Path $installedRoot | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $installedRoot 'rain.exe'), 'fake installed Rain main executable')
+        [pscustomobject]@{ ExitCode = 0 }
+      }
+      break
+    }
+    'nsis-install-validation-failure-uninstalls' {
+      $attemptMarker = Join-Path ([string]$request.temporaryRoot) 'uninstall-attempted.txt'
+      $adapter = {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        if ($FilePath -match '(?i)uninstall\.exe$') {
+          [System.IO.File]::WriteAllText($attemptMarker, ($ArgumentList -join ','))
+          Remove-Item -LiteralPath (Split-Path -Parent $FilePath) -Recurse -Force
+          return [pscustomobject]@{ ExitCode = 0 }
+        }
+        $installedRoot = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })[0].Substring(3)
+        $payloadRoot = Join-Path $installedRoot 'resources\whisper-backends'
+        New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $installedRoot 'rain.exe'), 'not an AMD64 PE')
+        [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
+        [System.IO.File]::WriteAllText((Join-Path $installedRoot 'uninstall.exe'), 'fake generated uninstaller')
+        return [pscustomobject]@{ ExitCode = 0 }
+      }.GetNewClosure()
+      Invoke-ReleaseEvidenceNsisInstallAndVerify -Installer 'C:\\fixture\\Rain_0.1.0_x64-setup.exe' -TemporaryRoot ([string]$request.temporaryRoot) -ProcessAdapter $adapter
+      break
+    }
+    'nsis-uninstall-residual-file' {
+      $installRoot = [string]$request.installRoot
+      New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+      [System.IO.File]::WriteAllText((Join-Path $installRoot 'uninstall.exe'), 'fake generated uninstaller')
+      [System.IO.File]::WriteAllText((Join-Path $installRoot 'rogue-program.dll'), 'residual program payload')
+      $installation = [pscustomobject]@{ installRoot = $installRoot; uninstallerPath = (Join-Path $installRoot 'uninstall.exe') }
+      Invoke-ReleaseEvidenceNsisUninstallAndVerify -Installation $installation -ProcessAdapter {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        Remove-Item -LiteralPath $FilePath -Force
+        [pscustomobject]@{ ExitCode = 0 }
+      }
+      break
+    }
+    'nsis-uninstall-combined-failure' {
+      $installRoot = [string]$request.installRoot
+      New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+      [System.IO.File]::WriteAllText((Join-Path $installRoot 'uninstall.exe'), 'fake generated uninstaller')
+      [System.IO.File]::WriteAllText((Join-Path $installRoot 'rogue-program.dll'), 'residual program payload')
+      $installation = [pscustomobject]@{
+        installRoot = $installRoot
+        uninstallerPath = (Join-Path $installRoot 'uninstall.exe')
+        systemSideEffectsBefore = [ordered]@{ uninstallRegistryEntries = @('before-registry'); shortcuts = @('before-shortcut') }
+      }
+      $sideEffectProbe = {
+        param([string]$Phase, [string]$InstallRoot)
+        if ($Phase -eq 'after-uninstall') {
+          return [ordered]@{ uninstallRegistryEntries = @('after-registry'); shortcuts = @('after-shortcut') }
+        }
+        return [ordered]@{ uninstallRegistryEntries = @('before-registry'); shortcuts = @('before-shortcut') }
+      }
+      $removeInstallRoot = { param([string]$Path) throw 'simulated disposable-root cleanup failure' }
+      Invoke-ReleaseEvidenceNsisUninstallAndVerify -Installation $installation -ProcessAdapter {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
+        [pscustomobject]@{ ExitCode = 7 }
+      } -SystemSideEffectProbe $sideEffectProbe -CleanupInstallRoot -RemoveInstallRoot $removeInstallRoot
       break
     }
     'main-executable-imports' {
@@ -644,6 +838,7 @@ function createPayloadFixture(root: string, options: {
   const manifestPath = join(root, 'payload-manifest.json')
   writeFileSync(manifestPath, JSON.stringify({
     schemaVersion: 1,
+    configuration: 'release',
     workerProtocolVersion: 1,
     driverLibraryBundled: false,
     files: entries,
@@ -655,6 +850,77 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
   const installerPath = join(root, 'Rain_0.1.0_x64-setup.exe')
   writeFileSync(installerPath, 'candidate installer bytes')
   const installerHash = sha256(installerPath)
+  const installedRoot = join(root, 'installed-rain')
+  const payloadRoot = join(installedRoot, 'resources', 'whisper-backends')
+  mkdirSync(payloadRoot, { recursive: true })
+  const mainExecutablePath = join(installedRoot, 'Rain.exe')
+  const workerPath = join(payloadRoot, 'rain-whisper-cuda.exe')
+  const payloadManifestPath = join(payloadRoot, 'payload-manifest.json')
+  const runtimeFileNames = ['cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll']
+  writeFileSync(mainExecutablePath, 'fixture:Rain.exe')
+  writeFileSync(workerPath, 'fixture:rain-whisper-cuda.exe')
+  for (const name of runtimeFileNames) writeFileSync(join(payloadRoot, name), `fixture:${name}`)
+  writeFileSync(payloadManifestPath, JSON.stringify({
+    schemaVersion: 1,
+    configuration: 'release',
+    workerProtocolVersion: 1,
+    driverLibraryBundled: false,
+    files: [workerPath, ...runtimeFileNames.map((name) => join(payloadRoot, name))].map((path) => ({
+      name: path.split('\\').at(-1),
+      sizeBytes: readFileSync(path).byteLength,
+      sha256: sha256(path),
+    })),
+  }))
+  const toolingCommit = 'b'.repeat(40)
+  const sourceRepository = 'https://github.com/llbz510/rain.git'
+  const generator = { id: 'rain-controlled-build', version: '1.0.0' }
+  const buildMetadata = { buildRecordId: 'controlled-record-20260811', builtAt: '2026-08-11T00:00:00.000Z' }
+  const toolchain = {
+    record: {
+      fileName: 'controlled-toolchain-record.json',
+      sizeBytes: 512,
+      sha256: 'd'.repeat(64),
+    },
+    runner: {
+      image: 'windows-2025',
+      imageVersion: '2026.08.01.1',
+      os: 'Microsoft Windows Server 2025',
+      osVersion: '10.0.26100',
+      architecture: 'X64',
+    },
+    cmake: { version: '4.0.0', minimumVersion: '4.0.0' },
+    cuda: {
+      toolkitVersion: '12.9.1',
+      architectures: ['120'],
+      architectureBasisUrl: 'https://developer.nvidia.com/cuda-gpus',
+    },
+    ninja: { version: '1.12.1' },
+    llvm: { version: '22.1.7' },
+    rust: { version: 'rustc 1.96.1' },
+    node: { version: 'v24.0.0' },
+    npm: { version: '11.0.0' },
+    cargo: { version: 'cargo 1.96.1' },
+    msvc: { version: '14.44.35207', hostArchitecture: 'x64', targetArchitecture: 'x64' },
+    nsis: { version: 'v3.11' },
+    downloads: {
+      cmake: {
+        url: 'https://github.com/Kitware/CMake/releases/download/v4.0.0/cmake-4.0.0-windows-x86_64.zip',
+        sha256: '89e87f3e297b70f1349ee7c5f90783ca96efb986b70c558c799c3c9b1b716456',
+      },
+      cuda: {
+        url: 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe',
+        sha256: 'f0ca7cc7b4cea2fac2c4951819d2a9caea31e04000e9110e2048719525f8ea0e',
+      },
+      llvm: {
+        url: 'https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.7/LLVM-22.1.7-win64.exe',
+        sha256: 'e091fcf965ce589c83c0f7c5356b2fcf3e658a8ec990bfcf79cce4389a0d1eb3',
+      },
+      nsis: {
+        url: 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download',
+        sha256: '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a',
+      },
+    },
+  }
   const artifactManifestPath = join(root, 'artifact-manifest.json')
   writeFileSync(artifactManifestPath, JSON.stringify({
     schemaVersion: 1,
@@ -663,11 +929,13 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
     identifier: 'com.rain.app',
     targetCommit,
     controlledBuild: {
-      sourceRepository: 'https://example.invalid/rain.git',
+      sourceRepository,
       targetCommit,
+      toolingCommit,
       cleanTree: true,
-      generator: { id: 'rain-controlled-build', version: '1.0.0' },
-      buildMetadata: { buildRecordId: 'controlled-record-20260811', builtAt: '2026-08-11T00:00:00.000Z' },
+      generator,
+      buildMetadata,
+      toolchain,
     },
     installer: {
       fileName: 'Rain_0.1.0_x64-setup.exe',
@@ -675,38 +943,123 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
       sizeBytes: readFileSync(installerPath).byteLength,
       kind: 'nsis-windows-x64',
     },
+    installationProof: {
+      kind: 'rain-nsis-install-proof-v2',
+      schemaVersion: 2,
+      installerSha256: installerHash,
+      mainExecutable: { path: 'Rain.exe', machine: 0x8664 },
+      payloadManifest: { path: 'resources\\whisper-backends\\payload-manifest.json' },
+      silentInstall: { mode: 'silent', destinationKind: 'unique-runner-temp', waited: true, exitCode: 0 },
+    },
+    hygieneScopes: ['installed-tree', 'installer-archive'],
     mainExecutable: {
       path: 'Rain.exe',
-      sha256: '1'.repeat(64),
+      sizeBytes: readFileSync(mainExecutablePath).byteLength,
+      sha256: sha256(mainExecutablePath),
       cudaImportsPresent: false,
     },
     resources: {
       cudaWorker: {
         path: 'resources\\whisper-backends\\rain-whisper-cuda.exe',
-        sha256: '2'.repeat(64),
+        sizeBytes: readFileSync(workerPath).byteLength,
+        sha256: sha256(workerPath),
         protocolVersion: 1,
+        configuration: 'release',
+      },
+      cudaPayloadManifest: {
+        path: 'resources\\whisper-backends\\payload-manifest.json',
+        sizeBytes: readFileSync(payloadManifestPath).byteLength,
+        sha256: sha256(payloadManifestPath),
+        schemaVersion: 1,
+        configuration: 'release',
       },
       cudaRuntime: {
-        files: [
-          { name: 'cublas64_12.dll', path: 'resources\\whisper-backends\\cublas64_12.dll', sizeBytes: 1, sha256: '3'.repeat(64) },
-          { name: 'cublasLt64_12.dll', path: 'resources\\whisper-backends\\cublasLt64_12.dll', sizeBytes: 1, sha256: '4'.repeat(64) },
-          { name: 'cudart64_12.dll', path: 'resources\\whisper-backends\\cudart64_12.dll', sizeBytes: 1, sha256: '5'.repeat(64) },
-        ],
+        files: runtimeFileNames.map((name) => ({
+          name,
+          path: `resources\\whisper-backends\\${name}`,
+          sizeBytes: readFileSync(join(payloadRoot, name)).byteLength,
+          sha256: sha256(join(payloadRoot, name)),
+        })),
         driverLibraryBundled: false,
         distributionApproval: 'pending',
       },
     },
-    forbiddenFindings: [],
+    forbiddenFindings: {
+      secrets: [],
+      e2eMarkers: [],
+      absolutePaths: [],
+      userData: [],
+      forbiddenDlls: [],
+      modelFiles: [],
+      sourceMaps: [],
+      unscannedTextFiles: [],
+      unreadableTextFiles: [],
+      debugArtifacts: [],
+    },
     generatedAt: '2026-08-11T00:00:00.000Z',
     generator: { id: 'rain-release-artifact-generator', version: '1.0.0' },
+  }))
+  const controlledBuildRecordPath = join(root, 'controlled-build-record.json')
+  writeFileSync(controlledBuildRecordPath, JSON.stringify({
+    schemaVersion: 1,
+    repository: 'llbz510/rain',
+    sourceRepository,
+    targetCommit,
+    toolingCommit,
+    cleanTree: true,
+    generator,
+    buildMetadata,
+    workflow: {
+      file: '.github/workflows/controlled-gpu-artifact-build.yml',
+      definitionCommit: toolingCommit,
+      runUrl: 'https://github.com/llbz510/rain/actions/runs/123/attempts/1',
+      event: 'workflow_dispatch',
+      ref: 'refs/heads/master',
+      runId: '123',
+      runAttempt: 1,
+    },
+    masterReachability: {
+      candidate: true,
+      tooling: true,
+    },
+    toolchain,
+    coreArtifact: {
+      name: 'rain-candidate-core',
+      digest: 'c'.repeat(64),
+    },
+    installer: {
+      fileName: 'Rain_0.1.0_x64-setup.exe',
+      sha256: installerHash,
+      sizeBytes: readFileSync(installerPath).byteLength,
+      kind: 'nsis-windows-x64',
+    },
+    artifactManifest: {
+      fileName: 'artifact-manifest.json',
+      sizeBytes: readFileSync(artifactManifestPath).byteLength,
+      sha256: sha256(artifactManifestPath),
+    },
   }))
   return {
     installerPath,
     installerHash,
     artifactManifestPath,
     artifactManifestHash: sha256(artifactManifestPath),
+    controlledBuildRecordPath,
+    installedRoot,
     targetCommit,
+    toolingCommit,
   }
+}
+
+function syncArtifactFixtureRecordManifestIdentity(candidate: {
+  artifactManifestPath: string
+  controlledBuildRecordPath: string
+}) {
+  const record = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
+  record.artifactManifest.fileName = 'artifact-manifest.json'
+  record.artifactManifest.sizeBytes = readFileSync(candidate.artifactManifestPath).byteLength
+  record.artifactManifest.sha256 = sha256(candidate.artifactManifestPath)
+  writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(record))
 }
 
 function invokeRunner(arguments_: string[]) {
@@ -944,7 +1297,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     }
   })
 
-  it('requires independent installer and controlled-build artifact-manifest trust inputs', () => {
+  it('requires independent installer, artifact-manifest and controlled-build-record trust inputs', () => {
     const script = `(Get-Command -Name '${psLiteral(runnerPath)}').Parameters.Keys | ConvertTo-Json -Compress`
     const result = spawnSync(powerShellExecutable, [
       '-NoProfile',
@@ -959,6 +1312,12 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(result.status).toBe(0)
     expect(JSON.parse(result.stdout)).toContain('ArtifactManifestPath')
     expect(JSON.parse(result.stdout)).toContain('ExpectedArtifactManifestSha256')
+    expect(JSON.parse(result.stdout)).toContain('ControlledBuildRecordPath')
+    const runner = readFileSync(runnerPath, 'utf8')
+    const contract = readFileSync(contractModulePath, 'utf8')
+    expect(runner).toContain('Assert-ReleaseEvidenceControlToolingCheckout')
+    expect(contract).toContain('status --porcelain --untracked-files=all')
+    expect(runner).not.toContain('function Assert-TargetCheckout')
   })
 
   it('accepts only a controlled-build record whose manifest hash, metadata, target and installer bytes all match', async () => {
@@ -972,6 +1331,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       expectedInstallerSha256: candidate.installerHash,
       artifactManifestPath: candidate.artifactManifestPath,
       expectedArtifactManifestSha256: candidate.artifactManifestHash,
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
     })
     expect(accepted.status).toBe(0)
     expect(accepted.output).toMatchObject({
@@ -979,12 +1339,42 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       value: {
         targetCommit: candidate.targetCommit,
         installer: { sha256: candidate.installerHash, fileName: 'Rain_0.1.0_x64-setup.exe' },
+        controlledBuildRecord: {
+          toolchain: {
+            runner: { image: 'windows-2025', architecture: 'X64' },
+            node: { version: 'v24.0.0' },
+            npm: { version: '11.0.0' },
+            cargo: { version: 'cargo 1.96.1' },
+            msvc: { version: '14.44.35207', hostArchitecture: 'x64', targetArchitecture: 'x64' },
+            nsis: { version: 'v3.11' },
+            downloads: {
+              cmake: { sha256: '89e87f3e297b70f1349ee7c5f90783ca96efb986b70c558c799c3c9b1b716456' },
+            },
+          },
+        },
       },
     })
+
+    const missingPinnedHash = createArtifactFixture(newTemporaryRoot())
+    const recordWithMissingPinnedHash = JSON.parse(readFileSync(missingPinnedHash.controlledBuildRecordPath, 'utf8'))
+    delete recordWithMissingPinnedHash.toolchain.downloads.cmake.sha256
+    writeFileSync(missingPinnedHash.controlledBuildRecordPath, JSON.stringify(recordWithMissingPinnedHash))
+    const rejectedPinnedHash = await invokeContract({
+      operation: 'provenance',
+      installerPath: missingPinnedHash.installerPath,
+      expectedTargetCommit: missingPinnedHash.targetCommit,
+      expectedInstallerSha256: missingPinnedHash.installerHash,
+      artifactManifestPath: missingPinnedHash.artifactManifestPath,
+      expectedArtifactManifestSha256: missingPinnedHash.artifactManifestHash,
+      controlledBuildRecordPath: missingPinnedHash.controlledBuildRecordPath,
+    })
+    expect(rejectedPinnedHash.status).toBe(1)
+    expect(rejectedPinnedHash.output.error).toMatch(/downloads cmake.*sha256/i)
 
     const mismatched = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
     mismatched.targetCommit = 'b'.repeat(40)
     writeFileSync(candidate.artifactManifestPath, JSON.stringify(mismatched))
+    syncArtifactFixtureRecordManifestIdentity(candidate)
     const rejected = await invokeContract({
       operation: 'provenance',
       installerPath: candidate.installerPath,
@@ -992,6 +1382,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       expectedInstallerSha256: candidate.installerHash,
       artifactManifestPath: candidate.artifactManifestPath,
       expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
     })
     expect(rejected.status).toBe(1)
     expect(rejected.output.error).toContain('Artifact manifest target commit does not match the expected target commit')
@@ -1000,6 +1391,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     controlledBuildMissing.targetCommit = candidate.targetCommit
     delete controlledBuildMissing.controlledBuild.cleanTree
     writeFileSync(candidate.artifactManifestPath, JSON.stringify(controlledBuildMissing))
+    syncArtifactFixtureRecordManifestIdentity(candidate)
     const missingMetadata = await invokeContract({
       operation: 'provenance',
       installerPath: candidate.installerPath,
@@ -1007,6 +1399,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       expectedInstallerSha256: candidate.installerHash,
       artifactManifestPath: candidate.artifactManifestPath,
       expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
     })
     expect(missingMetadata.status).toBe(1)
     expect(missingMetadata.output.error).toContain("Controlled-build record is missing required property 'cleanTree'")
@@ -1018,9 +1411,234 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       expectedInstallerSha256: candidate.installerHash,
       artifactManifestPath: candidate.artifactManifestPath,
       expectedArtifactManifestSha256: '0'.repeat(64),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
     })
     expect(wrongHash.status).toBe(1)
-    expect(wrongHash.output.error).toContain('Artifact manifest SHA-256 does not match the expected controlled-build record')
+    expect(wrongHash.output.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
+  }, 15_000)
+
+  it('rejects manifest installation proof that persists a raw installation root or /D argument', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+    manifest.installationProof.installRoot = 'C:\\runner\\temp\\installed-rain'
+    manifest.installationProof.silentInstall.arguments = ['/S', '/D=C:\\runner\\temp\\installed-rain']
+    writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+    syncArtifactFixtureRecordManifestIdentity(candidate)
+
+    const rejected = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toContain('must not contain raw installation paths or arguments')
+  })
+
+  it('rejects provenance whose CMake version is not exactly the pinned 4.0.0', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+    const record = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
+    manifest.controlledBuild.toolchain.cmake.version = '4.0.1'
+    record.toolchain.cmake.version = '4.0.1'
+    writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+    record.artifactManifest.sizeBytes = readFileSync(candidate.artifactManifestPath).byteLength
+    record.artifactManifest.sha256 = sha256(candidate.artifactManifestPath)
+    writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(record))
+
+    const rejected = await invokeContract({
+      operation: 'provenance', installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit, expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toContain('must record exactly CMake 4.0.0')
+  })
+
+  it('requires release payload-manifest configuration and the exact additive hygiene scopes', async () => {
+    const cases: Array<{ name: string; mutate: (manifest: any) => void; error: RegExp }> = [
+      {
+        name: 'missing payload manifest contract',
+        mutate: (manifest) => { delete manifest.resources.cudaPayloadManifest },
+        error: /cudaPayloadManifest/i,
+      },
+      {
+        name: 'non-release payload manifest',
+        mutate: (manifest) => { manifest.resources.cudaPayloadManifest.configuration = 'debug' },
+        error: /payload manifest configuration must be release/i,
+      },
+      {
+        name: 'missing hygiene scopes',
+        mutate: (manifest) => { delete manifest.hygieneScopes },
+        error: /hygieneScopes/i,
+      },
+      {
+        name: 'tampered hygiene scopes',
+        mutate: (manifest) => { manifest.hygieneScopes = ['installed-tree', 'different-scope'] },
+        error: /exactly installed-tree and installer-archive/i,
+      },
+    ]
+
+    for (const testCase of cases) {
+      const candidate = createArtifactFixture(newTemporaryRoot())
+      const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+      testCase.mutate(manifest)
+      writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+      syncArtifactFixtureRecordManifestIdentity(candidate)
+
+      const rejected = await invokeContract({
+        operation: 'provenance',
+        installerPath: candidate.installerPath,
+        expectedTargetCommit: candidate.targetCommit,
+        expectedInstallerSha256: candidate.installerHash,
+        artifactManifestPath: candidate.artifactManifestPath,
+        expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+        controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+      })
+      expect(rejected.status, testCase.name).toBe(1)
+      expect(rejected.output.error, testCase.name).toMatch(testCase.error)
+    }
+  }, 15_000)
+
+  it('binds runner control tooling to a clean canonical Git checkout, including untracked files', async () => {
+    const fixture = createCanonicalToolingCheckout(newTemporaryRoot())
+
+    const accepted = await invokeContract({
+      operation: 'control-tooling-checkout',
+      repoRoot: fixture.checkout,
+      expectedCommit: fixture.commit,
+    })
+    assertContractSucceeded(accepted)
+    expect(accepted.output.value).toBe(fixture.commit)
+
+    fixture.runGit(['-C', fixture.checkout, 'remote', 'set-url', 'origin', 'https://github.com/untrusted-fork/rain.git'])
+    const forked = await invokeContract({
+      operation: 'control-tooling-checkout',
+      repoRoot: fixture.checkout,
+      expectedCommit: fixture.commit,
+    })
+    expect(forked.status).toBe(1)
+    expect(forked.output.error).toContain('origin is not canonical')
+
+    fixture.runGit(['-C', fixture.checkout, 'remote', 'set-url', 'origin', 'https://github.com/llbz510/rain.git'])
+    writeFileSync(join(fixture.checkout, 'untracked-control-tool.txt'), 'must fail closed')
+    const dirty = await invokeContract({
+      operation: 'control-tooling-checkout',
+      repoRoot: fixture.checkout,
+      expectedCommit: fixture.commit,
+    })
+    expect(dirty.status).toBe(1)
+    expect(dirty.output.error).toContain('Control tooling checkout is not clean')
+  })
+
+  it('rejects controlled-build provenance from a fork even when candidate bytes and hashes otherwise match', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const record = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
+    record.repository = 'untrusted-fork/rain'
+    writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(record))
+
+    const rejected = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: candidate.artifactManifestHash,
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toContain('Controlled-build record repository must be llbz510/rain')
+  })
+
+  it('rejects a controlled-build record whose explicit CUDA toolchain differs from the core manifest', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const record = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
+    record.toolchain.cuda.architectures = ['89']
+    writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(record))
+
+    const rejected = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: candidate.artifactManifestHash,
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toContain('Controlled-build record toolchain cuda.architectures must be exactly 120')
+  })
+
+  it('requires an independent record to bind candidate target provenance separately from tooling provenance', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const accepted = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: candidate.artifactManifestHash,
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(accepted.status).toBe(0)
+    expect(accepted.output.value).toMatchObject({
+      targetCommit: candidate.targetCommit,
+      toolingCommit: candidate.toolingCommit,
+      controlledBuildRecord: { targetCommit: candidate.targetCommit, toolingCommit: candidate.toolingCommit },
+    })
+
+    const missingCoreArtifact = createArtifactFixture(newTemporaryRoot())
+    const recordWithoutCoreArtifact = JSON.parse(readFileSync(missingCoreArtifact.controlledBuildRecordPath, 'utf8'))
+    delete recordWithoutCoreArtifact.coreArtifact
+    writeFileSync(missingCoreArtifact.controlledBuildRecordPath, JSON.stringify(recordWithoutCoreArtifact))
+    const rejectedMissingCoreArtifact = await invokeContract({
+      operation: 'provenance',
+      installerPath: missingCoreArtifact.installerPath,
+      expectedTargetCommit: missingCoreArtifact.targetCommit,
+      expectedInstallerSha256: missingCoreArtifact.installerHash,
+      artifactManifestPath: missingCoreArtifact.artifactManifestPath,
+      expectedArtifactManifestSha256: missingCoreArtifact.artifactManifestHash,
+      controlledBuildRecordPath: missingCoreArtifact.controlledBuildRecordPath,
+    })
+    expect(rejectedMissingCoreArtifact.status).toBe(1)
+    expect(rejectedMissingCoreArtifact.output.error).toContain("Controlled-build record is missing required property 'coreArtifact'")
+
+    const wrongManifestHash = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
+    wrongManifestHash.artifactManifest.sha256 = '0'.repeat(64)
+    writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(wrongManifestHash))
+    const rejectedHash = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: candidate.artifactManifestHash,
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejectedHash.status).toBe(1)
+    expect(rejectedHash.output.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
+
+    const wrongTooling = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
+    wrongTooling.artifactManifest.sha256 = candidate.artifactManifestHash
+    wrongTooling.toolingCommit = 'c'.repeat(40)
+    wrongTooling.workflow.definitionCommit = wrongTooling.toolingCommit
+    writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(wrongTooling))
+    const rejectedTooling = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: candidate.artifactManifestHash,
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejectedTooling.status).toBe(1)
+    expect(rejectedTooling.output.error).toContain('Controlled-build record tooling commit does not match artifact manifest tooling commit')
   })
 
   it('validates provenance without PowerShell module autoload or Get-FileHash', async () => {
@@ -1034,6 +1652,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       expectedInstallerSha256: candidate.installerHash,
       artifactManifestPath: candidate.artifactManifestPath,
       expectedArtifactManifestSha256: candidate.artifactManifestHash,
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
     })
     assertContractSucceeded(result)
     expect(result.output.value.installer.sha256).toBe(candidate.installerHash)
@@ -1078,6 +1697,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
       testCase.mutate(manifest)
       writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+      syncArtifactFixtureRecordManifestIdentity(candidate)
       const result = await invokeContract({
         operation: 'provenance',
         installerPath: candidate.installerPath,
@@ -1085,11 +1705,72 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
         expectedInstallerSha256: candidate.installerHash,
         artifactManifestPath: candidate.artifactManifestPath,
         expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+        controlledBuildRecordPath: candidate.controlledBuildRecordPath,
       })
       expect(result.status, testCase.name).toBe(1)
       expect(result.output.error, testCase.name).toContain(testCase.error)
     }
   }, 15_000)
+
+  it('refuses a release artifact manifest unless every forbidden-findings category is present and empty', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+    manifest.forbiddenFindings.sourceMaps = ['resources/frontend.js.map']
+    writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+    syncArtifactFixtureRecordManifestIdentity(candidate)
+
+    const rejected = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toContain('Artifact manifest forbiddenFindings.sourceMaps must be empty')
+  })
+
+  it('refuses a release artifact manifest when a forbidden-findings category is omitted', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+    delete manifest.forbiddenFindings.unreadableTextFiles
+    writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+    syncArtifactFixtureRecordManifestIdentity(candidate)
+
+    const rejected = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toContain("Artifact manifest forbiddenFindings is missing required property 'unreadableTextFiles'")
+  })
+
+  it('fails closed when a declared forbidden-findings category is null rather than an empty array', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+    manifest.forbiddenFindings.unreadableTextFiles = null
+    writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+    syncArtifactFixtureRecordManifestIdentity(candidate)
+
+    const rejected = await invokeContract({
+      operation: 'provenance',
+      installerPath: candidate.installerPath,
+      expectedTargetCommit: candidate.targetCommit,
+      expectedInstallerSha256: candidate.installerHash,
+      artifactManifestPath: candidate.artifactManifestPath,
+      expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+      controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+    })
+    expect(rejected.status).toBe(1)
+    expect(rejected.output.error).toContain('Artifact manifest forbiddenFindings.unreadableTextFiles must be an empty array, not null')
+  })
 
   it('constructs a raw final NSIS install-directory argument for paths with spaces', async () => {
     const destination = 'C:\\Program Files\\Rain Evidence Install'
@@ -1110,6 +1791,135 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     })
     expect(processInvocation.output.value.argumentList.at(-1)).not.toContain('"')
   })
+
+  it('uses a unique runner-temporary NSIS install root and verifies the tree created by the installer process', async () => {
+    const temporaryRoot = newTemporaryRoot()
+    const result = await invokeContract({ operation: 'nsis-install-and-verify', temporaryRoot })
+
+    assertContractSucceeded(result)
+    expect(result.output.value.installRoot).toMatch(new RegExp(`^${temporaryRoot.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\\\rain-nsis-installed-[0-9a-f]{32}$`, 'i'))
+    expect(realpathSync.native(result.output.value.mainExecutable)).toBe(realpathSync.native(join(result.output.value.installRoot, 'rain.exe')))
+    expect(realpathSync.native(result.output.value.payloadManifestPath)).toBe(realpathSync.native(join(result.output.value.installRoot, 'resources', 'whisper-backends', 'payload-manifest.json')))
+    expect(existsSync(result.output.value.mainExecutable)).toBe(true)
+    expect(existsSync(result.output.value.payloadManifestPath)).toBe(true)
+    expect(result.output.value.process).toMatchObject({ wait: true, passThru: true, windowStyle: 'Hidden' })
+    expect(result.output.value.process.argumentList).toHaveLength(2)
+    expect(result.output.value.process.argumentList[0]).toBe('/S')
+    expect(result.output.value.process.argumentList[1]).toMatch(/^\/D=.+/)
+    const processInstallRoot = result.output.value.process.argumentList[1].slice(3)
+    expect(realpathSync.native(processInstallRoot)).toBe(realpathSync.native(result.output.value.installRoot))
+  })
+
+  it('removes a partial NSIS install tree when post-install payload verification fails', async () => {
+    const temporaryRoot = newTemporaryRoot()
+    const result = await invokeContract({ operation: 'nsis-install-and-verify-missing-payload', temporaryRoot })
+
+    expect(result.status).toBe(1)
+    expect(result.output.error).toContain('Expected exactly one CUDA payload manifest after NSIS installation, found 0')
+    expect(readdirSync(temporaryRoot).filter((name) => name.startsWith('rain-nsis-installed-'))).toEqual([])
+  })
+
+  it('attempts the generated uninstaller even when post-install validation fails', async () => {
+    const temporaryRoot = newTemporaryRoot()
+    const result = await invokeContract({ operation: 'nsis-install-validation-failure-uninstalls', temporaryRoot })
+    expect(result.status).toBe(1)
+    expect(result.output.error).toContain('basic PE artifact')
+    expect(readFileSync(join(temporaryRoot, 'uninstall-attempted.txt'), 'utf8')).toBe('/S')
+    expect(readdirSync(temporaryRoot).filter((name) => name.startsWith('rain-nsis-installed-'))).toEqual([])
+  })
+
+  it('rejects an I386 installed Rain executable even though an NSIS bootstrapper may be I386', async () => {
+    const temporaryRoot = newTemporaryRoot()
+    const result = await invokeContract({ operation: 'nsis-install-and-verify-i386-main', temporaryRoot })
+
+    expect(result.status).toBe(1)
+    expect(result.output.error).toContain('Installed Rain main executable must be an AMD64 PE artifact')
+    expect(readdirSync(temporaryRoot).filter((name) => name.startsWith('rain-nsis-installed-'))).toEqual([])
+  })
+
+  it('silently invokes the generated uninstaller, waits for exit zero, and verifies program payload removal', async () => {
+    const temporaryRoot = newTemporaryRoot()
+    const result = await invokeContract({ operation: 'nsis-install-uninstall-and-verify', temporaryRoot })
+
+    assertContractSucceeded(result)
+    expect(result.output.value.installation.uninstallerPath).toBe(join(result.output.value.installation.installRoot, 'uninstall.exe'))
+    expect(result.output.value.state.uninstall).toMatchObject({
+      filePath: join(result.output.value.installation.installRoot, 'uninstall.exe'),
+      argumentList: ['/S'],
+      wait: true,
+      passThru: true,
+      windowStyle: 'Hidden',
+    })
+    expect(result.output.value.state.sideEffects).toEqual(['before-install', 'after-uninstall'])
+    expect(result.output.value.uninstallation).toMatchObject({
+      programPayloadRemoved: true,
+      process: { ExitCode: 0 },
+    })
+    expect(existsSync(join(result.output.value.installation.installRoot, 'rain.exe'))).toBe(false)
+    expect(existsSync(join(result.output.value.installation.installRoot, 'resources', 'whisper-backends', 'payload-manifest.json'))).toBe(false)
+  })
+
+  it('fails closed when a generated NSIS uninstaller exits nonzero', async () => {
+    const installRoot = join(newTemporaryRoot(), 'installed')
+    const result = await invokeContract({ operation: 'nsis-uninstall-failure', installRoot })
+
+    expect(result.status).toBe(1)
+    expect(result.output.error).toContain('NSIS uninstaller failed with exit code 7')
+  })
+
+  it('rejects any residual program file left anywhere under the install root', async () => {
+    const installRoot = join(newTemporaryRoot(), 'installed')
+    const result = await invokeContract({ operation: 'nsis-uninstall-residual-file', installRoot })
+    expect(result.status).toBe(1)
+    expect(result.output.error).toContain('rogue-program.dll')
+  })
+
+  it('aggregates a nonzero uninstaller exit, whole-root residue, system side effects, and owned-root cleanup failure', async () => {
+    const installRoot = join(newTemporaryRoot(), 'installed')
+    const result = await invokeContract({ operation: 'nsis-uninstall-combined-failure', installRoot })
+
+    expect(result.status).toBe(1)
+    expect(result.output.error).toContain('NSIS uninstaller failed with exit code 7')
+    expect(result.output.error).toContain('rogue-program.dll')
+    expect(result.output.error).toContain('system-side-effect snapshot')
+    expect(result.output.error).toContain('simulated disposable-root cleanup failure')
+  })
+
+  it('reconciles every declared release artifact file against the real installed tree before runtime evidence', async () => {
+    const acceptedCandidate = createArtifactFixture(newTemporaryRoot())
+    const accepted = await invokeContract({
+      operation: 'installed-artifact-reconciliation',
+      installedRoot: acceptedCandidate.installedRoot,
+      artifactManifestPath: acceptedCandidate.artifactManifestPath,
+    })
+    assertContractSucceeded(accepted)
+    expect(accepted.output.value.files.map((file: { relativePath: string }) => file.relativePath).sort()).toEqual([
+      'Rain.exe',
+      'resources\\whisper-backends\\cublas64_12.dll',
+      'resources\\whisper-backends\\cublasLt64_12.dll',
+      'resources\\whisper-backends\\cudart64_12.dll',
+      'resources\\whisper-backends\\payload-manifest.json',
+      'resources\\whisper-backends\\rain-whisper-cuda.exe',
+    ])
+
+    const cases = [
+      { name: 'main executable', relativePath: 'Rain.exe' },
+      { name: 'CUDA worker', relativePath: 'resources\\whisper-backends\\rain-whisper-cuda.exe' },
+      { name: 'CUDA runtime DLL', relativePath: 'resources\\whisper-backends\\cudart64_12.dll' },
+      { name: 'CUDA payload manifest', relativePath: 'resources\\whisper-backends\\payload-manifest.json' },
+    ] as const
+    for (const testCase of cases) {
+      const candidate = createArtifactFixture(newTemporaryRoot())
+      writeFileSync(join(candidate.installedRoot, ...testCase.relativePath.split('\\')), `tampered:${testCase.name}`)
+      const rejected = await invokeContract({
+        operation: 'installed-artifact-reconciliation',
+        installedRoot: candidate.installedRoot,
+        artifactManifestPath: candidate.artifactManifestPath,
+      })
+      expect(rejected.status, testCase.name).toBe(1)
+      expect(rejected.output.error, testCase.name).toContain('Installed artifact file does not match release manifest')
+    }
+  }, 15_000)
 
   it('requires an exact, path-safe bidirectional installed CUDA payload set', async () => {
     const validRoot = newTemporaryRoot()
@@ -1574,6 +2384,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     const badProvenance = await invokeRunner([
       '-InstallerPath', candidate.installerPath,
       '-ArtifactManifestPath', candidate.artifactManifestPath,
+      '-ControlledBuildRecordPath', candidate.controlledBuildRecordPath,
       '-ExpectedArtifactManifestSha256', '0'.repeat(64),
       '-WhisperModelPath', missingSecretModelPath,
       '-ExpectedTargetCommit', candidate.targetCommit,
@@ -1584,13 +2395,14 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(badProvenance.status).toBe(1)
     const badProvenanceManifest = JSON.parse(readFileSync(join(badProvenanceRoot, 'manifest.json'), 'utf8'))
     expect(badProvenanceManifest).toMatchObject({ result: 'failed', phase: 'input-validation' })
-    expect(badProvenanceManifest.error).toContain('Artifact manifest SHA-256 does not match the expected controlled-build record')
+    expect(badProvenanceManifest.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
 
     writeFileSync(missingSecretModelPath, 'not a real model, only a runner input fixture')
     const outputRoot = join(root, 'runner-target-checkout-blocked')
     const result = await invokeRunner([
       '-InstallerPath', candidate.installerPath,
       '-ArtifactManifestPath', candidate.artifactManifestPath,
+      '-ControlledBuildRecordPath', candidate.controlledBuildRecordPath,
       '-ExpectedArtifactManifestSha256', candidate.artifactManifestHash,
       '-WhisperModelPath', missingSecretModelPath,
       '-ExpectedTargetCommit', candidate.targetCommit,
@@ -1603,19 +2415,16 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(existsSync(manifestPath)).toBe(true)
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     expect(manifest.result).toBe('failed')
-    expect(['runtime-adapter-readiness', 'target-checkout']).toContain(manifest.phase)
-    if (manifest.phase === 'runtime-adapter-readiness') {
-      expect(manifest.error).toContain('Production process-event job readiness failed closed')
-    } else {
-      expect(manifest.error).toContain('Target checkout mismatch')
-    }
+    expect(manifest.phase).toBe('control-tooling-checkout')
+    expect(manifest.error).toContain('Control tooling checkout mismatch')
     expect(manifest.expectedArtifactManifestSha256).toBe(candidate.artifactManifestHash)
     const partial = JSON.parse(readFileSync(join(outputRoot, 'partial-manifest.json'), 'utf8'))
-    if (manifest.phase === 'target-checkout') {
-      expect(partial.phases).toEqual(expect.arrayContaining([
-        expect.objectContaining({ phase: 'runtime-adapter-readiness', result: 'passed' }),
-      ]))
-    }
+    expect(partial.phases).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: 'input-validation', result: 'passed' }),
+    ]))
+    expect(partial.phases).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: 'install' }),
+    ]))
     const persistedText = allFileNames(outputRoot).map((path) => readFileSync(path, 'utf8')).join('\n')
     expect(persistedText).not.toContain('sk-secret')
     expect(persistedText).not.toContain('person@example.com')

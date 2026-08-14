@@ -13,6 +13,8 @@ param(
   [Alias('InstallerAttestationPath')]
   [string]$ArtifactManifestPath,
   [Parameter(Mandatory = $true)]
+  [string]$ControlledBuildRecordPath,
+  [Parameter(Mandatory = $true)]
   [ValidatePattern('^[0-9a-fA-F]{64}$')]
   [string]$ExpectedArtifactManifestSha256,
   [string]$OutputRoot = '',
@@ -60,10 +62,11 @@ $memoryHeadroomBytes = 512L * 1024L * 1024L
 $requiredEvidencePhases = @(
   'install-directory-ownership',
   'input-validation',
+  'control-tooling-checkout',
   'runtime-adapter-readiness',
-  'target-checkout',
   'host-qualification',
   'install',
+  'install-reconciliation',
   'payload-validation',
   'driver-start',
   'startup',
@@ -309,18 +312,6 @@ function Find-ProbeMedia([string]$InstalledRoot) {
   return $matches[0].FullName
 }
 
-function Assert-TargetCheckout([string]$ExpectedCommit) {
-  $actual = (& git -C $repoRoot rev-parse HEAD | Out-String).Trim().ToLowerInvariant()
-  if ($actual -ne $ExpectedCommit.ToLowerInvariant()) {
-    throw "Target checkout mismatch: expected $ExpectedCommit, found $actual."
-  }
-  $trackedStatus = (& git -C $repoRoot status --porcelain --untracked-files=no | Out-String).Trim()
-  if (-not [string]::IsNullOrWhiteSpace($trackedStatus)) {
-    throw "Tracked checkout is not clean at target commit $actual."
-  }
-  return $actual
-}
-
 function Assert-NvidiaEnvironment {
   $controllers = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | ForEach-Object {
     [ordered]@{
@@ -432,8 +423,10 @@ try {
     -ExpectedTargetCommit $ExpectedTargetCommit `
     -ExpectedInstallerSha256 $ExpectedInstallerSha256 `
     -ArtifactManifestPath $ArtifactManifestPath `
-    -ExpectedArtifactManifestSha256 $ExpectedArtifactManifestSha256
+    -ExpectedArtifactManifestSha256 $ExpectedArtifactManifestSha256 `
+    -ControlledBuildRecordPath $ControlledBuildRecordPath
   $installer = [string]$provenance.installer.path
+  $targetCommit = [string]$provenance.targetCommit
   $modelPath = (Resolve-Path -LiteralPath $WhisperModelPath).Path
   $modelItem = Get-Item -LiteralPath $modelPath
   $installerHash = [string]$provenance.installer.sha256
@@ -442,16 +435,17 @@ try {
     expectedTargetCommit = $ExpectedTargetCommit.ToLowerInvariant()
     installer = $provenance.installer
     artifactManifest = $provenance.artifactManifest
+    controlledBuildRecord = $provenance.controlledBuildRecord
     evidenceModel = @{ path = $modelPath; sizeBytes = $modelItem.Length; sha256 = $modelHash }
   }) | Out-Null
+
+  $phase = 'control-tooling-checkout'
+  $toolingCommit = Assert-ReleaseEvidenceControlToolingCheckout -RepoRoot $repoRoot -ExpectedCommit ([string]$provenance.toolingCommit)
+  Write-ReleaseEvidencePhase -Writer $evidenceWriter -Phase $phase -Result 'passed' -Data @{ toolingCommit = $toolingCommit; candidateTargetCommit = $targetCommit } | Out-Null
 
   $phase = 'runtime-adapter-readiness'
   $runtimeAdapterReadiness = Assert-ReleaseEvidenceRuntimeAdapterReadiness
   Write-ReleaseEvidencePhase -Writer $evidenceWriter -Phase $phase -Result 'passed' -Data $runtimeAdapterReadiness | Out-Null
-
-  $phase = 'target-checkout'
-  $targetCommit = Assert-TargetCheckout $ExpectedTargetCommit
-  Write-ReleaseEvidencePhase -Writer $evidenceWriter -Phase $phase -Result 'passed' -Data @{ targetCommit = $targetCommit } | Out-Null
   $installRoot = (New-Item -ItemType Directory -Force -Path $installRoot).FullName
 
   $tauriDriver = Require-Command 'tauri-driver' 'Install with: cargo install tauri-driver --version 2.0.6 --locked'
@@ -473,6 +467,13 @@ try {
     bundledProbeMedia = $probeMedia
   } | Out-Null
 
+  $phase = 'install-reconciliation'
+  $installedArtifactReconciliation = Assert-InstalledArtifactManifest -InstalledRoot $installedRoot -ArtifactManifestPath $ArtifactManifestPath
+  Write-ReleaseEvidencePhase -Writer $evidenceWriter -Phase $phase -Result 'passed' -Data @{
+    installedRoot = $installedRoot
+    reconciledFiles = @($installedArtifactReconciliation.files)
+  } | Out-Null
+
   $mainImports = Get-PeImportText $installedBinary
   Assert-ReleaseEvidenceMainExecutableImports -ImportText $mainImports | Out-Null
 
@@ -491,6 +492,7 @@ try {
       cudaImportsPresent = $false
     }
     installedRoot = $installedRoot
+    installedArtifactReconciliation = $installedArtifactReconciliation
     payloadManifest = $payloadManifestPath
     payloadFiles = @($payloadFiles)
     driverLibraryBundled = $false

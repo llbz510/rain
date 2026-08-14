@@ -28,6 +28,8 @@ $script:CudaOrDriverDllPrefixes = @(
   'nvperf',
   'npp',
   'nvtx'
+  'nvtoolsext'
+  'nvopencl'
 )
 $script:CudaOrDriverDllNamePattern = "(?i)^(?:$([string]::Join('|', $script:CudaOrDriverDllPrefixes))).*\.dll$"
 $script:CancellationFixtureSampleRateHz = 16000
@@ -38,6 +40,32 @@ $script:CancellationFixtureMinimumDurationSeconds = 120
 $script:CancellationFixtureCancelWindowMilliseconds = 2000
 $script:CancellationFixtureMaximumBytes = 6L * 1024L * 1024L
 $script:CancellationFixtureSha256 = '5545b8236a5eb7a03694955687d8adca43490b2f31efdb7f635a2c7409857045'
+$script:CanonicalRainRepository = 'llbz510/rain'
+$script:CanonicalRainOrigin = 'https://github.com/llbz510/rain.git'
+$script:ArtifactForbiddenFindingCategories = @(
+  'secrets', 'e2eMarkers', 'absolutePaths', 'userData', 'forbiddenDlls',
+  'modelFiles', 'sourceMaps', 'unscannedTextFiles', 'unreadableTextFiles', 'debugArtifacts'
+)
+$script:RequiredControlledCudaArchitecture = '120'
+$script:BlackwellArchitectureBasisUrl = 'https://developer.nvidia.com/cuda-gpus'
+$script:PinnedControlledToolDownloads = [ordered]@{
+  cmake = [ordered]@{
+    url = 'https://github.com/Kitware/CMake/releases/download/v4.0.0/cmake-4.0.0-windows-x86_64.zip'
+    sha256 = '89e87f3e297b70f1349ee7c5f90783ca96efb986b70c558c799c3c9b1b716456'
+  }
+  cuda = [ordered]@{
+    url = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe'
+    sha256 = 'f0ca7cc7b4cea2fac2c4951819d2a9caea31e04000e9110e2048719525f8ea0e'
+  }
+  llvm = [ordered]@{
+    url = 'https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.7/LLVM-22.1.7-win64.exe'
+    sha256 = 'e091fcf965ce589c83c0f7c5356b2fcf3e658a8ec990bfcf79cce4389a0d1eb3'
+  }
+  nsis = [ordered]@{
+    url = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
+    sha256 = '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a'
+  }
+}
 
 function Resolve-ReleaseEvidenceFile([string]$Path, [string]$Description) {
   if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -79,6 +107,40 @@ function Get-ReleaseEvidenceSha256([string]$Path) {
       if ($stream) { $stream.Dispose() }
     }
   }
+}
+
+function Assert-ReleaseEvidenceControlToolingCheckout {
+  param(
+    [Parameter(Mandatory = $true)][string]$RepoRoot,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$ExpectedCommit
+  )
+
+  $controlRoot = Resolve-ReleaseEvidenceDirectory $RepoRoot 'Control tooling checkout'
+  $git = Get-Command 'git.exe' -ErrorAction SilentlyContinue
+  if (-not $git) { $git = Get-Command 'git' -ErrorAction Stop }
+  $actual = (& $git.Source -C $controlRoot rev-parse HEAD 2>&1 | Out-String).Trim().ToLowerInvariant()
+  if ($LASTEXITCODE -ne 0 -or $actual -notmatch '^[0-9a-f]{40}$') {
+    throw "Could not resolve control tooling checkout HEAD: $actual"
+  }
+  if ($actual -ne $ExpectedCommit.ToLowerInvariant()) {
+    throw "Control tooling checkout mismatch: expected $ExpectedCommit, found $actual."
+  }
+
+  $canonicalOrigin = $script:CanonicalRainOrigin.TrimEnd('/')
+  $canonicalOriginWithoutGitSuffix = $canonicalOrigin.Substring(0, $canonicalOrigin.Length - 4)
+  $origin = (& $git.Source -C $controlRoot remote get-url origin 2>&1 | Out-String).Trim().TrimEnd('/')
+  if ($LASTEXITCODE -ne 0 -or $origin -notin @($canonicalOrigin, $canonicalOriginWithoutGitSuffix)) {
+    throw "Control tooling checkout origin is not canonical: $origin"
+  }
+
+  $status = (& $git.Source -C $controlRoot status --porcelain --untracked-files=all 2>&1 | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not inspect control tooling checkout cleanliness: $status"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($status)) {
+    throw "Control tooling checkout is not clean at tooling commit $actual."
+  }
+  return $actual
 }
 
 function Assert-ReleaseEvidenceTempRoot([string]$Path) {
@@ -863,20 +925,216 @@ function Assert-ReleaseEvidenceManifestNonBlankString([string]$Value, [string]$D
   return $Value
 }
 
+function Get-ReleaseEvidenceControlledToolchain($Toolchain, [string]$Description) {
+  $record = Get-ObjectProperty $Toolchain 'record' $Description
+  $recordFileName = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $record 'fileName' "$Description record")) "$Description record.fileName"
+  if ($recordFileName -ne [System.IO.Path]::GetFileName($recordFileName) -or $recordFileName.Contains(':') -or $recordFileName.Contains('..') -or $recordFileName -notmatch '(?i)\.json$') {
+    throw "$Description record.fileName must be a simple JSON file name."
+  }
+  $recordSize = [int64](Get-ObjectProperty $record 'sizeBytes' "$Description record")
+  if ($recordSize -lt 0) { throw "$Description record.sizeBytes must not be negative." }
+  $recordHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $record 'sha256' "$Description record")) "$Description record.sha256"
+
+  $cmake = Get-ObjectProperty $Toolchain 'cmake' $Description
+  $cmakeVersion = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $cmake 'version' "$Description cmake")) "$Description cmake.version"
+  $cmakeMinimumVersion = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $cmake 'minimumVersion' "$Description cmake")) "$Description cmake.minimumVersion"
+  try {
+    if ([version]$cmakeVersion -ne [version]'4.0.0' -or [version]$cmakeMinimumVersion -ne [version]'4.0.0') {
+      throw "$Description must record exactly CMake 4.0.0 with minimumVersion 4.0.0."
+    }
+  } catch [System.Management.Automation.RuntimeException] { throw }
+  catch { throw "$Description contains an invalid CMake version." }
+
+  $cuda = Get-ObjectProperty $Toolchain 'cuda' $Description
+  $cudaToolkitVersion = [string](Get-ObjectProperty $cuda 'toolkitVersion' "$Description cuda")
+  if ($cudaToolkitVersion -ne '12.9.1') { throw "$Description cuda.toolkitVersion must be 12.9.1." }
+  $architectures = @((Get-ObjectProperty $cuda 'architectures' "$Description cuda") | ForEach-Object { [string]$_ })
+  if ($architectures.Count -ne 1 -or $architectures[0] -ne $script:RequiredControlledCudaArchitecture) {
+    throw "$Description cuda.architectures must be exactly $script:RequiredControlledCudaArchitecture."
+  }
+  $architectureBasisUrl = [string](Get-ObjectProperty $cuda 'architectureBasisUrl' "$Description cuda")
+  if ($architectureBasisUrl -ne $script:BlackwellArchitectureBasisUrl) {
+    throw "$Description cuda.architectureBasisUrl must be $script:BlackwellArchitectureBasisUrl."
+  }
+
+  $versions = [ordered]@{}
+  foreach ($component in @('ninja', 'llvm', 'rust')) {
+    $componentValue = Get-ObjectProperty $Toolchain $component $Description
+    $versions[$component] = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $componentValue 'version' "$Description $component")) "$Description $component.version"
+  }
+
+  $runner = Get-ObjectProperty $Toolchain 'runner' $Description
+  $runnerFacts = [ordered]@{}
+  foreach ($field in @('image', 'imageVersion', 'os', 'osVersion', 'architecture')) {
+    $runnerFacts[$field] = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $runner $field "$Description runner")) "$Description runner.$field"
+  }
+  $hostedVersions = [ordered]@{}
+  foreach ($component in @('node', 'npm', 'cargo', 'nsis')) {
+    $componentValue = Get-ObjectProperty $Toolchain $component $Description
+    $hostedVersions[$component] = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $componentValue 'version' "$Description $component")) "$Description $component.version"
+  }
+  $msvc = Get-ObjectProperty $Toolchain 'msvc' $Description
+  $msvcVersion = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $msvc 'version' "$Description msvc")) "$Description msvc.version"
+  $msvcHostArchitecture = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $msvc 'hostArchitecture' "$Description msvc")) "$Description msvc.hostArchitecture"
+  $msvcTargetArchitecture = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $msvc 'targetArchitecture' "$Description msvc")) "$Description msvc.targetArchitecture"
+  if ($msvcHostArchitecture.ToLowerInvariant() -ne 'x64' -or $msvcTargetArchitecture.ToLowerInvariant() -ne 'x64') {
+    throw "$Description msvc.hostArchitecture and msvc.targetArchitecture must be x64."
+  }
+  $downloads = Get-ObjectProperty $Toolchain 'downloads' $Description
+  $normalizedDownloads = [ordered]@{}
+  foreach ($downloadName in $script:PinnedControlledToolDownloads.Keys) {
+    $expectedDownload = $script:PinnedControlledToolDownloads[$downloadName]
+    $download = Get-ObjectProperty $downloads $downloadName "$Description downloads"
+    $downloadUrl = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $download 'url' "$Description downloads $downloadName url")) "$Description downloads $downloadName.url"
+    $downloadHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $download 'sha256' "$Description downloads $downloadName sha256")) "$Description downloads $downloadName.sha256"
+    if ($downloadUrl -ne $expectedDownload.url) {
+      throw "$Description downloads $downloadName.url must be the pinned download URL."
+    }
+    if ($downloadHash -ne $expectedDownload.sha256) {
+      throw "$Description downloads $downloadName.sha256 must be the pinned download hash."
+    }
+    $normalizedDownloads[$downloadName] = [ordered]@{ url = $downloadUrl; sha256 = $downloadHash }
+  }
+  return [pscustomobject]@{
+    record = [ordered]@{ fileName = $recordFileName; sizeBytes = $recordSize; sha256 = $recordHash }
+    cmake = [ordered]@{ version = $cmakeVersion; minimumVersion = $cmakeMinimumVersion }
+    cuda = [ordered]@{ toolkitVersion = $cudaToolkitVersion; architectures = @($architectures); architectureBasisUrl = $architectureBasisUrl }
+    ninja = [ordered]@{ version = $versions['ninja'] }
+    llvm = [ordered]@{ version = $versions['llvm'] }
+    rust = [ordered]@{ version = $versions['rust'] }
+    runner = $runnerFacts
+    node = [ordered]@{ version = $hostedVersions['node'] }
+    npm = [ordered]@{ version = $hostedVersions['npm'] }
+    cargo = [ordered]@{ version = $hostedVersions['cargo'] }
+    msvc = [ordered]@{ version = $msvcVersion; hostArchitecture = $msvcHostArchitecture; targetArchitecture = $msvcTargetArchitecture }
+    nsis = [ordered]@{ version = $hostedVersions['nsis'] }
+    downloads = $normalizedDownloads
+  }
+}
+
 function Assert-CandidateArtifactProvenance {
   param(
     [Parameter(Mandatory = $true)][string]$InstallerPath,
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$ExpectedTargetCommit,
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedInstallerSha256,
     [Parameter(Mandatory = $true)][string]$ArtifactManifestPath,
-    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedArtifactManifestSha256
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedArtifactManifestSha256,
+    [Parameter(Mandatory = $true)][string]$ControlledBuildRecordPath
   )
 
   $installer = Resolve-ReleaseEvidenceFile $InstallerPath 'Installer'
   $artifactManifest = Resolve-ReleaseEvidenceFile $ArtifactManifestPath 'Artifact manifest'
+  $controlledBuildRecordPath = Resolve-ReleaseEvidenceFile $ControlledBuildRecordPath 'Controlled-build record'
+  try {
+    $controlledBuildRecord = Get-Content -LiteralPath $controlledBuildRecordPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  } catch {
+    throw "Controlled-build record is not valid JSON: $($_.Exception.Message)"
+  }
+  if ([int](Get-ObjectProperty $controlledBuildRecord 'schemaVersion' 'Controlled-build record') -ne 1) {
+    throw 'Controlled-build record schemaVersion must be 1.'
+  }
+  $recordRepository = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $controlledBuildRecord 'repository' 'Controlled-build record')) 'Controlled-build record repository'
+  if ($recordRepository -ne $script:CanonicalRainRepository) {
+    throw "Controlled-build record repository must be $script:CanonicalRainRepository."
+  }
+  $recordSourceRepository = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $controlledBuildRecord 'sourceRepository' 'Controlled-build record')) 'Controlled-build record sourceRepository'
+  if ($recordSourceRepository -ne $script:CanonicalRainOrigin) {
+    throw "Controlled-build record sourceRepository must be $script:CanonicalRainOrigin."
+  }
+  $recordTargetCommit = [string](Get-ObjectProperty $controlledBuildRecord 'targetCommit' 'Controlled-build record')
+  if ($recordTargetCommit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw 'Controlled-build record targetCommit must be a full 40-character Git SHA.'
+  }
+  $recordTargetCommit = $recordTargetCommit.ToLowerInvariant()
+  if ($recordTargetCommit -ne $ExpectedTargetCommit.ToLowerInvariant()) {
+    throw 'Controlled-build record target commit does not match the expected target commit.'
+  }
+  $recordToolingCommit = [string](Get-ObjectProperty $controlledBuildRecord 'toolingCommit' 'Controlled-build record')
+  if ($recordToolingCommit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw 'Controlled-build record toolingCommit must be a full 40-character Git SHA.'
+  }
+  $recordToolingCommit = $recordToolingCommit.ToLowerInvariant()
+  if ($recordToolingCommit -eq $recordTargetCommit) {
+    throw 'Controlled-build record toolingCommit must be distinct from the candidate targetCommit.'
+  }
+  if ((Get-ObjectProperty $controlledBuildRecord 'cleanTree' 'Controlled-build record') -ne $true) {
+    throw 'Controlled-build record cleanTree must be true.'
+  }
+  $recordGenerator = Get-ObjectProperty $controlledBuildRecord 'generator' 'Controlled-build record'
+  $recordGeneratorId = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordGenerator 'id' 'Controlled-build record generator')) 'Controlled-build record generator.id'
+  $recordGeneratorVersion = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordGenerator 'version' 'Controlled-build record generator')) 'Controlled-build record generator.version'
+  $recordBuildMetadata = Get-ObjectProperty $controlledBuildRecord 'buildMetadata' 'Controlled-build record'
+  $recordBuildRecordId = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordBuildMetadata 'buildRecordId' 'Controlled-build record metadata')) 'Controlled-build record buildMetadata.buildRecordId'
+  $recordBuiltAt = [string](Get-ObjectProperty $recordBuildMetadata 'builtAt' 'Controlled-build record metadata')
+  $parsedRecordBuiltAt = [DateTimeOffset]::MinValue
+  if (-not [DateTimeOffset]::TryParse($recordBuiltAt, [ref]$parsedRecordBuiltAt)) {
+    throw 'Controlled-build record buildMetadata.builtAt must be an ISO-8601 timestamp.'
+  }
+  $recordWorkflow = Get-ObjectProperty $controlledBuildRecord 'workflow' 'Controlled-build record'
+  $recordWorkflowFile = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordWorkflow 'file' 'Controlled-build record workflow')) 'Controlled-build record workflow.file'
+  if ($recordWorkflowFile -ne '.github/workflows/controlled-gpu-artifact-build.yml') {
+    throw 'Controlled-build record workflow.file must be the controlled GPU artifact workflow.'
+  }
+  $recordWorkflowDefinitionCommit = [string](Get-ObjectProperty $recordWorkflow 'definitionCommit' 'Controlled-build record workflow')
+  if ($recordWorkflowDefinitionCommit -notmatch '^[0-9a-fA-F]{40}$' -or $recordWorkflowDefinitionCommit.ToLowerInvariant() -ne $recordToolingCommit) {
+    throw 'Controlled-build record workflow definition commit must match toolingCommit.'
+  }
+  $recordWorkflowRunId = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordWorkflow 'runId' 'Controlled-build record workflow')) 'Controlled-build record workflow.runId'
+  if ($recordWorkflowRunId -notmatch '^[0-9]+$') {
+    throw 'Controlled-build record workflow.runId must be a GitHub run id.'
+  }
+  $recordWorkflowRunAttempt = [int](Get-ObjectProperty $recordWorkflow 'runAttempt' 'Controlled-build record workflow')
+  if ($recordWorkflowRunAttempt -lt 1) {
+    throw 'Controlled-build record workflow.runAttempt must be positive.'
+  }
+  $recordWorkflowEvent = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordWorkflow 'event' 'Controlled-build record workflow')) 'Controlled-build record workflow.event'
+  if ($recordWorkflowEvent -ne 'workflow_dispatch') {
+    throw 'Controlled-build record workflow.event must be workflow_dispatch.'
+  }
+  $recordWorkflowRef = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordWorkflow 'ref' 'Controlled-build record workflow')) 'Controlled-build record workflow.ref'
+  if ($recordWorkflowRef -ne 'refs/heads/master') {
+    throw 'Controlled-build record workflow.ref must be refs/heads/master.'
+  }
+  $recordWorkflowRunUrl = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordWorkflow 'runUrl' 'Controlled-build record workflow')) 'Controlled-build record workflow.runUrl'
+  $expectedWorkflowRunUrl = "https://github.com/$script:CanonicalRainRepository/actions/runs/$recordWorkflowRunId/attempts/$recordWorkflowRunAttempt"
+  if ($recordWorkflowRunUrl -ne $expectedWorkflowRunUrl) {
+    throw 'Controlled-build record workflow.runUrl must bind the canonical repository, run id, and attempt.'
+  }
+  $masterReachability = Get-ObjectProperty $controlledBuildRecord 'masterReachability' 'Controlled-build record'
+  if ((Get-ObjectProperty $masterReachability 'candidate' 'Controlled-build record masterReachability') -ne $true -or
+      (Get-ObjectProperty $masterReachability 'tooling' 'Controlled-build record masterReachability') -ne $true) {
+    throw 'Controlled-build record must prove candidate and tooling reachability from canonical master.'
+  }
+  $recordToolchain = Get-ReleaseEvidenceControlledToolchain (Get-ObjectProperty $controlledBuildRecord 'toolchain' 'Controlled-build record') 'Controlled-build record toolchain'
+  $recordCoreArtifact = Get-ObjectProperty $controlledBuildRecord 'coreArtifact' 'Controlled-build record'
+  $recordCoreArtifactName = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordCoreArtifact 'name' 'Controlled-build record core artifact')) 'Controlled-build record coreArtifact.name'
+  if ($recordCoreArtifactName -ne [System.IO.Path]::GetFileName($recordCoreArtifactName) -or
+      $recordCoreArtifactName.Contains(':') -or $recordCoreArtifactName.Contains('..')) {
+    throw 'Controlled-build record coreArtifact.name must be a simple artifact name.'
+  }
+  $recordCoreArtifactDigest = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $recordCoreArtifact 'digest' 'Controlled-build record core artifact')) 'Controlled-build record coreArtifact.digest'
+  $recordInstaller = Get-ObjectProperty $controlledBuildRecord 'installer' 'Controlled-build record'
+  $recordInstallerFileName = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordInstaller 'fileName' 'Controlled-build record installer')) 'Controlled-build record installer.fileName'
+  $recordInstallerHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $recordInstaller 'sha256' 'Controlled-build record installer')) 'Controlled-build record installer.sha256'
+  $recordInstallerSize = [int64](Get-ObjectProperty $recordInstaller 'sizeBytes' 'Controlled-build record installer')
+  if ($recordInstallerSize -lt 0) { throw 'Controlled-build record installer.sizeBytes must not be negative.' }
+  $recordInstallerKind = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordInstaller 'kind' 'Controlled-build record installer')) 'Controlled-build record installer.kind'
+  $recordArtifactManifest = Get-ObjectProperty $controlledBuildRecord 'artifactManifest' 'Controlled-build record'
+  $recordArtifactManifestFileName = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $recordArtifactManifest 'fileName' 'Controlled-build record artifact manifest')) 'Controlled-build record artifactManifest.fileName'
+  $recordArtifactManifestHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $recordArtifactManifest 'sha256' 'Controlled-build record artifact manifest')) 'Controlled-build record artifactManifest.sha256'
+  $recordArtifactManifestSize = [int64](Get-ObjectProperty $recordArtifactManifest 'sizeBytes' 'Controlled-build record artifact manifest')
+  if ($recordArtifactManifestSize -lt 0) { throw 'Controlled-build record artifactManifest.sizeBytes must not be negative.' }
+  if ($recordArtifactManifestHash -ne $ExpectedArtifactManifestSha256.ToLowerInvariant()) {
+    throw 'Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256.'
+  }
+
   $artifactManifestHash = Get-ReleaseEvidenceSha256 $artifactManifest
   if ($artifactManifestHash -ne $ExpectedArtifactManifestSha256.ToLowerInvariant()) {
     throw 'Artifact manifest SHA-256 does not match the expected controlled-build record.'
+  }
+  $artifactManifestItem = Get-Item -LiteralPath $artifactManifest
+  if ($artifactManifestItem.Name -ne $recordArtifactManifestFileName -or $artifactManifestItem.Length -ne $recordArtifactManifestSize) {
+    throw 'Controlled-build record artifact manifest identity does not match the supplied artifact manifest.'
   }
   try {
     $manifest = Get-Content -LiteralPath $artifactManifest -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -897,8 +1155,17 @@ function Assert-CandidateArtifactProvenance {
     throw 'Artifact manifest identifier must be com.rain.app.'
   }
 
+  $hygieneScopes = @((Get-ObjectProperty $manifest 'hygieneScopes' 'Artifact manifest'))
+  if ($hygieneScopes.Count -ne 2 -or
+      [string]$hygieneScopes[0] -ne 'installed-tree' -or
+      [string]$hygieneScopes[1] -ne 'installer-archive') {
+    throw 'Artifact manifest hygieneScopes must be exactly installed-tree and installer-archive.'
+  }
+
   $mainExecutable = Get-ObjectProperty $manifest 'mainExecutable' 'Artifact manifest'
   $mainExecutablePath = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $mainExecutable 'path' 'Artifact manifest mainExecutable')) 'Artifact manifest mainExecutable.path'
+  $mainExecutableSize = [int64](Get-ObjectProperty $mainExecutable 'sizeBytes' 'Artifact manifest mainExecutable')
+  if ($mainExecutableSize -lt 0) { throw 'Artifact manifest mainExecutable.sizeBytes must not be negative.' }
   $mainExecutableHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $mainExecutable 'sha256' 'Artifact manifest mainExecutable')) 'Artifact manifest mainExecutable.sha256'
   if ((Get-ObjectProperty $mainExecutable 'cudaImportsPresent' 'Artifact manifest mainExecutable') -ne $false) {
     throw 'Artifact manifest mainExecutable.cudaImportsPresent must be false.'
@@ -907,9 +1174,29 @@ function Assert-CandidateArtifactProvenance {
   $resources = Get-ObjectProperty $manifest 'resources' 'Artifact manifest'
   $cudaWorker = Get-ObjectProperty $resources 'cudaWorker' 'Artifact manifest resources'
   $cudaWorkerPath = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $cudaWorker 'path' 'Artifact manifest CUDA worker')) 'Artifact manifest CUDA worker.path'
+  $cudaWorkerSize = [int64](Get-ObjectProperty $cudaWorker 'sizeBytes' 'Artifact manifest CUDA worker')
+  if ($cudaWorkerSize -lt 0) { throw 'Artifact manifest CUDA worker.sizeBytes must not be negative.' }
   $cudaWorkerHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $cudaWorker 'sha256' 'Artifact manifest CUDA worker')) 'Artifact manifest CUDA worker.sha256'
   if ([int](Get-ObjectProperty $cudaWorker 'protocolVersion' 'Artifact manifest CUDA worker') -ne 1) {
     throw 'Artifact manifest CUDA worker protocolVersion must be 1.'
+  }
+  if ([string](Get-ObjectProperty $cudaWorker 'configuration' 'Artifact manifest CUDA worker') -ne 'release') {
+    throw 'Artifact manifest CUDA worker configuration must be release.'
+  }
+
+  $cudaPayloadManifest = Get-ObjectProperty $resources 'cudaPayloadManifest' 'Artifact manifest resources'
+  $cudaPayloadManifestPath = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $cudaPayloadManifest 'path' 'Artifact manifest CUDA payload manifest')) 'Artifact manifest CUDA payload manifest.path'
+  if ($cudaPayloadManifestPath.Replace('\', '/') -ne 'resources/whisper-backends/payload-manifest.json') {
+    throw 'Artifact manifest CUDA payload manifest path must be resources/whisper-backends/payload-manifest.json.'
+  }
+  $cudaPayloadManifestSize = [int64](Get-ObjectProperty $cudaPayloadManifest 'sizeBytes' 'Artifact manifest CUDA payload manifest')
+  if ($cudaPayloadManifestSize -lt 0) { throw 'Artifact manifest CUDA payload manifest sizeBytes must not be negative.' }
+  [void](Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $cudaPayloadManifest 'sha256' 'Artifact manifest CUDA payload manifest')) 'Artifact manifest CUDA payload manifest.sha256')
+  if ([int](Get-ObjectProperty $cudaPayloadManifest 'schemaVersion' 'Artifact manifest CUDA payload manifest') -ne 1) {
+    throw 'Artifact manifest CUDA payload manifest schemaVersion must be 1.'
+  }
+  if ([string](Get-ObjectProperty $cudaPayloadManifest 'configuration' 'Artifact manifest CUDA payload manifest') -ne 'release') {
+    throw 'Artifact manifest CUDA payload manifest configuration must be release.'
   }
 
   $cudaRuntime = Get-ObjectProperty $resources 'cudaRuntime' 'Artifact manifest resources'
@@ -920,7 +1207,8 @@ function Assert-CandidateArtifactProvenance {
   foreach ($runtimeFile in $cudaRuntimeFiles) {
     [void](Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $runtimeFile 'name' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.name')
     [void](Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $runtimeFile 'path' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.path')
-    [void](Get-ObjectProperty $runtimeFile 'sizeBytes' 'Artifact manifest CUDA runtime file')
+    $runtimeSize = [int64](Get-ObjectProperty $runtimeFile 'sizeBytes' 'Artifact manifest CUDA runtime file')
+    if ($runtimeSize -lt 0) { throw 'Artifact manifest CUDA runtime file.sizeBytes must not be negative.' }
     [void](Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $runtimeFile 'sha256' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.sha256')
   }
   if ((Get-ObjectProperty $cudaRuntime 'driverLibraryBundled' 'Artifact manifest CUDA runtime') -ne $false) {
@@ -928,7 +1216,36 @@ function Assert-CandidateArtifactProvenance {
   }
   [void](Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $cudaRuntime 'distributionApproval' 'Artifact manifest CUDA runtime')) 'Artifact manifest CUDA runtime distributionApproval')
 
-  [void](Get-ObjectProperty $manifest 'forbiddenFindings' 'Artifact manifest')
+  $forbiddenFindings = Get-ObjectProperty $manifest 'forbiddenFindings' 'Artifact manifest'
+  $unexpectedFindingCategories = @($forbiddenFindings.PSObject.Properties.Name | Where-Object { $script:ArtifactForbiddenFindingCategories -notcontains $_ })
+  if ($unexpectedFindingCategories.Count -gt 0) {
+    throw "Artifact manifest forbiddenFindings contains an unknown category: $($unexpectedFindingCategories -join ', ')."
+  }
+  foreach ($category in $script:ArtifactForbiddenFindingCategories) {
+    # Read the PSPropertyInfo value directly.  Returning an empty array through
+    # the PowerShell pipeline produces no output (and therefore looks like
+    # $null), which must remain distinct from a JSON null here.
+    $categoryProperty = $forbiddenFindings.PSObject.Properties[$category]
+    if ($null -eq $categoryProperty) {
+      throw "Artifact manifest forbiddenFindings is missing required property '$category'."
+    }
+    $categoryValue = $categoryProperty.Value
+    if ($null -eq $categoryValue) {
+      throw "Artifact manifest forbiddenFindings.$category must be an empty array, not null."
+    }
+    # ConvertFrom-Json unwraps a single-item JSON array to a scalar in Windows
+    # PowerShell.  A scalar can therefore only be accepted here when it is
+    # absent; any present scalar represents a non-empty forbidden finding.
+    if ($categoryValue -is [string]) {
+      throw "Artifact manifest forbiddenFindings.$category must be empty."
+    }
+    if ($categoryValue -isnot [System.Collections.IEnumerable]) {
+      throw "Artifact manifest forbiddenFindings.$category must be an array."
+    }
+    if (@($categoryValue).Count -ne 0) {
+      throw "Artifact manifest forbiddenFindings.$category must be empty."
+    }
+  }
   $generatedAt = [string](Get-ObjectProperty $manifest 'generatedAt' 'Artifact manifest')
   $parsedGeneratedAt = [DateTimeOffset]::MinValue
   if (-not [DateTimeOffset]::TryParse($generatedAt, [ref]$parsedGeneratedAt)) {
@@ -948,22 +1265,45 @@ function Assert-CandidateArtifactProvenance {
 
   $controlledBuild = Get-ObjectProperty $manifest 'controlledBuild' 'Artifact manifest'
   $sourceRepository = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $controlledBuild 'sourceRepository' 'Controlled-build record')) 'Controlled-build record sourceRepository'
+  if ($sourceRepository -ne $recordSourceRepository) {
+    throw 'Controlled-build record source repository does not match artifact manifest source repository.'
+  }
   $controlledTargetCommit = [string](Get-ObjectProperty $controlledBuild 'targetCommit' 'Controlled-build record')
   if ($controlledTargetCommit -notmatch '^[0-9a-fA-F]{40}$' -or $controlledTargetCommit.ToLowerInvariant() -ne $ExpectedTargetCommit.ToLowerInvariant()) {
     throw 'Controlled-build record target commit does not match the expected target commit.'
   }
+  if ($controlledTargetCommit.ToLowerInvariant() -ne $recordTargetCommit) {
+    throw 'Controlled-build record target commit does not match artifact manifest target commit.'
+  }
+  $controlledToolingCommit = [string](Get-ObjectProperty $controlledBuild 'toolingCommit' 'Controlled-build record')
+  if ($controlledToolingCommit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw 'Artifact manifest controlled-build toolingCommit must be a full 40-character Git SHA.'
+  }
+  if ($controlledToolingCommit.ToLowerInvariant() -ne $recordToolingCommit) {
+    throw 'Controlled-build record tooling commit does not match artifact manifest tooling commit.'
+  }
   if ((Get-ObjectProperty $controlledBuild 'cleanTree' 'Controlled-build record') -ne $true) {
     throw 'Controlled-build record cleanTree must be true.'
+  }
+  $manifestToolchain = Get-ReleaseEvidenceControlledToolchain (Get-ObjectProperty $controlledBuild 'toolchain' 'Artifact manifest controlledBuild') 'Artifact manifest controlled-build toolchain'
+  if ((ConvertTo-Json -InputObject $manifestToolchain -Depth 20 -Compress) -ne (ConvertTo-Json -InputObject $recordToolchain -Depth 20 -Compress)) {
+    throw 'Controlled-build record toolchain does not match artifact manifest controlled-build toolchain.'
   }
   $generator = Get-ObjectProperty $controlledBuild 'generator' 'Controlled-build record'
   $generatorId = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $generator 'id' 'Controlled-build generator')) 'Controlled-build generator identity'
   $generatorVersion = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $generator 'version' 'Controlled-build generator')) 'Controlled-build generator version'
+  if ($generatorId -ne $recordGeneratorId -or $generatorVersion -ne $recordGeneratorVersion) {
+    throw 'Controlled-build record generator does not match artifact manifest controlled-build generator.'
+  }
   $buildMetadata = Get-ObjectProperty $controlledBuild 'buildMetadata' 'Controlled-build record'
   $buildRecordId = [string](Get-ObjectProperty $buildMetadata 'buildRecordId' 'Controlled-build metadata')
   $builtAt = [string](Get-ObjectProperty $buildMetadata 'builtAt' 'Controlled-build metadata')
   $parsedBuiltAt = [DateTimeOffset]::MinValue
   if ([string]::IsNullOrWhiteSpace($buildRecordId) -or -not [DateTimeOffset]::TryParse($builtAt, [ref]$parsedBuiltAt)) {
     throw 'Controlled-build metadata must contain a build record id and ISO-8601 timestamp.'
+  }
+  if ($buildRecordId -ne $recordBuildRecordId -or $builtAt -ne $recordBuiltAt) {
+    throw 'Controlled-build record metadata does not match artifact manifest controlled-build metadata.'
   }
 
   $manifestInstaller = Get-ObjectProperty $manifest 'installer' 'Artifact manifest'
@@ -974,6 +1314,12 @@ function Assert-CandidateArtifactProvenance {
   $manifestHash = Assert-ReleaseEvidenceManifestSha256 $manifestHash 'Artifact manifest installer SHA-256'
   if ($manifestKind -notmatch '(?i)^nsis(?:[-_ ]windows)?[-_ ]x64$') {
     throw 'Artifact manifest installer kind must identify an NSIS Windows x64 installer.'
+  }
+  if ($manifestFileName -ne $recordInstallerFileName -or
+      $manifestHash -ne $recordInstallerHash -or
+      $manifestSize -ne $recordInstallerSize -or
+      $manifestKind -ne $recordInstallerKind) {
+    throw 'Controlled-build record installer identity does not match artifact manifest installer identity.'
   }
 
   $installerItem = Get-Item -LiteralPath $installer
@@ -991,8 +1337,45 @@ function Assert-CandidateArtifactProvenance {
     throw 'Installer SHA-256 mismatch against the expected installer hash.'
   }
 
+  $installationProof = Get-ObjectProperty $manifest 'installationProof' 'Artifact manifest'
+  $proofPropertyNames = @($installationProof.PSObject.Properties.Name)
+  $unexpectedProofProperties = @($proofPropertyNames | Where-Object { @('kind', 'schemaVersion', 'installerSha256', 'mainExecutable', 'payloadManifest', 'silentInstall') -notcontains $_ })
+  if ($unexpectedProofProperties.Count -gt 0) {
+    throw 'Artifact manifest installationProof must not contain raw installation paths or arguments.'
+  }
+  if ([string](Get-ObjectProperty $installationProof 'kind' 'Artifact manifest installationProof') -ne 'rain-nsis-install-proof-v2' -or
+      [int](Get-ObjectProperty $installationProof 'schemaVersion' 'Artifact manifest installationProof') -ne 2) {
+    throw 'Artifact manifest installationProof must use the logical rain-nsis-install-proof-v2 schema.'
+  }
+  $proofInstallerHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $installationProof 'installerSha256' 'Artifact manifest installationProof')) 'Artifact manifest installationProof.installerSha256'
+  if ($proofInstallerHash -ne $installerHash) {
+    throw 'Artifact manifest installationProof is not bound to the supplied installer bytes.'
+  }
+  $proofMainExecutable = Get-ObjectProperty $installationProof 'mainExecutable' 'Artifact manifest installationProof'
+  $proofMainPath = ([string](Get-ObjectProperty $proofMainExecutable 'path' 'Artifact manifest installationProof mainExecutable')).Replace('\', '/').ToLowerInvariant()
+  if ($proofMainPath -ne 'rain.exe' -or [int](Get-ObjectProperty $proofMainExecutable 'machine' 'Artifact manifest installationProof mainExecutable') -ne 0x8664) {
+    throw 'Artifact manifest installationProof must establish the logical AMD64 rain.exe layout.'
+  }
+  $proofPayloadManifest = Get-ObjectProperty $installationProof 'payloadManifest' 'Artifact manifest installationProof'
+  $proofPayloadPath = ([string](Get-ObjectProperty $proofPayloadManifest 'path' 'Artifact manifest installationProof payloadManifest')).Replace('\', '/').ToLowerInvariant()
+  if ($proofPayloadPath -ne 'resources/whisper-backends/payload-manifest.json') {
+    throw 'Artifact manifest installationProof must establish the logical CUDA payload-manifest layout.'
+  }
+  $proofSilentInstall = Get-ObjectProperty $installationProof 'silentInstall' 'Artifact manifest installationProof'
+  $unexpectedSilentProperties = @($proofSilentInstall.PSObject.Properties.Name | Where-Object { @('mode', 'destinationKind', 'waited', 'exitCode') -notcontains $_ })
+  if ($unexpectedSilentProperties.Count -gt 0) {
+    throw 'Artifact manifest installationProof must not contain raw installation paths or arguments.'
+  }
+  if ([string](Get-ObjectProperty $proofSilentInstall 'mode' 'Artifact manifest installationProof silentInstall') -ne 'silent' -or
+      [string](Get-ObjectProperty $proofSilentInstall 'destinationKind' 'Artifact manifest installationProof silentInstall') -ne 'unique-runner-temp' -or
+      (Get-ObjectProperty $proofSilentInstall 'waited' 'Artifact manifest installationProof silentInstall') -ne $true -or
+      [int](Get-ObjectProperty $proofSilentInstall 'exitCode' 'Artifact manifest installationProof silentInstall') -ne 0) {
+    throw 'Artifact manifest installationProof must establish a successful waited silent install into a unique runner-temporary destination.'
+  }
+
   return [pscustomobject]@{
     targetCommit = $targetCommit.ToLowerInvariant()
+    toolingCommit = $recordToolingCommit
     installer = [ordered]@{
       path = $installer
       fileName = $installerItem.Name
@@ -1005,21 +1388,184 @@ function Assert-CandidateArtifactProvenance {
       sha256 = $artifactManifestHash
       schemaVersion = [int]$manifest.schemaVersion
       version = '0.1.0'
-      mainExecutable = [ordered]@{ path = $mainExecutablePath; sha256 = $mainExecutableHash; cudaImportsPresent = $false }
+      installationProof = [ordered]@{
+        kind = 'rain-nsis-install-proof-v2'; schemaVersion = 2; installerSha256 = $proofInstallerHash
+        mainExecutable = [ordered]@{ path = 'rain.exe'; machine = 0x8664 }
+        payloadManifest = [ordered]@{ path = 'resources/whisper-backends/payload-manifest.json' }
+        silentInstall = [ordered]@{ mode = 'silent'; destinationKind = 'unique-runner-temp'; waited = $true; exitCode = 0 }
+      }
+      mainExecutable = [ordered]@{ path = $mainExecutablePath; sizeBytes = $mainExecutableSize; sha256 = $mainExecutableHash; cudaImportsPresent = $false }
       resources = [ordered]@{
-        cudaWorker = [ordered]@{ path = $cudaWorkerPath; sha256 = $cudaWorkerHash; protocolVersion = 1 }
-        cudaRuntime = [ordered]@{ fileCount = $cudaRuntimeFiles.Count; driverLibraryBundled = $false }
+        cudaWorker = [ordered]@{ path = $cudaWorkerPath; sizeBytes = $cudaWorkerSize; sha256 = $cudaWorkerHash; protocolVersion = 1 }
+        cudaRuntime = [ordered]@{
+          files = @($cudaRuntimeFiles | ForEach-Object {
+            [ordered]@{
+              name = [string]$_.name
+              path = [string]$_.path
+              sizeBytes = [int64]$_.sizeBytes
+              sha256 = ([string]$_.sha256).ToLowerInvariant()
+            }
+          })
+          fileCount = $cudaRuntimeFiles.Count
+          driverLibraryBundled = $false
+        }
       }
       generatedAt = $parsedGeneratedAt.ToString('o')
+      forbiddenFindings = [ordered]@{
+        secrets = @(); e2eMarkers = @(); absolutePaths = @(); userData = @(); forbiddenDlls = @();
+        modelFiles = @(); sourceMaps = @(); unscannedTextFiles = @(); unreadableTextFiles = @(); debugArtifacts = @()
+      }
       generator = [ordered]@{ id = $artifactGeneratorId; version = $artifactGeneratorVersion }
       controlledBuild = [ordered]@{
         sourceRepository = $sourceRepository
         targetCommit = $controlledTargetCommit.ToLowerInvariant()
+        toolingCommit = $controlledToolingCommit.ToLowerInvariant()
         cleanTree = $true
         generator = [ordered]@{ id = $generatorId; version = $generatorVersion }
         buildMetadata = [ordered]@{ buildRecordId = $buildRecordId; builtAt = $parsedBuiltAt.ToString('o') }
+        toolchain = $manifestToolchain
       }
     }
+    controlledBuildRecord = [ordered]@{
+      path = $controlledBuildRecordPath
+      sha256 = Get-ReleaseEvidenceSha256 $controlledBuildRecordPath
+      schemaVersion = [int]$controlledBuildRecord.schemaVersion
+      repository = $recordRepository
+      sourceRepository = $recordSourceRepository
+      targetCommit = $recordTargetCommit
+      toolingCommit = $recordToolingCommit
+      cleanTree = $true
+      generator = [ordered]@{ id = $recordGeneratorId; version = $recordGeneratorVersion }
+      buildMetadata = [ordered]@{ buildRecordId = $recordBuildRecordId; builtAt = $parsedRecordBuiltAt.ToString('o') }
+      workflow = [ordered]@{
+        file = $recordWorkflowFile
+        definitionCommit = $recordToolingCommit
+        runUrl = $recordWorkflowRunUrl
+        event = $recordWorkflowEvent
+        ref = $recordWorkflowRef
+        runId = $recordWorkflowRunId
+        runAttempt = $recordWorkflowRunAttempt
+      }
+      masterReachability = [ordered]@{ candidate = $true; tooling = $true }
+      toolchain = $recordToolchain
+      coreArtifact = [ordered]@{ name = $recordCoreArtifactName; digest = $recordCoreArtifactDigest }
+    }
+  }
+}
+
+function Resolve-ReleaseEvidenceInstalledManifestFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$InstalledRoot,
+    [Parameter(Mandatory = $true)][string]$RelativePath,
+    [Parameter(Mandatory = $true)][string]$Description
+  )
+
+  $relativePath = Assert-ReleaseEvidenceManifestNonBlankString $RelativePath "$Description path"
+  if ([System.IO.Path]::IsPathRooted($relativePath)) {
+    throw "$Description path must be relative to the installed application root."
+  }
+  $segments = @($relativePath -split '[\\/]' | Where-Object { $_ -ne '' })
+  if ($segments.Count -eq 0 -or @($segments | Where-Object { $_ -eq '.' -or $_ -eq '..' }).Count -gt 0) {
+    throw "$Description path must be a normalized relative path."
+  }
+
+  $rootPath = [System.IO.Path]::GetFullPath($InstalledRoot)
+  $candidatePath = [System.IO.Path]::GetFullPath((Join-Path $rootPath ($segments -join [System.IO.Path]::DirectorySeparatorChar)))
+  $rootPrefix = $rootPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $candidatePath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Description path escapes the installed application root."
+  }
+  if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+    throw "Installed artifact file is missing from the real installed tree: $relativePath"
+  }
+  return Get-Item -LiteralPath $candidatePath -Force
+}
+
+function Assert-InstalledArtifactManifest {
+  param(
+    [Parameter(Mandatory = $true)][string]$InstalledRoot,
+    [Parameter(Mandatory = $true)][string]$ArtifactManifestPath
+  )
+
+  $installedRoot = (Get-Item -LiteralPath (Resolve-ReleaseEvidenceDirectory $InstalledRoot 'Installed application root')).FullName
+  $artifactManifestPath = Resolve-ReleaseEvidenceFile $ArtifactManifestPath 'Artifact manifest'
+  try {
+    $manifest = Get-Content -LiteralPath $artifactManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  } catch {
+    throw "Artifact manifest is not valid JSON: $($_.Exception.Message)"
+  }
+  if ([int](Get-ObjectProperty $manifest 'schemaVersion' 'Artifact manifest') -ne 1) {
+    throw 'Artifact manifest schemaVersion must be 1.'
+  }
+
+  $declaredFiles = [System.Collections.Generic.List[object]]::new()
+  $mainExecutable = Get-ObjectProperty $manifest 'mainExecutable' 'Artifact manifest'
+  [void]$declaredFiles.Add([pscustomobject]@{
+    description = 'Artifact manifest main executable'
+    path = [string](Get-ObjectProperty $mainExecutable 'path' 'Artifact manifest mainExecutable')
+    sizeBytes = Get-ObjectProperty $mainExecutable 'sizeBytes' 'Artifact manifest mainExecutable'
+    sha256 = [string](Get-ObjectProperty $mainExecutable 'sha256' 'Artifact manifest mainExecutable')
+  })
+
+  $resources = Get-ObjectProperty $manifest 'resources' 'Artifact manifest'
+  $cudaWorker = Get-ObjectProperty $resources 'cudaWorker' 'Artifact manifest resources'
+  [void]$declaredFiles.Add([pscustomobject]@{
+    description = 'Artifact manifest CUDA worker'
+    path = [string](Get-ObjectProperty $cudaWorker 'path' 'Artifact manifest CUDA worker')
+    sizeBytes = Get-ObjectProperty $cudaWorker 'sizeBytes' 'Artifact manifest CUDA worker'
+    sha256 = [string](Get-ObjectProperty $cudaWorker 'sha256' 'Artifact manifest CUDA worker')
+  })
+
+  $cudaPayloadManifest = Get-ObjectProperty $resources 'cudaPayloadManifest' 'Artifact manifest resources'
+  [void]$declaredFiles.Add([pscustomobject]@{
+    description = 'Artifact manifest CUDA payload manifest'
+    path = [string](Get-ObjectProperty $cudaPayloadManifest 'path' 'Artifact manifest CUDA payload manifest')
+    sizeBytes = Get-ObjectProperty $cudaPayloadManifest 'sizeBytes' 'Artifact manifest CUDA payload manifest'
+    sha256 = [string](Get-ObjectProperty $cudaPayloadManifest 'sha256' 'Artifact manifest CUDA payload manifest')
+  })
+
+  $cudaRuntime = Get-ObjectProperty $resources 'cudaRuntime' 'Artifact manifest resources'
+  $cudaRuntimeFiles = @((Get-ObjectProperty $cudaRuntime 'files' 'Artifact manifest CUDA runtime'))
+  if ($cudaRuntimeFiles.Count -eq 0) {
+    throw 'Artifact manifest CUDA runtime files must not be empty.'
+  }
+  foreach ($runtimeFile in $cudaRuntimeFiles) {
+    [void]$declaredFiles.Add([pscustomobject]@{
+      description = 'Artifact manifest CUDA runtime file'
+      path = [string](Get-ObjectProperty $runtimeFile 'path' 'Artifact manifest CUDA runtime file')
+      sizeBytes = Get-ObjectProperty $runtimeFile 'sizeBytes' 'Artifact manifest CUDA runtime file'
+      sha256 = [string](Get-ObjectProperty $runtimeFile 'sha256' 'Artifact manifest CUDA runtime file')
+    })
+  }
+
+  $seenPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $verified = [System.Collections.Generic.List[object]]::new()
+  foreach ($declared in $declaredFiles) {
+    $relativePath = Assert-ReleaseEvidenceManifestNonBlankString ([string]$declared.path) "$($declared.description)"
+    if (-not $seenPaths.Add($relativePath.Replace('/', '\\'))) {
+      throw "Artifact manifest declares the installed artifact path more than once: $relativePath"
+    }
+    $expectedSize = [int64]$declared.sizeBytes
+    if ($expectedSize -lt 0) {
+      throw "$($declared.description) sizeBytes must not be negative."
+    }
+    $expectedHash = Assert-ReleaseEvidenceManifestSha256 ([string]$declared.sha256) "$($declared.description) SHA-256"
+    $file = Resolve-ReleaseEvidenceInstalledManifestFile -InstalledRoot $installedRoot -RelativePath $relativePath -Description $declared.description
+    $actualHash = Get-ReleaseEvidenceSha256 $file.FullName
+    if ($file.Length -ne $expectedSize -or $actualHash -ne $expectedHash) {
+      throw "Installed artifact file does not match release manifest: $relativePath"
+    }
+    [void]$verified.Add([ordered]@{
+      relativePath = Get-ReleaseEvidenceRelativePath $installedRoot $file.FullName
+      path = $file.FullName
+      sizeBytes = $file.Length
+      sha256 = $actualHash
+    })
+  }
+  return [pscustomobject]@{
+    installedRoot = $installedRoot
+    artifactManifestPath = $artifactManifestPath
+    files = @($verified)
   }
 }
 
@@ -1044,6 +1590,9 @@ function Assert-InstalledCudaPayload {
   }
   if ([int](Get-ObjectProperty $manifest 'schemaVersion' 'CUDA payload manifest') -ne 1) {
     throw 'CUDA payload manifest schemaVersion must be 1.'
+  }
+  if ([string](Get-ObjectProperty $manifest 'configuration' 'CUDA payload manifest') -ne 'release') {
+    throw 'CUDA payload manifest configuration must be release.'
   }
   if ([int](Get-ObjectProperty $manifest 'workerProtocolVersion' 'CUDA payload manifest') -ne 1) {
     throw 'Installed worker protocol version is not 1.'
@@ -1149,12 +1698,24 @@ function Assert-InstalledCudaPayload {
   }
 }
 
+function Get-ReleaseEvidenceSecretFindings([AllowNull()][string]$Text) {
+  if ([string]::IsNullOrEmpty($Text)) { return @() }
+  $findings = @()
+  if ($Text -match '(?i)\bsk-[A-Za-z0-9._-]+') { $findings += 'OpenAI-style key' }
+  if ($Text -match '(?i)\b(?:AKIA|ASIA)[A-Z0-9]{16}\b') { $findings += 'AWS credential' }
+  if ($Text -match '(?i)-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----') { $findings += 'PEM private key' }
+  if ($Text -match '(?i)\b(?:Bearer|Basic)\s+(?!\[REDACTED\])[^\s"''\r\n]+') { $findings += 'authorization credential' }
+  if ($Text -match '(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*([=:])\s*(?!\[REDACTED\])') { $findings += 'key-value secret' }
+  if ($Text -match '(?i)"(?:api[_-]?key|apiKey|api[_-]?secret|apiSecret|access[_-]?token|accessToken|refresh[_-]?token|refreshToken|client[_-]?secret|clientSecret|password|secret)"\s*:\s*"(?!\[REDACTED\])[^\"]+"') { $findings += 'JSON quoted secret' }
+  return @($findings | Select-Object -Unique)
+}
+
 function Protect-ReleaseEvidenceDiagnosticText([AllowNull()][string]$Value) {
   if ($null -eq $Value) { return '' }
   $protected = $Value
   $protected = [regex]::Replace($protected, '(?i)\bsk-[A-Za-z0-9._-]+', '[REDACTED]')
   $protected = [regex]::Replace($protected, '(?i)\b(?:AKIA|ASIA)[A-Z0-9]{16}\b', '[REDACTED]')
-  $protected = [regex]::Replace($protected, '(?i)\b(Bearer|Basic)\s+(?!\[REDACTED\])[^\s"''`r`n]+', '$1 [REDACTED]')
+  $protected = [regex]::Replace($protected, '(?i)\b(Bearer|Basic)\s+(?!\[REDACTED\])[^\s"''\r\n]+', '$1 [REDACTED]')
   $protected = [regex]::Replace($protected, '(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*([=:])\s*(?:"[^"]*"|''[^'']*''|[^\s,;]+)', '$1$2[REDACTED]')
   $protected = [regex]::Replace($protected, '(?i)("(?:api[_-]?key|apiKey|token|password|secret)"\s*:\s*")[^"]*(")', '$1[REDACTED]$2')
   $protected = [regex]::Replace($protected, '(?i)\b(?:authorization|x-api-key)\s*:\s*(?!\[REDACTED\])[^\s,;]+', 'authorization: [REDACTED]')
@@ -1212,12 +1773,7 @@ function Write-AtomicJsonFile([string]$Path, $Value) {
 }
 
 function Get-ReleaseEvidenceSensitiveFindings([string]$Text) {
-  $findings = @()
-  if ($Text -match '(?i)\bsk-[A-Za-z0-9._-]+') { $findings += 'OpenAI-style key' }
-  if ($Text -match '(?i)\b(?:AKIA|ASIA)[A-Z0-9]{16}\b') { $findings += 'AWS credential' }
-  if ($Text -match '(?i)\b(?:Bearer|Basic)\s+(?!\[REDACTED\])[^\s"''`r`n]+') { $findings += 'authorization credential' }
-  if ($Text -match '(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*([=:])\s*(?!\[REDACTED\])') { $findings += 'key-value secret' }
-  if ($Text -match '(?i)"(?:api[_-]?key|apiKey|access[_-]?token|refresh[_-]?token|password|secret)"\s*:\s*"(?!\[REDACTED\])[^\"]+"') { $findings += 'JSON quoted secret' }
+  $findings = @(Get-ReleaseEvidenceSecretFindings $Text)
   if ($Text -match '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b') { $findings += 'email address' }
   if ($Text -match '(?i)(?:\\\\\\?\\)?[A-Z]:[\\/](?:Users|Documents and Settings)[\\/](?!\[REDACTED\])') { $findings += 'Windows user-profile path' }
   return @($findings | Select-Object -Unique)
@@ -1289,6 +1845,284 @@ function Start-ReleaseEvidenceNsisInstaller {
     return & $ProcessAdapter -FilePath $Installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
   }
   return Start-Process -FilePath $Installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+}
+
+function Get-ReleaseEvidenceNsisSystemSideEffectSnapshot {
+  param([Parameter(Mandatory = $true)][string]$Phase, [Parameter(Mandatory = $true)][string]$InstallRoot)
+  $registryEntries = [System.Collections.Generic.List[string]]::new()
+  foreach ($registryRoot in @(
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+  )) {
+    if (-not (Test-Path -LiteralPath $registryRoot)) { continue }
+    foreach ($key in @(Get-ChildItem -LiteralPath $registryRoot -ErrorAction Stop)) {
+      $properties = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction Stop
+      $displayNameProperty = $properties.PSObject.Properties['DisplayName']
+      $installLocationProperty = $properties.PSObject.Properties['InstallLocation']
+      $displayName = if ($null -ne $displayNameProperty) { [string]$displayNameProperty.Value } else { '' }
+      $installLocation = if ($null -ne $installLocationProperty) { [string]$installLocationProperty.Value } else { '' }
+      $matchesInstallRoot = $false
+      if (-not [string]::IsNullOrWhiteSpace($installLocation)) {
+        try {
+          $matchesInstallRoot = [string]::Equals([System.IO.Path]::GetFullPath($installLocation.Trim('"')), [System.IO.Path]::GetFullPath($InstallRoot), [System.StringComparison]::OrdinalIgnoreCase)
+        } catch {
+          $matchesInstallRoot = $false
+        }
+      }
+      if ($displayName -match '(?i)^Rain(?:\s|$)' -or $matchesInstallRoot) {
+        [void]$registryEntries.Add("$registryRoot/$($key.PSChildName)|$displayName|$installLocation")
+      }
+    }
+  }
+  $shortcuts = [System.Collections.Generic.List[string]]::new()
+  foreach ($shortcutRoot in @(
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),
+    (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs')
+  )) {
+    if (-not (Test-Path -LiteralPath $shortcutRoot -PathType Container)) { continue }
+    foreach ($shortcut in @(Get-ChildItem -LiteralPath $shortcutRoot -Filter 'Rain*.lnk' -File -Recurse -ErrorAction Stop)) {
+      [void]$shortcuts.Add($shortcut.FullName)
+    }
+  }
+  return [ordered]@{ uninstallRegistryEntries = @($registryEntries | Sort-Object); shortcuts = @($shortcuts | Sort-Object) }
+}
+
+function Get-ReleaseEvidencePeMachine {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Description
+  )
+
+  $file = Resolve-ReleaseEvidenceFile $Path $Description
+  $item = Get-Item -LiteralPath $file
+  if ($item.Length -lt 0x40) {
+    throw "$Description is not a basic PE artifact."
+  }
+  $stream = [System.IO.File]::Open($file, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  try {
+    $header = [byte[]]::new(0x40)
+    if ($stream.Read($header, 0, $header.Length) -ne $header.Length -or
+        $header[0] -ne [byte][char]'M' -or $header[1] -ne [byte][char]'Z') {
+      throw "$Description is not a basic PE artifact."
+    }
+    $peOffset = [BitConverter]::ToInt32($header, 0x3c)
+    if ($peOffset -lt 0x40 -or $peOffset + 6 -gt $item.Length) {
+      throw "$Description is not a basic PE artifact."
+    }
+    $stream.Position = $peOffset
+    $signature = [byte[]]::new(6)
+    if ($stream.Read($signature, 0, $signature.Length) -ne $signature.Length -or
+        $signature[0] -ne [byte][char]'P' -or $signature[1] -ne [byte][char]'E' -or
+        $signature[2] -ne 0 -or $signature[3] -ne 0) {
+      throw "$Description is not a basic PE artifact."
+    }
+    return [BitConverter]::ToUInt16($signature, 4)
+  } finally {
+    $stream.Dispose()
+  }
+}
+
+function Invoke-ReleaseEvidenceNsisInstallAndVerify {
+  param(
+    [Parameter(Mandatory = $true)][string]$Installer,
+    [Parameter(Mandatory = $true)][string]$TemporaryRoot,
+    [scriptblock]$ReserveInstallRoot = $null,
+    [scriptblock]$RemoveInstallRoot = {
+      param([string]$Path)
+      if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop }
+    },
+    [scriptblock]$ProcessAdapter = $null,
+    [scriptblock]$SystemSideEffectProbe = ${function:Get-ReleaseEvidenceNsisSystemSideEffectSnapshot}
+  )
+
+  $temporaryRoot = Resolve-ReleaseEvidenceDirectory $TemporaryRoot 'NSIS temporary root'
+  $installRoot = Join-Path $temporaryRoot ('rain-nsis-installed-' + [Guid]::NewGuid().ToString('N'))
+  if (Test-Path -LiteralPath $installRoot) {
+    throw "Generated NSIS install root already exists: $installRoot"
+  }
+  if ($null -ne $ReserveInstallRoot) {
+    & $ReserveInstallRoot $installRoot
+  }
+
+  $uninstallerPath = Join-Path $installRoot 'uninstall.exe'
+  $systemSideEffectsBefore = & $SystemSideEffectProbe -Phase 'before-install' -InstallRoot $installRoot
+  $installError = $null
+  try {
+    $process = Start-ReleaseEvidenceNsisInstaller -Installer $Installer -Destination $installRoot -ProcessAdapter $ProcessAdapter
+    if ($null -eq $process -or $null -eq $process.PSObject.Properties['ExitCode']) {
+      throw 'NSIS installer did not return an exit code.'
+    }
+    if ([int]$process.ExitCode -ne 0) {
+      throw "NSIS installer failed with exit code $($process.ExitCode)."
+    }
+    if (-not (Test-Path -LiteralPath $installRoot -PathType Container)) {
+      throw "NSIS installer did not create its requested install root: $installRoot"
+    }
+
+    $verifiedFiles = @{}
+    foreach ($required in @(
+      [ordered]@{ name = 'rain.exe'; description = 'Rain main executable' },
+      [ordered]@{ name = 'payload-manifest.json'; description = 'CUDA payload manifest' }
+    )) {
+      $matches = @(Get-ChildItem -LiteralPath $installRoot -Filter ([string]$required.name) -File -Recurse -ErrorAction Stop)
+      if ($matches.Count -ne 1) {
+        throw "Expected exactly one $($required.description) after NSIS installation, found $($matches.Count)."
+      }
+      $verifiedFiles[[string]$required.name] = $matches[0].FullName
+    }
+
+    $mainExecutableMachine = Get-ReleaseEvidencePeMachine -Path $verifiedFiles['rain.exe'] -Description 'Installed Rain main executable'
+    if ($mainExecutableMachine -ne 0x8664) {
+      throw 'Installed Rain main executable must be an AMD64 PE artifact.'
+    }
+    if (-not (Test-Path -LiteralPath $uninstallerPath -PathType Leaf)) {
+      throw "Expected the generated NSIS uninstaller after installation: $uninstallerPath"
+    }
+    return [pscustomobject]@{
+      kind = 'rain-nsis-install-proof-v1'
+      schemaVersion = 1
+      installerPath = $Installer
+      installerSha256 = if (Test-Path -LiteralPath $Installer -PathType Leaf) { Get-ReleaseEvidenceSha256 $Installer } else { '' }
+      installRoot = $installRoot
+      mainExecutable = $verifiedFiles['rain.exe']
+      mainExecutableMachine = $mainExecutableMachine
+      payloadManifestPath = $verifiedFiles['payload-manifest.json']
+      uninstallerPath = $uninstallerPath
+      systemSideEffectsBefore = $systemSideEffectsBefore
+      silentInstall = [ordered]@{
+        arguments = @(Get-ReleaseEvidenceNsisInstallArguments -Destination $installRoot)
+        waited = $true
+        exitCode = [int]$process.ExitCode
+      }
+      process = $process
+    }
+  } catch {
+    $installError = $_
+  }
+
+  $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+  if (Test-Path -LiteralPath $uninstallerPath -PathType Leaf) {
+    try {
+      Invoke-ReleaseEvidenceNsisUninstallAndVerify -Installation ([pscustomobject]@{
+        installRoot = $installRoot
+        uninstallerPath = $uninstallerPath
+        systemSideEffectsBefore = $systemSideEffectsBefore
+      }) -ProcessAdapter $ProcessAdapter -SystemSideEffectProbe $SystemSideEffectProbe | Out-Null
+    } catch {
+      [void]$cleanupErrors.Add("generated uninstaller cleanup failed: $($_.Exception.Message)")
+    }
+  }
+  if (Test-Path -LiteralPath $installRoot) {
+    try {
+      & $RemoveInstallRoot $installRoot
+    } catch {
+      [void]$cleanupErrors.Add("residual install-root cleanup failed: $($_.Exception.Message)")
+    }
+  }
+  if ($cleanupErrors.Count -gt 0) {
+    throw "NSIS installation validation failed: $($installError.Exception.Message); additionally, $($cleanupErrors -join '; ')"
+  }
+  throw $installError
+}
+
+function Start-ReleaseEvidenceNsisUninstaller {
+  param(
+    [Parameter(Mandatory = $true)][string]$Uninstaller,
+    [scriptblock]$ProcessAdapter = $null
+  )
+
+  $uninstaller = Resolve-ReleaseEvidenceFile $Uninstaller 'Generated NSIS uninstaller'
+  $arguments = @('/S')
+  if ($null -ne $ProcessAdapter) {
+    return & $ProcessAdapter -FilePath $uninstaller -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+  }
+  return Start-Process -FilePath $uninstaller -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+}
+
+function Invoke-ReleaseEvidenceNsisUninstallAndVerify {
+  param(
+    [Parameter(Mandatory = $true)]$Installation,
+    [scriptblock]$ProcessAdapter = $null,
+    [scriptblock]$SystemSideEffectProbe = ${function:Get-ReleaseEvidenceNsisSystemSideEffectSnapshot},
+    [switch]$CleanupInstallRoot,
+    [scriptblock]$RemoveInstallRoot = {
+      param([string]$Path)
+      if (Test-Path -LiteralPath $Path) {
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+      }
+    }
+  )
+
+  $installRoot = Resolve-ReleaseEvidenceDirectory ([string](Get-ObjectProperty $Installation 'installRoot' 'NSIS installation')) 'NSIS installation root'
+  $declaredUninstaller = [string](Get-ObjectProperty $Installation 'uninstallerPath' 'NSIS installation')
+  $expectedUninstaller = Join-Path $installRoot 'uninstall.exe'
+  if (-not [string]::Equals(
+      [System.IO.Path]::GetFullPath($declaredUninstaller),
+      [System.IO.Path]::GetFullPath($expectedUninstaller),
+      [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'NSIS installation proof does not bind the generated uninstaller to the install root.'
+  }
+
+  $failures = [System.Collections.Generic.List[string]]::new()
+  $process = $null
+  try {
+    $process = Start-ReleaseEvidenceNsisUninstaller -Uninstaller $expectedUninstaller -ProcessAdapter $ProcessAdapter
+    if ($null -eq $process -or $null -eq $process.PSObject.Properties['ExitCode']) {
+      throw 'NSIS uninstaller did not return an exit code.'
+    }
+    if ([int]$process.ExitCode -ne 0) {
+      throw "NSIS uninstaller failed with exit code $($process.ExitCode)."
+    }
+  } catch {
+    [void]$failures.Add($_.Exception.Message)
+  }
+
+  try {
+    $residualProgramPayload = @()
+    if (Test-Path -LiteralPath $installRoot -PathType Container) {
+      $residualProgramPayload = @(
+        Get-ChildItem -LiteralPath $installRoot -File -Recurse -Force -ErrorAction Stop
+      )
+    }
+    if ($residualProgramPayload.Count -ne 0) {
+      throw "NSIS uninstaller left program payload in the disposable install root: $($residualProgramPayload.FullName -join ', ')"
+    }
+  } catch {
+    [void]$failures.Add($_.Exception.Message)
+  }
+
+  if ($Installation.PSObject.Properties.Name -contains 'systemSideEffectsBefore') {
+    try {
+      $systemSideEffectsAfter = & $SystemSideEffectProbe -Phase 'after-uninstall' -InstallRoot $installRoot
+      $beforeJson = ConvertTo-Json -InputObject $Installation.systemSideEffectsBefore -Depth 20 -Compress
+      $afterJson = ConvertTo-Json -InputObject $systemSideEffectsAfter -Depth 20 -Compress
+      if ($beforeJson -ne $afterJson) {
+        throw 'NSIS uninstaller did not restore the observable system-side-effect snapshot.'
+      }
+    } catch {
+      [void]$failures.Add($_.Exception.Message)
+    }
+  }
+
+  if ($CleanupInstallRoot) {
+    try {
+      & $RemoveInstallRoot $installRoot
+    } catch {
+      [void]$failures.Add("Disposable install-root cleanup failed: $($_.Exception.Message)")
+    }
+  }
+  if ($failures.Count -gt 0) {
+    throw "NSIS uninstaller verification failed: $($failures -join '; additionally, ')"
+  }
+
+  return [pscustomobject]@{
+    installRoot = $installRoot
+    uninstallerPath = $expectedUninstaller
+    process = $process
+    programPayloadRemoved = $true
+    residualInstallRoot = Test-Path -LiteralPath $installRoot -PathType Container
+  }
 }
 
 function Assert-ReleaseEvidenceMainExecutableImports {
@@ -1562,8 +2396,12 @@ function Write-ReleaseEvidenceSuccessManifest {
 
 Export-ModuleMember -Function @(
   'Get-ReleaseEvidenceSha256',
+  'Get-ReleaseEvidenceSecretFindings',
+  'Test-ReleaseEvidenceCudaOrDriverDllName',
+  'Assert-ReleaseEvidenceControlToolingCheckout',
   'Test-ReleaseEvidencePayloadManifestRelativeIdentity',
   'Assert-CandidateArtifactProvenance',
+  'Assert-InstalledArtifactManifest',
   'Assert-InstalledCudaPayload',
   'Protect-ReleaseEvidenceDiagnosticText',
   'Protect-ReleaseEvidenceLogFile',
@@ -1571,6 +2409,9 @@ Export-ModuleMember -Function @(
   'Join-ReleaseEvidenceWindowsCommandLine',
   'Get-ReleaseEvidenceNsisInstallArguments',
   'Start-ReleaseEvidenceNsisInstaller',
+  'Invoke-ReleaseEvidenceNsisInstallAndVerify',
+  'Start-ReleaseEvidenceNsisUninstaller',
+  'Invoke-ReleaseEvidenceNsisUninstallAndVerify',
   'Assert-ReleaseEvidenceMainExecutableImports',
   'Assert-ReleaseEvidenceCancellationFixture',
   'Invoke-WithReleaseEvidenceCancellationFixture',
