@@ -167,6 +167,7 @@ function Invoke-RainControlledToolchainInstall {
   $llvmBin = Join-Path $llvmRoot 'bin'
   $nsisHome = 'C:\Program Files (x86)\NSIS'
   $cmakeBin = Join-Path $CmakeExtractRoot 'cmake-4.0.0-windows-x86_64\bin'
+  $cmakePackageRoot = Split-Path -Parent $cmakeBin
   $cmakePath = Join-Path $cmakeBin 'cmake.exe'
   $errors = [System.Collections.Generic.List[string]]::new()
   $cmakeReady = $false
@@ -206,8 +207,7 @@ function Invoke-RainControlledToolchainInstall {
       "LLVM_BIN=$llvmBin",
       "NSIS_HOME=$nsisHome",
       "CMAKE_PATH=$cmakePath",
-      "CMAKE=$cmakePath",
-      "CMAKE_ROOT=$CmakeExtractRoot"
+      "CMAKE=$cmakePath"
     )) {
       & $adapterToUse.appendLine $GitHubEnvFile $envLine
     }
@@ -237,7 +237,7 @@ function Invoke-RainControlledToolchainInstall {
   if ($errors.Count -gt 0) { throw "Controlled toolchain install failures: $($errors -join '; ')" }
   return [pscustomobject]@{
     cmakeReady = $true
-    cmakeRoot = $CmakeExtractRoot
+    cmakeRoot = $cmakePackageRoot
     cmakePath = $cmakePath
     cudaRoot = $cudaRoot
     llvmBin = $llvmBin
