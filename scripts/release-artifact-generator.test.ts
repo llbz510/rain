@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -31,6 +32,13 @@ const powerShellExecutable = resolvePowerShellExecutable()
 
 function sha256(path: string) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function expectSameExistingFile(actualPath: string, expectedPath: string) {
+  expect(existsSync(actualPath)).toBe(true)
+  expect(existsSync(expectedPath)).toBe(true)
+  expect(realpathSync.native(actualPath)).toBe(realpathSync.native(expectedPath))
+  expect(readFileSync(actualPath)).toEqual(readFileSync(expectedPath))
 }
 
 function windowsShortPath(path: string) {
@@ -812,8 +820,8 @@ describe('controlled release artifact generator', () => {
       command,
     ], { encoding: 'utf8', windowsHide: true })
     const result = JSON.parse(stdout)
-    expect(result.manifestPath).toBe(join(outputRoot, 'release-artifact-manifest.json'))
-    expect(result.recordPath).toBe(join(outputRoot, 'controlled-build-record.json'))
+    expectSameExistingFile(result.manifestPath, join(outputRoot, 'release-artifact-manifest.json'))
+    expectSameExistingFile(result.recordPath, join(outputRoot, 'controlled-build-record.json'))
     expect(result.noRecordBeforeCoreUploadDigest).toBe(true)
     const record = JSON.parse(readFileSync(result.recordPath, 'utf8'))
     expect(record.coreArtifact).toEqual({ name: 'rain-candidate-core', digest: coreDigest })
@@ -838,7 +846,7 @@ describe('controlled release artifact generator', () => {
       outputRoot: join(root, 'same-instant-record'),
       manifestReadAdapter: readAsDateTime,
     })
-    expect(accepted.controlledBuildRecordPath).toBe(join(root, 'same-instant-record', 'controlled-build-record.json'))
+    expectSameExistingFile(accepted.controlledBuildRecordPath, join(root, 'same-instant-record', 'controlled-build-record.json'))
 
     const readDifferentDateTime = "{ param($path) $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json; $value.controlledBuild.buildMetadata.builtAt = [DateTime]::Parse('2026-08-11T12:00:01.0000000+00:00', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); return $value }"
     expect(() => runControlledBuildRecord({
