@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -11,8 +12,58 @@ const candidateTargetCommit = '3006757838b972b511917663e4ba8328804607d6'
 const checkoutAction = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683'
 const uploadArtifactAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 
+function resolvePowerShellExecutable() {
+  for (const candidate of ['pwsh.exe', 'powershell.exe']) {
+    const probe = spawnSync(candidate, ['-NoProfile', '-NonInteractive', '-Command', '$null'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    if (probe.status === 0) return candidate
+  }
+  throw new Error('controlled GPU artifact workflow tests require pwsh.exe or powershell.exe.')
+}
+
+const powerShellExecutable = resolvePowerShellExecutable()
+
 function readWorkflow() {
   return readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n')
+}
+
+function workflowRunBlock(workflow: string, stepName: string) {
+  const stepStart = requiredIndex(workflow, `      - name: ${stepName}\n`)
+  const runStart = requiredIndex(workflow.slice(stepStart), '        run: |\n') + stepStart
+  const bodyStart = runStart + '        run: |\n'.length
+  const nextStep = workflow.indexOf('\n      - name:', bodyStart)
+  return workflow.slice(bodyStart, nextStep >= 0 ? nextStep : workflow.length)
+    .split('\n')
+    .map((line) => line.startsWith('          ') ? line.slice(10) : line)
+    .join('\n')
+}
+
+function parsePowerShell(source: string) {
+  const encodedSource = Buffer.from(source, 'utf8').toString('base64')
+  const parserCommand = [
+    `$source = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${encodedSource}'))`,
+    '$tokens = $null',
+    '$parseErrors = $null',
+    '[void][System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)',
+    'foreach ($parseError in $parseErrors) { [Console]::Error.WriteLine($parseError.Message) }',
+    'if ($parseErrors.Count -gt 0) { exit 1 }',
+  ].join('\n')
+  const result = spawnSync(powerShellExecutable, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-EncodedCommand',
+    Buffer.from(parserCommand, 'utf16le').toString('base64'),
+  ], {
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  return {
+    status: result.status,
+    error: result.error?.message,
+    output: `${result.stdout}\n${result.stderr}`.trim(),
+  }
 }
 
 function requiredIndex(source: string, needle: string) {
@@ -170,6 +221,21 @@ describe('controlled GPU artifact build workflow contract', () => {
 
     expect(() => assertCanonicalDispatchEligibility(illegalEnvFixture)).toThrow()
     expect(() => assertCanonicalDispatchEligibility(illegalEnvFixture)).toThrow(/env/)
+  })
+
+  it('keeps the pinned-download PowerShell block parseable and braces diagnostic variables before a colon', () => {
+    const workflow = readWorkflow()
+    const downloadBlock = workflowRunBlock(workflow, 'Download and verify pinned CUDA, LLVM, NSIS, and CMake packages')
+    const parseResult = parsePowerShell(downloadBlock)
+    const legalScopeNames = new Set(['env', 'global', 'local', 'private', 'script', 'using', 'function', 'variable', 'alias', 'drive'])
+    const unbracedVariableColonReferences = Array.from(workflow.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*):/g))
+      .map((match) => match[0])
+      .filter((reference) => !legalScopeNames.has(reference.slice(1, -1).toLowerCase()))
+
+    expect(parseResult.error, parseResult.output).toBeUndefined()
+    expect(parseResult.status, parseResult.output).toBe(0)
+    expect(downloadBlock).toContain('SHA-256 mismatch for ${Uri}: expected')
+    expect(unbracedVariableColonReferences).toEqual([])
   })
 
   it('pins CMake, records the complete hosted toolchain, and guarantees installed-tree and candidate cleanup', () => {

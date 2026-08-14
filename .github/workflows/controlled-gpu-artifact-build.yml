@@ -163,9 +163,9 @@ jobs:
               try {
                 Remove-Item -LiteralPath $Destination -Force -ErrorAction Stop
               } catch {
-                throw "SHA-256 mismatch for $Uri: expected $ExpectedSha256, found $actualSha256; and failed to remove the rejected download: $($_.Exception.Message)"
+                throw "SHA-256 mismatch for ${Uri}: expected $ExpectedSha256, found $actualSha256; and failed to remove the rejected download: $($_.Exception.Message)"
               }
-              throw "SHA-256 mismatch for $Uri: expected $ExpectedSha256, found $actualSha256."
+              throw "SHA-256 mismatch for ${Uri}: expected $ExpectedSha256, found $actualSha256."
             }
           }
           try {
