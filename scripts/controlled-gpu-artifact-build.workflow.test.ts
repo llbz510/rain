@@ -128,6 +128,11 @@ function assertCanonicalDispatchEligibility(workflow: string) {
   expect(expression).toBe(`\${{ github.repository == 'llbz510/rain' && github.ref == 'refs/heads/master' && inputs.confirm_target == 'BUILD-${candidateTargetCommit}' }}`)
 }
 
+function assertControlledWindows2022Runner(workflow: string) {
+  const runnerLabels = Array.from(workflow.matchAll(/^    runs-on:\s*([^\r\n#]+)\s*$/gm), (match) => match[1].trim())
+  expect(runnerLabels, 'controlled build must use one fixed hosted runner label').toEqual(['windows-2022'])
+}
+
 function assertPinnedCmakeConsumers(workflow: string, toolchainModule: string) {
   expect(toolchainModule).toContain('foreach ($pathLine in @($llvmBin, $nsisHome, $cmakeBin))')
   expect(toolchainModule).toContain('& $adapterToUse.appendLine $GitHubPathFile $pathLine')
@@ -178,8 +183,6 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(workflow).toContain(`BUILD-${candidateTargetCommit}`)
     assertCanonicalDispatchEligibility(workflow)
     expect(workflow).toContain('permissions:\n  contents: read')
-    expect(workflow).toContain('runs-on: windows-2025')
-    expect(workflow).not.toContain('RAIN_CONTROLLED_WINDOWS_RUNNER')
     expect(workflow).toContain('timeout-minutes: 180')
     expect(workflow).toContain('CMAKE_MINIMUM_VERSION: 4.0.0')
     expect(workflow).toContain("CUDA_ARCHITECTURES: '120'")
@@ -273,6 +276,27 @@ describe('controlled GPU artifact build workflow contract', () => {
 
     expect(workflow).not.toMatch(/(?:nvidia-smi|scripts[\\/]run-nvidia-release-evidence\.ps1|evidence:nvidia-release|harness:check|cargo test|gh release|softprops\/action-gh-release|Start-Process\s+-Verb\s+RunAs)/i)
     expect(workflow).not.toMatch(/(?:ggml-[^\s'"`]*\.bin|\.gguf|whisper-models)/i)
+  })
+
+  it('pins the controlled build to standard windows-2022 and rejects changing runner images, pools, or variables', () => {
+    const workflow = readWorkflow()
+    const unsupportedRunnerLabels = [
+      'windows-2025',
+      'windows-latest',
+      'windows-2026',
+      'windows-2025-vs2026',
+      'self-hosted',
+      '[self-hosted, windows-2022]',
+      '${{ vars.RAIN_CONTROLLED_WINDOWS_RUNNER }}',
+      '${{ inputs.runner }}',
+    ]
+
+    assertControlledWindows2022Runner(workflow)
+    for (const unsupportedRunnerLabel of unsupportedRunnerLabels) {
+      const fixture = workflow.replace(/^    runs-on: [^\r\n]+$/m, `    runs-on: ${unsupportedRunnerLabel}`)
+      expect(fixture).not.toBe(workflow)
+      expect(() => assertControlledWindows2022Runner(fixture)).toThrow()
+    }
   })
 
   it('rejects job eligibility gates that use an illegal env context before a hosted build can be scheduled', () => {

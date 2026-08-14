@@ -37,7 +37,7 @@ jobs:
   build:
     name: Build exact merged candidate on hosted Windows
     if: ${{ github.repository == 'llbz510/rain' && github.ref == 'refs/heads/master' && inputs.confirm_target == 'BUILD-3006757838b972b511917663e4ba8328804607d6' }}
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 180
     env:
       CI: true
