@@ -138,7 +138,7 @@ jobs:
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-build-disk.psm1') -Force
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-native-tool-probe.psm1') -Force
           Assert-ControlledBuildPathsFreeBytes -Stage 'before-download' -Paths @($env:RUNNER_TEMP, $env:GITHUB_WORKSPACE) -MinimumBytes 24GB | Out-Null
-          foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe')) {
+          foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe', 'curl.exe')) {
             if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "Hosted Windows runner is missing required command: $command" }
           }
           [void](Invoke-RainControlledNativeToolProbe -Name 'node' -Path (Get-Command node.exe -ErrorAction Stop).Source -Arguments @('--version'))
@@ -146,6 +146,7 @@ jobs:
           [void](Invoke-RainControlledNativeToolProbe -Name 'cargo' -Path (Get-Command cargo.exe -ErrorAction Stop).Source -Arguments @('--version'))
           [void](Invoke-RainControlledNativeToolProbe -Name 'rustup' -Path (Get-Command rustup.exe -ErrorAction Stop).Source -Arguments @('--version'))
           [void](Invoke-RainControlledNativeToolProbe -Name 'ninja' -Path (Get-Command ninja.exe -ErrorAction Stop).Source -Arguments @('--version'))
+          [void](Invoke-RainControlledNativeToolProbe -Name 'curl' -Path (Get-Command curl.exe -ErrorAction Stop).Source -Arguments @('--version'))
 
       - name: Download and verify pinned CUDA, LLVM, NSIS, and CMake packages
         shell: pwsh
@@ -157,7 +158,11 @@ jobs:
           $downloadsReservation = New-RainControlledDirectoryReservation -Path $toolDownloads -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
           New-Item -ItemType Directory -Path $toolDownloads -ErrorAction Stop | Out-Null
           function Get-VerifiedDownload([string]$Uri, [string]$ExpectedSha256, [string]$Destination) {
-            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Destination
+            & curl.exe --location --fail --silent --show-error --output $Destination --url $Uri
+            $curlExitCode = $LASTEXITCODE
+            if ($curlExitCode -ne 0) {
+              throw "Pinned download failed for ${Uri}: curl.exe exited with code $curlExitCode."
+            }
             $actualSha256 = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToUpperInvariant()
             if ($actualSha256 -ne $ExpectedSha256.ToUpperInvariant()) {
               try {
