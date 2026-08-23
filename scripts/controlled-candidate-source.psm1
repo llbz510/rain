@@ -37,6 +37,13 @@ function Assert-RainControlledCandidateSourceExitCode($Value, [string]$Descripti
   if ($Value -isnot [int] -or $Value -ne 0) { throw "$Description failed with exit code $Value." }
 }
 
+function Resolve-RainControlledCandidateSourcePublicPath([string]$Path) {
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  $pathRoot = [System.IO.Path]::GetPathRoot($fullPath)
+  if ([string]::Equals($fullPath, $pathRoot, [System.StringComparison]::OrdinalIgnoreCase)) { return $pathRoot }
+  return $fullPath.TrimEnd('\', '/')
+}
+
 function Open-RainControlledCandidateSource {
   param(
     [Parameter(Mandatory = $true)][string]$OwnedRoot,
@@ -54,7 +61,10 @@ function Open-RainControlledCandidateSource {
   if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
     throw "Controlled candidate-source directory is missing: $SourceRoot"
   }
-  return [pscustomobject][ordered]@{ ownedRoot = (Get-Item -LiteralPath $OwnedRoot).FullName; sourceRoot = (Get-Item -LiteralPath $SourceRoot).FullName }
+  return [pscustomobject][ordered]@{
+    ownedRoot = Resolve-RainControlledCandidateSourcePublicPath $OwnedRoot
+    sourceRoot = Resolve-RainControlledCandidateSourcePublicPath $SourceRoot
+  }
 }
 
 function New-RainControlledCandidateSource {
@@ -80,7 +90,11 @@ function New-RainControlledCandidateSource {
     Assert-RainControlledCandidateSourceExitCode (& $adapterToUse.gitArchive $CandidateRoot $CandidateTargetCommit $archivePath) 'git archive'
     Assert-RainControlledCandidateSourceExitCode (& $adapterToUse.tarExtract $archivePath $sourceRoot) 'tar extraction of exact candidate files'
     & $adapterToUse.removeFile $archivePath
-    return [pscustomobject][ordered]@{ ownedRoot = $ownedRoot; sourceRoot = $sourceRoot; reservationToken = $reservation.token }
+    return [pscustomobject][ordered]@{
+      ownedRoot = Resolve-RainControlledCandidateSourcePublicPath $ownedRoot
+      sourceRoot = Resolve-RainControlledCandidateSourcePublicPath $sourceRoot
+      reservationToken = $reservation.token
+    }
   } catch {
     $primaryError = $_
   } finally {
