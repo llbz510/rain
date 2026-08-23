@@ -138,7 +138,7 @@ jobs:
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-build-disk.psm1') -Force
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-native-tool-probe.psm1') -Force
           Assert-ControlledBuildPathsFreeBytes -Stage 'before-download' -Paths @($env:RUNNER_TEMP, $env:GITHUB_WORKSPACE) -MinimumBytes 24GB | Out-Null
-          foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe', 'curl.exe')) {
+          foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe', 'tar.exe', 'curl.exe')) {
             if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "Hosted Windows runner is missing required command: $command" }
           }
           [void](Invoke-RainControlledNativeToolProbe -Name 'node' -Path (Get-Command node.exe -ErrorAction Stop).Source -Arguments @('--version'))
@@ -148,6 +148,19 @@ jobs:
           [void](Invoke-RainControlledNativeToolProbe -Name 'ninja' -Path (Get-Command ninja.exe -ErrorAction Stop).Source -Arguments @('--version'))
           [void](Invoke-RainControlledNativeToolProbe -Name 'curl' -Path (Get-Command curl.exe -ErrorAction Stop).Source -Arguments @('--version'))
 
+      - name: Export exact tracked candidate source into invocation-owned TEMP build tree
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-candidate-source.psm1') -Force
+          $candidateSource = New-RainControlledCandidateSource -CandidateRoot $candidateRoot -CandidateTargetCommit $env:CANDIDATE_TARGET_COMMIT -OwnedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          Write-Output "::add-mask::$($candidateSource.reservationToken)"
+          "BUILD_SOURCE_OWNED_ROOT=$($candidateSource.ownedRoot)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BUILD_SOURCE_ROOT=$($candidateSource.sourceRoot)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BUILD_SOURCE_RESERVATION_TOKEN=$($candidateSource.reservationToken)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Download and verify pinned CUDA, LLVM, NSIS, and CMake packages
         shell: pwsh
         run: |
@@ -156,6 +169,7 @@ jobs:
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
           $toolDownloads = Join-Path $env:RUNNER_TEMP 'rain-pinned-tool-downloads'
           $downloadsReservation = New-RainControlledDirectoryReservation -Path $toolDownloads -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          Write-Output "::add-mask::$($downloadsReservation.token)"
           New-Item -ItemType Directory -Path $toolDownloads -ErrorAction Stop | Out-Null
           function Get-VerifiedDownload([string]$Uri, [string]$ExpectedSha256, [string]$Destination) {
             & curl.exe --location --fail --silent --show-error --output $Destination --url $Uri
@@ -354,11 +368,18 @@ jobs:
 
       - name: Install candidate JavaScript dependencies without test or evidence execution
         shell: pwsh
-        working-directory: candidate
         run: |
           $ErrorActionPreference = 'Stop'
-          npm ci
-          if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-candidate-source.psm1') -Force
+          $buildSource = Open-RainControlledCandidateSource -OwnedRoot $env:BUILD_SOURCE_OWNED_ROOT -SourceRoot $env:BUILD_SOURCE_ROOT -OwnedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:BUILD_SOURCE_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          Push-Location $buildSource.sourceRoot
+          try {
+            npm ci
+            if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
 
       - name: Build CUDA worker and NSIS candidate remotely
         shell: pwsh
@@ -367,7 +388,9 @@ jobs:
           $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-build-disk.psm1') -Force
           Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-owned-directory.psm1') -Force
-          $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-candidate-source.psm1') -Force
+          $buildSource = Open-RainControlledCandidateSource -OwnedRoot $env:BUILD_SOURCE_OWNED_ROOT -SourceRoot $env:BUILD_SOURCE_ROOT -OwnedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:BUILD_SOURCE_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          $buildSourceRoot = $buildSource.sourceRoot
           $workerScript = Join-Path $controlRoot 'scripts\build-whisper-cuda-worker.ps1'
           $workerInvocationId = "github-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $workerTarget = Join-Path $env:RUNNER_TEMP "rain-controlled-worker-target-$workerInvocationId"
@@ -379,12 +402,14 @@ jobs:
           if (-not [string]::Equals($env:CMAKE, $env:CMAKE_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw 'The standard CMAKE environment variable is not bound to pinned CMake.'
           }
-          Assert-ControlledBuildPathsFreeBytes -Stage 'before-cuda-worker-build' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 16GB | Out-Null
-          & $workerScript -ProjectRoot $candidateRoot -CudaRoot $env:CUDA_ROOT -NinjaPath (Get-Command ninja.exe -ErrorAction Stop).Source -CmakePath $env:CMAKE_PATH -LlvmBinPath $env:LLVM_BIN -VcVarsPath $env:MSVC_VCVARS64_PATH -WorkerTargetRoot $workerTarget -WorkerInvocationId $workerInvocationId
+          Assert-ControlledBuildPathsFreeBytes -Stage 'before-cuda-worker-build' -Paths @($workerTarget, (Join-Path $buildSourceRoot 'src-tauri\target')) -MinimumBytes 16GB | Out-Null
+          & $workerScript -ProjectRoot $buildSourceRoot -CudaRoot $env:CUDA_ROOT -NinjaPath (Get-Command ninja.exe -ErrorAction Stop).Source -CmakePath $env:CMAKE_PATH -LlvmBinPath $env:LLVM_BIN -VcVarsPath $env:MSVC_VCVARS64_PATH -WorkerTargetRoot $workerTarget -WorkerInvocationId $workerInvocationId
           if ($LASTEXITCODE -ne 0) { throw "CUDA worker build failed with exit code $LASTEXITCODE" }
           Remove-RainControlledOwnedDirectory -Path $workerTarget -AllowedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $workerReservation.token -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
-          Assert-ControlledBuildPathsFreeBytes -Stage 'before-tauri-package' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 12GB | Out-Null
-          Push-Location $candidateRoot
+          $buildSource = Open-RainControlledCandidateSource -OwnedRoot $env:BUILD_SOURCE_OWNED_ROOT -SourceRoot $env:BUILD_SOURCE_ROOT -OwnedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:BUILD_SOURCE_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          $buildSourceRoot = $buildSource.sourceRoot
+          Assert-ControlledBuildPathsFreeBytes -Stage 'before-tauri-package' -Paths @($workerTarget, (Join-Path $buildSourceRoot 'src-tauri\target')) -MinimumBytes 12GB | Out-Null
+          Push-Location $buildSourceRoot
           try {
             Remove-Item -LiteralPath Env:CMAKE_ROOT -ErrorAction SilentlyContinue
             npx.cmd --no-install tauri build --config src-tauri/tauri.gpu.conf.json
@@ -399,7 +424,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
           $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
-          $installerDirectory = Join-Path $candidateRoot 'src-tauri\target\release\bundle\nsis'
+          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-candidate-source.psm1') -Force
+          $buildSource = Open-RainControlledCandidateSource -OwnedRoot $env:BUILD_SOURCE_OWNED_ROOT -SourceRoot $env:BUILD_SOURCE_ROOT -OwnedParent $env:RUNNER_TEMP -OwnerId $env:CONTROLLED_INVOCATION_ID -ReservationToken $env:BUILD_SOURCE_RESERVATION_TOKEN -CleanupAuthorityToken $env:CONTROLLED_CLEANUP_AUTHORITY_TOKEN
+          $installerDirectory = Join-Path $buildSource.sourceRoot 'src-tauri\target\release\bundle\nsis'
           $installers = @(Get-ChildItem -LiteralPath $installerDirectory -Filter '*.exe' -File -ErrorAction Stop)
           if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
           $installer = $installers[0]
@@ -464,40 +491,21 @@ jobs:
           "BUILD_RECORD_ID=$buildRecordId" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "BUILT_AT=$builtAt" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Clean candidate build residue before immutable upload
+      - name: Verify canonical candidate source remained clean during isolated build
         if: ${{ always() }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $controlRoot = Join-Path $env:GITHUB_WORKSPACE 'control'
-          Import-Module -Name (Join-Path $controlRoot 'scripts\controlled-build-disk.psm1') -Force
           $candidateRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate'
-          $candidateCleanupErrors = [System.Collections.Generic.List[string]]::new()
-          try {
-            if (-not (Test-Path -LiteralPath $candidateRoot -PathType Container)) {
-              Write-Host "Candidate checkout is absent; no candidate residue can be removed: $candidateRoot"
-            } else {
-              git -C $candidateRoot clean -ffdx
-              if ($LASTEXITCODE -ne 0) { throw "Could not remove candidate untracked build residue: $LASTEXITCODE" }
-              $candidateCleanupStatusOutput = & git -C $candidateRoot status --porcelain --untracked-files=all 2>&1
-              $candidateCleanupStatusExitCode = $LASTEXITCODE
-              if ($candidateCleanupStatusExitCode -ne 0) { throw "Could not verify candidate cleanup status: $candidateCleanupStatusExitCode" }
-              $candidateStatusEntries = @($candidateCleanupStatusOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-              if ($candidateStatusEntries.Count -gt 0) {
-                $candidateStatusDiagnosticLimit = 20
-                $candidateStatusDiagnosticEntries = @($candidateStatusEntries | Select-Object -First $candidateStatusDiagnosticLimit)
-                throw "Candidate checkout is not clean after controlled build cleanup. Remaining relative porcelain entries (first $($candidateStatusDiagnosticEntries.Count) of $($candidateStatusEntries.Count)): $($candidateStatusDiagnosticEntries -join '; ')"
-              }
-            }
-          } catch {
-            [void]$candidateCleanupErrors.Add("Candidate cleanup failed: $($_.Exception.Message)")
+          $candidateStatusOutput = & git -C $candidateRoot status --porcelain --untracked-files=all 2>&1
+          $candidateStatusExitCode = $LASTEXITCODE
+          if ($candidateStatusExitCode -ne 0) { throw "Could not verify canonical candidate source status: $candidateStatusExitCode" }
+          $candidateStatusEntries = @($candidateStatusOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          if ($candidateStatusEntries.Count -gt 0) {
+            $candidateStatusDiagnosticLimit = 20
+            $candidateStatusDiagnosticEntries = @($candidateStatusEntries | Select-Object -First $candidateStatusDiagnosticLimit)
+            throw "Canonical candidate source changed during isolated build. Remaining relative porcelain entries (first $($candidateStatusDiagnosticEntries.Count) of $($candidateStatusEntries.Count)): $($candidateStatusDiagnosticEntries -join '; ')"
           }
-          try {
-            Assert-ControlledBuildPathsFreeBytes -Stage 'after-candidate-cleanup' -Paths @($env:GITHUB_WORKSPACE, (Join-Path $candidateRoot 'src-tauri\target')) -MinimumBytes 12GB | Out-Null
-          } catch {
-            [void]$candidateCleanupErrors.Add("Post-cleanup disk gate failed: $($_.Exception.Message)")
-          }
-          if ($candidateCleanupErrors.Count -gt 0) { throw "Controlled cleanup failures: $($candidateCleanupErrors -join '; ')" }
 
       - name: Upload immutable candidate core first
         id: upload_core

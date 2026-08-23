@@ -1,8 +1,7 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 const repoRoot = join(__dirname, '..')
 const workflowPath = join(repoRoot, '.github', 'workflows', 'controlled-gpu-artifact-build.yml')
@@ -14,7 +13,6 @@ const checkoutAction = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af68
 const uploadArtifactAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
 const pinnedNsisDirectUrl = 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe'
 const legacyNsisDownloadPageUrl = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
-const temporaryRoots: string[] = []
 
 function resolvePowerShellExecutable() {
   for (const candidate of ['pwsh.exe', 'powershell.exe']) {
@@ -32,46 +30,6 @@ const powerShellExecutable = resolvePowerShellExecutable()
 function readWorkflow() {
   return readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n')
 }
-
-function newTemporaryRoot() {
-  const root = mkdtempSync(join(tmpdir(), 'rain-controlled-workflow-test-'))
-  temporaryRoots.push(root)
-  return root
-}
-
-function psQuoted(value: string) {
-  return `'${value.replace(/'/g, "''")}'`
-}
-
-function runGit(repositoryRoot: string, arguments_: string[]) {
-  const result = spawnSync('git', ['-C', repositoryRoot, ...arguments_], { encoding: 'utf8', windowsHide: true })
-  if (result.status !== 0) throw new Error(`git ${arguments_.join(' ')} failed: ${result.stderr || result.stdout}`)
-  return result.stdout.trim()
-}
-
-function invokeCandidateCleanup(workflow: string, workspace: string) {
-  const cleanupBlock = workflowRunBlock(workflow, 'Clean candidate build residue before immutable upload').replace(
-    "Import-Module -Name (Join-Path $controlRoot 'scripts\\controlled-build-disk.psm1') -Force",
-    'function Assert-ControlledBuildPathsFreeBytes { param([string]$Stage, [string[]]$Paths, [int64]$MinimumBytes) return [pscustomobject]@{} }',
-  )
-  const command = [
-    "$ErrorActionPreference = 'Stop'",
-    `$env:GITHUB_WORKSPACE = ${psQuoted(workspace)}`,
-    '$errorText = $null',
-    `try { & { ${cleanupBlock} } } catch { $errorText = $_.Exception.Message }`,
-    '[ordered]@{ error = $errorText } | ConvertTo-Json -Compress',
-  ].join('\n')
-  const result = spawnSync(powerShellExecutable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
-    encoding: 'utf8',
-    windowsHide: true,
-  })
-  if (result.status !== 0) throw new Error(`workflow cleanup harness failed: ${result.stderr || result.stdout}`)
-  return JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1)!)
-}
-
-afterEach(() => {
-  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
-})
 
 function workflowRunBlock(workflow: string, stepName: string) {
   const stepStart = requiredIndex(workflow, `      - name: ${stepName}\n`)
@@ -145,7 +103,7 @@ function assertPinnedCmakeConsumers(workflow: string, toolchainModule: string) {
 
 function assertReservedCmakeRootIsolatedFromBuildChildren(workflow: string, toolchainModule: string, workerBuildScript: string) {
   const buildBlock = workflowRunBlock(workflow, 'Build CUDA worker and NSIS candidate remotely')
-  const workerInvocation = requiredIndex(buildBlock, '& $workerScript -ProjectRoot $candidateRoot')
+  const workerInvocation = requiredIndex(buildBlock, '& $workerScript -ProjectRoot $buildSourceRoot')
   const tauriInvocation = requiredIndex(buildBlock, 'npx.cmd --no-install tauri build --config src-tauri/tauri.gpu.conf.json')
   const removal = 'Remove-Item -LiteralPath Env:CMAKE_ROOT -ErrorAction SilentlyContinue'
   const workerRemoval = requiredIndex(workerBuildScript, removal)
@@ -167,8 +125,8 @@ function assertNativeGitFailureClosed(workflow: string) {
   expect(workflow).toContain('$exitCode = $LASTEXITCODE')
   expect(workflow).toContain("$controlStatus = Invoke-ControlledGitText $controlRoot 'Control tooling status' @('status', '--porcelain', '--untracked-files=all')")
   expect(workflow).toContain("$candidateStatus = Invoke-ControlledGitText $candidateRoot 'Candidate status' @('status', '--porcelain', '--untracked-files=all')")
-  expect(workflow).toContain('$candidateCleanupStatusExitCode = $LASTEXITCODE')
-  expect(workflow).toContain("if ($candidateCleanupStatusExitCode -ne 0) { throw \"Could not verify candidate cleanup status: $candidateCleanupStatusExitCode\" }")
+  expect(workflow).toContain('$candidateStatusExitCode = $LASTEXITCODE')
+  expect(workflow).toContain("if ($candidateStatusExitCode -ne 0) { throw \"Could not verify canonical candidate source status: $candidateStatusExitCode\" }")
 }
 
 describe('controlled GPU artifact build workflow contract', () => {
@@ -219,7 +177,7 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(workflow).toContain("Import-Module -Name (Join-Path $controlRoot 'scripts\\controlled-build-disk.psm1')")
     expect(workflow).toContain("-Paths @($env:RUNNER_TEMP, $env:GITHUB_WORKSPACE)")
     expect(toolchainModule).toContain("@($DownloadsRoot, $CmakeExtractRoot, $cudaRoot, $llvmRoot, $nsisHome)")
-    expect(workflow).toContain("-Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\\target'))")
+    expect(workflow).toContain("-Paths @($workerTarget, (Join-Path $buildSourceRoot 'src-tauri\\target'))")
     expect(workflow).not.toContain('Get-RunnerFreeBytes')
     expect(workflow).not.toContain('$env:SystemDrive')
     expect(toolchainModule).toContain('Remove-RainControlledOwnedDirectory -Path $DownloadsRoot')
@@ -254,8 +212,8 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(workflow).toContain('$workerReservation = New-RainControlledDirectoryReservation')
     expect(workflow).toContain('Remove-RainControlledOwnedDirectory -Path $workerTarget')
     expect(workflow).toContain('-ToolchainRecordPath $env:TOOLCHAIN_RECORD_PATH')
-    expect(workflow).toContain('git -C $candidateRoot clean -ffdx')
-    expect(workflow).toContain('after-candidate-cleanup')
+    expect(workflow).not.toContain('git -C $candidateRoot clean -ffdx')
+    expect(workflow).toContain('Verify canonical candidate source remained clean during isolated build')
     expect(readFileSync(workerBuildScriptPath, 'utf8')).toContain("'--locked'")
 
     const coreUploadIndex = requiredIndex(workflow, 'id: upload_core')
@@ -332,7 +290,7 @@ describe('controlled GPU artifact build workflow contract', () => {
     const downloadBlock = workflowRunBlock(workflow, 'Download and verify pinned CUDA, LLVM, NSIS, and CMake packages')
     const curlCommand = '& curl.exe --location --fail --silent --show-error --output $Destination --url $Uri'
 
-    expect(preflightBlock).toContain("foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe', 'curl.exe'))")
+    expect(preflightBlock).toContain("foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe', 'tar.exe', 'curl.exe'))")
     expect(preflightBlock).toContain("Invoke-RainControlledNativeToolProbe -Name 'curl' -Path (Get-Command curl.exe -ErrorAction Stop).Source -Arguments @('--version')")
     expect(workflow).not.toContain('curl = [ordered]@{')
     expect(downloadBlock).not.toContain('Invoke-WebRequest')
@@ -361,31 +319,52 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(workflow).toContain('msvc = [ordered]@{ version = $env:MSVC_VERSION; hostArchitecture = \'x64\'; targetArchitecture = \'x64\' }')
   })
 
-  it('fails closed after cleanup when tracked dirt remains and reports a finite relative porcelain diagnostic', () => {
-    const workspace = newTemporaryRoot()
-    const candidateRoot = join(workspace, 'candidate')
-    mkdirSync(candidateRoot, { recursive: true })
-    runGit(candidateRoot, ['init'])
-    runGit(candidateRoot, ['config', 'user.email', 'rain-test@example.invalid'])
-    runGit(candidateRoot, ['config', 'user.name', 'Rain Test'])
-    const trackedFiles = Array.from({ length: 21 }, (_, index) => join(candidateRoot, `tracked-${index.toString().padStart(2, '0')}.txt`))
-    for (const path of trackedFiles) writeFileSync(path, 'committed')
-    runGit(candidateRoot, ['add', '.'])
-    runGit(candidateRoot, ['commit', '-m', 'fixture'])
-    for (const path of trackedFiles) writeFileSync(path, 'dirty')
-    const untrackedPath = join(candidateRoot, 'untracked-build-output.txt')
-    writeFileSync(untrackedPath, 'removable build residue')
+  it('fails closed if the canonical candidate source changes, without restoring or cleaning it', () => {
+    const workflow = readWorkflow()
+    const sourceCheckBlock = workflowRunBlock(workflow, 'Verify canonical candidate source remained clean during isolated build')
 
-    const result = invokeCandidateCleanup(readWorkflow(), workspace)
+    expect(sourceCheckBlock).toContain("$candidateStatusOutput = & git -C $candidateRoot status --porcelain --untracked-files=all 2>&1")
+    expect(sourceCheckBlock).toContain('Canonical candidate source changed during isolated build. Remaining relative porcelain entries')
+    expect(sourceCheckBlock).not.toMatch(/\bgit\s+-C\s+\$candidateRoot\s+(?:clean|checkout|restore)\b/)
+  })
 
-    expect(result.error).toContain('Candidate checkout is not clean after controlled build cleanup')
-    expect(result.error).toContain('Remaining relative porcelain entries (first 20 of 21)')
-    expect(result.error).toContain('tracked-00.txt')
-    expect(result.error).not.toContain('tracked-20.txt')
-    expect(result.error).not.toContain(candidateRoot)
-    expect(readFileSync(trackedFiles[0], 'utf8')).toBe('dirty')
-    expect(existsSync(untrackedPath)).toBe(false)
-    expect(runGit(candidateRoot, ['status', '--porcelain', '--untracked-files=all'])).toContain('M tracked-00.txt')
+  it('exports only tracked candidate files into a pure source child of a masked, reserved TEMP parent', () => {
+    const workflow = readWorkflow()
+    const verificationBlock = workflowRunBlock(workflow, 'Verify manual dispatch, exact control tooling, and candidate ancestry')
+    const preflightBlock = workflowRunBlock(workflow, 'Verify hosted Windows capacity and preinstalled build prerequisites')
+    const sourceExportBlock = workflowRunBlock(workflow, 'Export exact tracked candidate source into invocation-owned TEMP build tree')
+    const npmBlock = workflowRunBlock(workflow, 'Install candidate JavaScript dependencies without test or evidence execution')
+    const buildBlock = workflowRunBlock(workflow, 'Build CUDA worker and NSIS candidate remotely')
+
+    expect(verificationBlock).toContain("Invoke-ControlledGitText $candidateRoot 'Candidate reachability from canonical master'")
+    expect(preflightBlock).toContain("foreach ($command in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustup.exe', 'ninja.exe', '7z.exe', 'tar.exe', 'curl.exe'))")
+    expect(requiredIndex(workflow, '      - name: Verify hosted Windows capacity and preinstalled build prerequisites\n')).toBeLessThan(
+      requiredIndex(workflow, '      - name: Export exact tracked candidate source into invocation-owned TEMP build tree\n'),
+    )
+    expect(sourceExportBlock).toContain("Import-Module -Name (Join-Path $controlRoot 'scripts\\controlled-candidate-source.psm1') -Force")
+    expect(sourceExportBlock).toContain('New-RainControlledCandidateSource -CandidateRoot $candidateRoot -CandidateTargetCommit $env:CANDIDATE_TARGET_COMMIT')
+    expect(sourceExportBlock).toContain('Write-Output "::add-mask::$($candidateSource.reservationToken)"')
+    expect(sourceExportBlock).toContain('BUILD_SOURCE_OWNED_ROOT=')
+    expect(sourceExportBlock).toContain('BUILD_SOURCE_ROOT=')
+    expect(sourceExportBlock).toContain('BUILD_SOURCE_RESERVATION_TOKEN=')
+    const opens = workflow.match(/Open-RainControlledCandidateSource -OwnedRoot \$env:BUILD_SOURCE_OWNED_ROOT/g) ?? []
+    expect(opens).toHaveLength(4)
+    expect(npmBlock).toContain('Push-Location $buildSource.sourceRoot')
+    expect(buildBlock).toContain('& $workerScript -ProjectRoot $buildSourceRoot')
+    expect(buildBlock).toContain('Push-Location $buildSourceRoot')
+    expect(workflow).not.toContain('git -C $candidateRoot clean -ffdx')
+    expect(workflow).not.toContain('git -C $candidateRoot checkout')
+    expect(workflow).not.toContain('git -C $candidateRoot restore')
+  })
+
+  it('masks every ownership reservation token before exposing it through GITHUB_ENV', () => {
+    const workflow = readWorkflow()
+    const downloadBlock = workflowRunBlock(workflow, 'Download and verify pinned CUDA, LLVM, NSIS, and CMake packages')
+
+    expect(downloadBlock).toContain('Write-Output "::add-mask::$($downloadsReservation.token)"')
+    expect(requiredIndex(downloadBlock, 'Write-Output "::add-mask::$($downloadsReservation.token)"')).toBeLessThan(
+      requiredIndex(downloadBlock, '"PINNED_DOWNLOADS_RESERVATION_TOKEN=$($downloadsReservation.token)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'),
+    )
   })
 
   it('pins CMake, records the complete hosted toolchain, and guarantees installed-tree and candidate cleanup', () => {
@@ -420,13 +399,10 @@ describe('controlled GPU artifact build workflow contract', () => {
     expect(workflow).toContain("-Stage 'before-download' -Paths @($env:RUNNER_TEMP, $env:GITHUB_WORKSPACE) -MinimumBytes 24GB")
     expect(toolchainModule).toContain("diskGate 'before-install' @($DownloadsRoot, $CmakeExtractRoot, $cudaRoot, $llvmRoot, $nsisHome) 20GB")
     expect(toolchainModule).toContain("diskGate 'after-tool-install-cleanup' @($DownloadsRoot, $CmakeExtractRoot) 14GB")
-    expect(workflow).toContain("-Stage 'before-cuda-worker-build' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\\target')) -MinimumBytes 16GB")
-    expect(workflow).toContain("-Stage 'before-tauri-package' -Paths @($workerTarget, (Join-Path $candidateRoot 'src-tauri\\target')) -MinimumBytes 12GB")
-    expect(workflow).toContain("-Stage 'after-candidate-cleanup' -Paths @($env:GITHUB_WORKSPACE, (Join-Path $candidateRoot 'src-tauri\\target')) -MinimumBytes 12GB")
-    expect(workflow).toContain('Clean candidate build residue before immutable upload\n        if: ${{ always() }}')
-    expect(workflow).toContain('$candidateCleanupErrors = [System.Collections.Generic.List[string]]::new()')
+    expect(workflow).toContain("-Stage 'before-cuda-worker-build' -Paths @($workerTarget, (Join-Path $buildSourceRoot 'src-tauri\\target')) -MinimumBytes 16GB")
+    expect(workflow).toContain("-Stage 'before-tauri-package' -Paths @($workerTarget, (Join-Path $buildSourceRoot 'src-tauri\\target')) -MinimumBytes 12GB")
+    expect(workflow).toContain('Verify canonical candidate source remained clean during isolated build\n        if: ${{ always() }}')
     expect(workflow).toContain('Invocation-owned TEMP cleanup failed')
-    expect(workflow).toContain('Controlled cleanup failures:')
     expect(workflow).toContain('$artifactGenerationError')
     expect(workflow).toContain('$artifactCleanupErrors')
     expect(workflow).toContain('Artifact generation failed:')
