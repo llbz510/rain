@@ -663,14 +663,14 @@ function Assert-RainReleaseArtifactArchiveContents {
     throw 'Installer archive Rain executable must be an AMD64 PE artifact.'
   }
 
+  # 7z's NSIS handler reduces the virtual $INSTDIR prefix before it exposes
+  # archive item paths. The extraction root is consequently the physical
+  # application root; only $PLUGINSDIR remains a literal NSIS directory.
+  $installRoot = $archive
   $nsisDirectories = @(Get-ChildItem -LiteralPath $archive -Directory -Recurse -Force -ErrorAction Stop)
-  $installDirectories = @($nsisDirectories | Where-Object { $_.Name -ceq '$INSTDIR' })
-  if ($installDirectories.Count -ne 1) {
-    throw "Installer archive extraction must contain exactly one explicit NSIS `$INSTDIR application root; found $($installDirectories.Count)."
-  }
-  $installRoot = $installDirectories[0].FullName
-  if ((Get-RainReleaseArtifactRelativePath $archive $installRoot 'Installer archive NSIS application root') -ne '$INSTDIR') {
-    throw 'Installer archive NSIS $INSTDIR application root must be a direct child of the extraction root.'
+  $physicalInstallDirectories = @($nsisDirectories | Where-Object { $_.Name -ieq '$INSTDIR' })
+  if ($physicalInstallDirectories.Count -ne 0) {
+    throw "Installer archive extraction must not contain a physical NSIS `$INSTDIR marker; found $($physicalInstallDirectories.Count)."
   }
   $pluginDirectories = @($nsisDirectories | Where-Object { $_.Name -ceq '$PLUGINSDIR' })
   if ($pluginDirectories.Count -ne 1) {
@@ -682,7 +682,7 @@ function Assert-RainReleaseArtifactArchiveContents {
   }
   $expectedRainExecutable = Join-Path $installRoot 'Rain.exe'
   if (-not (Test-RainReleaseArtifactSameExistingPath $rainExecutables[0].FullName $expectedRainExecutable $false)) {
-    throw 'Installer archive Rain executable must be located at $INSTDIR/Rain.exe.'
+    throw 'Installer archive Rain executable must be located at the extraction root as Rain.exe.'
   }
 
   $payloadManifests = @($files | Where-Object { $_.Name -ieq 'payload-manifest.json' })
@@ -692,7 +692,7 @@ function Assert-RainReleaseArtifactArchiveContents {
   $payloadDirectory = Join-Path $installRoot 'resources\whisper-backends'
   $expectedPayloadManifest = Join-Path $payloadDirectory 'payload-manifest.json'
   if (-not (Test-RainReleaseArtifactSameExistingPath $payloadManifests[0].FullName $expectedPayloadManifest $false)) {
-    throw 'Installer archive CUDA payload manifest must be located at $INSTDIR/resources/whisper-backends/payload-manifest.json.'
+    throw 'Installer archive CUDA payload manifest must be located at resources/whisper-backends/payload-manifest.json below the extraction root.'
   }
   try {
     $payload = Get-Content -LiteralPath $payloadManifests[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -731,7 +731,7 @@ function Assert-RainReleaseArtifactArchiveContents {
     $file = $matches[0]
     $expectedFile = Join-Path $payloadDirectory $requiredName
     if (-not (Test-RainReleaseArtifactSameExistingPath $file.FullName $expectedFile $false)) {
-      throw "Installer archive CUDA payload file '$requiredName' must be located below the explicit `$INSTDIR/resources/whisper-backends payload directory."
+      throw "Installer archive CUDA payload file '$requiredName' must be located below the extraction-root resources/whisper-backends payload directory."
     }
     if ([int64](Get-RainReleaseArtifactProperty $entry 'sizeBytes' "Installer archive CUDA payload manifest file $requiredName") -ne $file.Length -or
         [string](Get-RainReleaseArtifactProperty $entry 'sha256' "Installer archive CUDA payload manifest file $requiredName") -ne (Get-RainReleaseArtifactSha256 $file.FullName)) {
