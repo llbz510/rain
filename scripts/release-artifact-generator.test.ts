@@ -920,7 +920,7 @@ describe('controlled release artifact generator', () => {
     rmSync(applicationPayload, { recursive: true, force: true })
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
-      .rejects.toThrow(/CUDA payload manifest must be located at resources\/whisper-backends\/payload-manifest\.json below the\s+extraction root/i)
+      .rejects.toThrow(/CUDA payload manifest must be located at resources\/whisper-backends\/payload-manifest\.json below the(?:\s|\x1b\[[0-9;]*m)*extraction root/i)
   })
 
   it('rejects a CUDA payload moved into a physical $INSTDIR directory instead of the extraction-root application payload', async () => {
