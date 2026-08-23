@@ -60,12 +60,14 @@ describe('controlled candidate source module', () => {
       `New-Item -ItemType Directory -Path ${quote(join(ownedRoot, 'candidate-source'))} -ErrorAction Stop | Out-Null`,
       `$opened = Open-RainControlledCandidateSource -OwnedRoot ${quote(ownedRoot)} -SourceRoot ${quote(join(ownedRoot, 'candidate-source'))} -OwnedParent ${quote(ownedParent)} -OwnerId 'run-123-1' -ReservationToken $reservation.token -CleanupAuthorityToken 'authority-secret'`,
       `$reservationCheck = Open-RainControlledDirectoryReservation -Path ${quote(ownedRoot)} -AllowedParent ${quote(ownedParent)} -OwnerId 'run-123-1' -ReservationToken $reservation.token -CleanupAuthorityToken 'authority-secret'`,
+      `$sourceIdentityMatches = [string]::Equals((Get-Item -LiteralPath $opened.sourceRoot).FullName, (Get-Item -LiteralPath ${quote(join(ownedRoot, 'candidate-source'))}).FullName, [System.StringComparison]::OrdinalIgnoreCase)`,
+      `$reservationIdentityMatches = [string]::Equals((Get-Item -LiteralPath $reservationCheck.path).FullName, (Get-Item -LiteralPath ${quote(ownedRoot)}).FullName, [System.StringComparison]::OrdinalIgnoreCase)`,
       `Remove-RainControlledOwnedDirectory -Path ${quote(ownedRoot)} -AllowedParent ${quote(ownedParent)} -OwnerId 'run-123-1' -ReservationToken $reservation.token -CleanupAuthorityToken 'authority-secret'`,
-      '[ordered]@{ sourceRoot = $opened.sourceRoot; reservationPath = $reservationCheck.path; ownedRootExistsAfterCleanup = Test-Path -LiteralPath ' + quote(ownedRoot) + ' } | ConvertTo-Json -Compress',
+      '[ordered]@{ sourceIdentityMatches = $sourceIdentityMatches; reservationIdentityMatches = $reservationIdentityMatches; ownedRootExistsAfterCleanup = Test-Path -LiteralPath ' + quote(ownedRoot) + ' } | ConvertTo-Json -Compress',
     ])
 
-    expect(result.sourceRoot).toBe(join(ownedRoot, 'candidate-source'))
-    expect(result.reservationPath).toBe(ownedRoot)
+    expect(result.sourceIdentityMatches).toBe(true)
+    expect(result.reservationIdentityMatches).toBe(true)
     expect(result.ownedRootExistsAfterCleanup).toBe(false)
   })
 
