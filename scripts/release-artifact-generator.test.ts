@@ -389,7 +389,7 @@ function writeControlledToolchainRecordFixture(root: string) {
   return toolchainRecordPath
 }
 
-function createInstalledTreeFixture(root: string, { archiveWrapper = '$PLUGINSDIR' }: { archiveWrapper?: string } = {}) {
+function createInstalledTreeFixture(root: string, { archiveWrapper = '$INSTDIR' }: { archiveWrapper?: string } = {}) {
   const installRoot = join(root, 'installed')
   const payloadRoot = join(installRoot, 'resources', 'whisper-backends')
   const installerPath = join(root, 'Rain_0.1.0_x64-setup.exe')
@@ -405,9 +405,10 @@ function createInstalledTreeFixture(root: string, { archiveWrapper = '$PLUGINSDI
 
   writeNsisInstallerFixture(installerPath)
   writePeFixture(join(archiveRoot, 'embedded-bootstrapper.exe'), 0x14c)
-  // 7z extraction is an independent, additive judge.  Its fixture must look
-  // like an unpacked Rain payload rather than merely contain an NSIS stub.
+  // 7z extraction is an independent, additive judge. NSIS places the app at
+  // $INSTDIR and also retains a separate direct $PLUGINSDIR plugin area.
   const archivePayloadBase = join(archiveRoot, archiveWrapper)
+  mkdirSync(join(archiveRoot, '$PLUGINSDIR'), { recursive: true })
   writePeFixture(join(archivePayloadBase, 'Rain.exe'), 0x8664)
   const archivePayloadRoot = join(archivePayloadBase, 'resources', 'whisper-backends')
   const archivePayloadFiles = [
@@ -801,45 +802,95 @@ describe('controlled release artifact generator', () => {
       .rejects.toThrow(/installer-archive.*secret|secret.*installer-archive/i)
   })
 
-  it('accepts the unique Tauri NSIS $PLUGINSDIR archive wrapper and its exact AMD64 CUDA payload layout', async () => {
+  it('accepts the direct Tauri NSIS $INSTDIR application root plus a separate direct $PLUGINSDIR plugin directory', async () => {
     const root = newTemporaryRoot()
-    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root, { archiveWrapper: '$PLUGINSDIR' })
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
 
     await runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') })
   })
 
-  it.each([
-    ['a bare extraction root', ''],
-    ['an arbitrary wrapper directory', 'unexpected-wrapper'],
-  ])('rejects %s instead of treating any recursive archive match as the NSIS payload root', async (_label, archiveWrapper) => {
+  it('rejects an archive that omits the required direct NSIS plugin directory', async () => {
     const root = newTemporaryRoot()
-    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root, { archiveWrapper })
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    rmSync(join(archiveRoot, '$PLUGINSDIR'), { recursive: true, force: true })
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
-      .rejects.toThrow(/exactly one explicit NSIS \$PLUGINSDIR wrapper/i)
+      .rejects.toThrow(/exactly one explicit NSIS \$PLUGINSDIR plugin directory; found 0/i)
   })
 
-  it('rejects multiple NSIS payload wrappers instead of accepting the first recursive Rain payload', async () => {
+  it('rejects an archive whose only exact NSIS plugin directory is nested', async () => {
     const root = newTemporaryRoot()
-    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root, { archiveWrapper: '$PLUGINSDIR' })
-    cpSync(join(archiveRoot, '$PLUGINSDIR'), join(archiveRoot, '$PLUGINSDIR-copy'), { recursive: true })
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    mkdirSync(join(archiveRoot, 'shadow'), { recursive: true })
+    renameSync(join(archiveRoot, '$PLUGINSDIR'), join(archiveRoot, 'shadow', '$PLUGINSDIR'))
+
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/NSIS \$PLUGINSDIR plugin directory must be a direct child of the extraction root/i)
+  })
+
+  it('rejects an archive whose only exact NSIS application root is nested', async () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    mkdirSync(join(archiveRoot, 'shadow'), { recursive: true })
+    renameSync(join(archiveRoot, '$INSTDIR'), join(archiveRoot, 'shadow', '$INSTDIR'))
+
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/NSIS \$INSTDIR application root must be a direct child of the extraction root/i)
+  })
+
+  it('rejects a second AMD64 Rain executable anywhere in the extracted archive', async () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    writePeFixture(join(archiveRoot, 'shadow', 'Rain.exe'), 0x8664)
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
       .rejects.toThrow(/exactly one AMD64 Rain executable; found 2/i)
   })
 
-  it('rejects a nested second exact NSIS wrapper even when it contains no Rain payload', async () => {
+  it.each([
+    ['$INSTDIR', '$instdir', /exactly one explicit NSIS \$INSTDIR application root; found 0/i],
+    ['$PLUGINSDIR', '$pluginsdir', /exactly one explicit NSIS \$PLUGINSDIR plugin directory; found 0/i],
+  ])('rejects a wrong-case NSIS directory name %s renamed to %s', async (exactName, wrongCaseName, expectedError) => {
     const root = newTemporaryRoot()
-    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root, { archiveWrapper: '$PLUGINSDIR' })
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    renameSync(join(archiveRoot, exactName), join(archiveRoot, wrongCaseName))
+
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(expectedError)
+  })
+
+  it.each([
+    ['a bare extraction root', ''],
+    ['an arbitrary wrapper directory', 'unexpected-wrapper'],
+  ])('rejects %s instead of treating any recursive archive match as the NSIS application root', async (_label, archiveWrapper) => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root, { archiveWrapper })
+
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/exactly one explicit NSIS \$INSTDIR application root/i)
+  })
+
+  it('rejects a nested second exact NSIS plugin directory even when it contains no Rain payload', async () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
     mkdirSync(join(archiveRoot, 'shadow', '$PLUGINSDIR'), { recursive: true })
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
-      .rejects.toThrow(/exactly one explicit NSIS \$PLUGINSDIR wrapper; found 2/i)
+      .rejects.toThrow(/exactly one explicit NSIS \$PLUGINSDIR plugin directory; found 2/i)
   })
 
-  it('rejects a duplicate CUDA worker outside the unique NSIS payload wrapper', async () => {
+  it('rejects a nested second exact NSIS application root even when it contains no Rain payload', async () => {
     const root = newTemporaryRoot()
-    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root, { archiveWrapper: '$PLUGINSDIR' })
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    mkdirSync(join(archiveRoot, 'shadow', '$INSTDIR'), { recursive: true })
+
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/exactly one explicit NSIS \$INSTDIR application root; found 2/i)
+  })
+
+  it('rejects a duplicate CUDA worker outside the unique NSIS application payload root', async () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
     writeFixtureFile(join(archiveRoot, 'shadow', 'rain-whisper-cuda.exe'), 'duplicate archive worker')
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
@@ -848,11 +899,23 @@ describe('controlled release artifact generator', () => {
 
   it('rejects an unexpected file in the NSIS CUDA payload directory instead of accepting a superset', async () => {
     const root = newTemporaryRoot()
-    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root, { archiveWrapper: '$PLUGINSDIR' })
-    writeFixtureFile(join(archiveRoot, '$PLUGINSDIR', 'resources', 'whisper-backends', 'unexpected.dll'), 'unexpected archive runtime')
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    writeFixtureFile(join(archiveRoot, '$INSTDIR', 'resources', 'whisper-backends', 'unexpected.dll'), 'unexpected archive runtime')
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
       .rejects.toThrow(/payload directory must contain exactly the payload manifest, worker, and three CUDA runtime DLLs/i)
+  })
+
+  it('rejects a CUDA payload moved into the plugin directory instead of the application root', async () => {
+    const root = newTemporaryRoot()
+    const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
+    const applicationPayload = join(archiveRoot, '$INSTDIR', 'resources', 'whisper-backends')
+    const pluginPayload = join(archiveRoot, '$PLUGINSDIR', 'resources', 'whisper-backends')
+    cpSync(applicationPayload, pluginPayload, { recursive: true })
+    rmSync(applicationPayload, { recursive: true, force: true })
+
+    await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
+      .rejects.toThrow(/CUDA payload manifest must be located at \$INSTDIR\/resources\/whisper-backends\/payload-manifest\.json/i)
   })
 
   it('rejects an empty installer archive extraction instead of declaring an unscanned scope clean', async () => {
