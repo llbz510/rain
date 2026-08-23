@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module -Name (Join-Path $PSScriptRoot 'controlled-owned-directory.psm1') -Force
+Import-Module -Name (Join-Path $PSScriptRoot 'controlled-owned-directory.psm1')
 
 function New-RainControlledCandidateSourceAdapter {
   return [pscustomobject]@{
