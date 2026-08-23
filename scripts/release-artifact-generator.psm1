@@ -663,9 +663,27 @@ function Assert-RainReleaseArtifactArchiveContents {
     throw 'Installer archive Rain executable must be an AMD64 PE artifact.'
   }
 
+  $pluginDirectories = @(Get-ChildItem -LiteralPath $archive -Directory -Recurse -Force -ErrorAction Stop | Where-Object { $_.Name -ceq '$PLUGINSDIR' })
+  if ($pluginDirectories.Count -ne 1) {
+    throw "Installer archive extraction must contain exactly one explicit NSIS `$PLUGINSDIR wrapper; found $($pluginDirectories.Count)."
+  }
+  $pluginRoot = $pluginDirectories[0].FullName
+  if ((Get-RainReleaseArtifactRelativePath $archive $pluginRoot 'Installer archive NSIS wrapper') -ne '$PLUGINSDIR') {
+    throw 'Installer archive NSIS $PLUGINSDIR wrapper must be a direct child of the extraction root.'
+  }
+  $expectedRainExecutable = Join-Path $pluginRoot 'Rain.exe'
+  if (-not (Test-RainReleaseArtifactSameExistingPath $rainExecutables[0].FullName $expectedRainExecutable $false)) {
+    throw 'Installer archive Rain executable must be located at $PLUGINSDIR/Rain.exe.'
+  }
+
   $payloadManifests = @($files | Where-Object { $_.Name -ieq 'payload-manifest.json' })
   if ($payloadManifests.Count -ne 1) {
     throw "Installer archive extraction must contain exactly one CUDA payload manifest; found $($payloadManifests.Count)."
+  }
+  $payloadDirectory = Join-Path $pluginRoot 'resources\whisper-backends'
+  $expectedPayloadManifest = Join-Path $payloadDirectory 'payload-manifest.json'
+  if (-not (Test-RainReleaseArtifactSameExistingPath $payloadManifests[0].FullName $expectedPayloadManifest $false)) {
+    throw 'Installer archive CUDA payload manifest must be located at $PLUGINSDIR/resources/whisper-backends/payload-manifest.json.'
   }
   try {
     $payload = Get-Content -LiteralPath $payloadManifests[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -679,10 +697,6 @@ function Assert-RainReleaseArtifactArchiveContents {
     throw 'Installer archive CUDA payload manifest does not declare the required release payload contract.'
   }
 
-  $payloadDirectory = Split-Path -Parent $payloadManifests[0].FullName
-  if ((Get-RainReleaseArtifactRelativePath $archive $payloadDirectory 'Installer archive CUDA payload directory') -ne 'resources/whisper-backends') {
-    throw 'Installer archive CUDA payload manifest must be located at resources/whisper-backends/payload-manifest.json.'
-  }
   $payloadEntries = @((Get-RainReleaseArtifactProperty $payload 'files' 'Installer archive CUDA payload manifest'))
   if ($payloadEntries.Count -ne $script:RequiredCudaPayloadFiles.Count) {
     throw 'Installer archive CUDA payload manifest file list is not the required exact payload set.'
@@ -700,19 +714,26 @@ function Assert-RainReleaseArtifactArchiveContents {
     $payloadByName[$key] = $entry
   }
   foreach ($requiredName in $script:RequiredCudaPayloadFiles) {
-    $matches = @($files | Where-Object {
-      $_.Name -ieq $requiredName -and
-      [string]::Equals($_.Directory.FullName, (Get-Item -LiteralPath $payloadDirectory).FullName, [System.StringComparison]::OrdinalIgnoreCase)
-    })
+    $matches = @($files | Where-Object { $_.Name -ieq $requiredName })
     if ($matches.Count -ne 1 -or -not $payloadByName.ContainsKey($requiredName.ToLowerInvariant())) {
       throw "Installer archive extraction must contain exactly one required CUDA payload file '$requiredName'; found $($matches.Count)."
     }
     $entry = $payloadByName[$requiredName.ToLowerInvariant()]
     $file = $matches[0]
+    $expectedFile = Join-Path $payloadDirectory $requiredName
+    if (-not (Test-RainReleaseArtifactSameExistingPath $file.FullName $expectedFile $false)) {
+      throw "Installer archive CUDA payload file '$requiredName' must be located below the explicit `$PLUGINSDIR/resources/whisper-backends payload directory."
+    }
     if ([int64](Get-RainReleaseArtifactProperty $entry 'sizeBytes' "Installer archive CUDA payload manifest file $requiredName") -ne $file.Length -or
         [string](Get-RainReleaseArtifactProperty $entry 'sha256' "Installer archive CUDA payload manifest file $requiredName") -ne (Get-RainReleaseArtifactSha256 $file.FullName)) {
       throw "Installer archive CUDA payload manifest does not match actual file '$requiredName'."
     }
+  }
+  $actualPayloadFiles = @(Get-ChildItem -LiteralPath $payloadDirectory -File -Recurse -Force -ErrorAction Stop)
+  $expectedPayloadNames = @($script:RequiredCudaPayloadFiles) + 'payload-manifest.json'
+  $unexpectedPayloadFiles = @($actualPayloadFiles | Where-Object { $_.Name -notin $expectedPayloadNames })
+  if ($actualPayloadFiles.Count -ne $expectedPayloadNames.Count -or $unexpectedPayloadFiles.Count -gt 0) {
+    throw 'Installer archive CUDA payload directory must contain exactly the payload manifest, worker, and three CUDA runtime DLLs.'
   }
   return [pscustomobject]@{
     archiveRoot = $archive
