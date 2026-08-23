@@ -53,10 +53,13 @@ export {
   getVideoById,
   insertVideo,
   listVideos,
+  queryVideos,
   searchVideosByTitle,
   updateVideoLastStudiedAt,
   updateVideoPosition,
   updateVideoStatus,
+  type VideoQuery,
+  type VideoSortBy,
 } from './database-videos'
 export { deleteVideoWithCascade } from './database-video-deletion'
 export {
