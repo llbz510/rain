@@ -1,20 +1,17 @@
 // src/pages/VideoListPage.tsx
 // ========================================
-// M17 视频列表页（Task 5 组装）
-// 顶栏：标题 / 搜索框 / 排序 / 导入
-// 主区：视频卡片网格，复用 VideoCard 组件
-// 数据：createDatabase + listVideos + searchVideosByTitle
-// jsdom 下 listVideos 返回空 → 显示空状态（getEmptyStateMessage）
+// Video 列表页：标题搜索、确定排序、导入与任务详情的页面组合。
+// 查询与导入刷新结果只由 cancellation-aware queryVideos effect 写入；已提交删除仍可同步移除对应卡片。
 // ========================================
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   deleteVideoWithCascade,
   getNodesByVideoId,
   getNotesByVideoId,
-  listVideos,
-  searchVideosByTitle,
+  queryVideos,
   type Database,
+  type VideoSortBy,
 } from '@/models/database'
 import { getDb } from '@/models/db-singleton'
 import { VideoCard } from '@/ui/components/video-list'
@@ -28,7 +25,11 @@ import {
   type ImportProgress,
 } from '@/pipeline/video-import-controller'
 
-type SortBy = 'lastStudied' | 'createdAt' | 'title'
+type SortBy = VideoSortBy
+
+function queryErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 const rootStyle: React.CSSProperties = {
   display: 'flex',
@@ -246,6 +247,8 @@ export function VideoListPage() {
   const [videos, setVideos] = useState<Video[]>([])
   const [sortBy, setSortBy] = useState<SortBy>('lastStudied')
   const [keyword, setKeyword] = useState('')
+  const [videoListError, setVideoListError] = useState('')
+  const [refreshRevision, setRefreshRevision] = useState(0)
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [importUrl, setImportUrl] = useState('')
@@ -261,10 +264,14 @@ export function VideoListPage() {
     let cancelled = false
     getDb()
       .then((d) => {
-        if (!cancelled) setDb(d)
+        if (!cancelled) {
+          setDb(d)
+          setVideoListError('')
+        }
       })
       .catch((err) => {
         console.error('[VideoListPage] 数据库初始化失败', err)
+        if (!cancelled) setVideoListError(queryErrorMessage(err))
       })
     return () => {
       cancelled = true
@@ -275,22 +282,24 @@ export function VideoListPage() {
   useEffect(() => {
     if (!db) return
     let cancelled = false
-    const trimmed = keyword.trim()
-    const promise = trimmed
-      ? searchVideosByTitle(db, trimmed)
-      : listVideos(db, sortBy)
-    promise
+    queryVideos(db, { titleKeyword: keyword, sortBy })
       .then((list) => {
-        if (!cancelled) setVideos(list)
+        if (!cancelled) {
+          setVideos(list)
+          setVideoListError('')
+        }
       })
       .catch((err) => {
         console.error('[VideoListPage] 查询视频列表失败', err)
-        if (!cancelled) setVideos([])
+        if (!cancelled) {
+          setVideos([])
+          setVideoListError(queryErrorMessage(err))
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [db, sortBy, keyword])
+  }, [db, sortBy, keyword, refreshRevision])
 
   // 点 ready 卡 → 进入学习界面（store 接管 currentVideoId 切页）
   const handleOpen = async (videoId: string) => {
@@ -298,18 +307,6 @@ export function VideoListPage() {
     const result = await useRainStore.getState().loadVideo(videoId)
     if (!result.ok) setOpenError(result.error)
   }
-
-  // 导入任务状态变更后，从持久层刷新列表事实。
-  const refreshVideos = useCallback(async () => {
-    if (!db) return
-    const list = keyword.trim() ? await searchVideosByTitle(db, keyword.trim()) : await listVideos(db, sortBy)
-    setVideos(list)
-  }, [db, keyword, sortBy])
-
-  const refreshVideosRef = useRef(refreshVideos)
-  useEffect(() => {
-    refreshVideosRef.current = refreshVideos
-  }, [refreshVideos])
 
   const importController = useMemo(() => {
     if (!db) return null
@@ -327,7 +324,7 @@ export function VideoListPage() {
           whisperBackendPreference: configured.whisperBackendPreference,
         }
       },
-      onChanged: () => refreshVideosRef.current(),
+      onChanged: () => setRefreshRevision((current) => current + 1),
       onProgress: (videoId, progress) => {
         setPipelineProgress((current) => {
           if (progress) return { ...current, [videoId]: progress }
@@ -466,6 +463,7 @@ export function VideoListPage() {
   }
 
   const isEmpty = videos.length === 0
+  const isTitleSearch = keyword.trim().length > 0
 
   return (
     <div data-testid="video-list-page" style={rootStyle}>
@@ -473,6 +471,7 @@ export function VideoListPage() {
         <span style={titleStyle}>Rain</span>
         <input
           type="text"
+          aria-label="搜索视频标题"
           placeholder="搜索标题"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
@@ -555,8 +554,16 @@ export function VideoListPage() {
 
       <main style={mainStyle}>
         {openError && <div role="alert" style={errorStyle}>{openError}</div>}
-        {isEmpty ? (
-          <div style={emptyStyle}>{getEmptyStateMessage()}</div>
+        {videoListError ? (
+          <div role="alert" style={errorStyle}>无法加载视频列表：{videoListError}</div>
+        ) : isEmpty ? (
+          <div
+            role={isTitleSearch ? 'status' : undefined}
+            aria-live={isTitleSearch ? 'polite' : undefined}
+            style={emptyStyle}
+          >
+            {isTitleSearch ? '没有找到匹配的视频' : getEmptyStateMessage()}
+          </div>
         ) : (
           <div style={gridStyle}>
             {videos.map((v) => (

@@ -213,6 +213,79 @@ export async function updateVideoStatus(
   memory.replaceTable('video', rows)
 }
 
+export type VideoSortBy = 'lastStudied' | 'createdAt' | 'title'
+
+export interface VideoQuery {
+  titleKeyword?: string
+  sortBy?: VideoSortBy
+}
+
+function sqlOrderBy(sortBy: VideoSortBy): string {
+  switch (sortBy) {
+    case 'createdAt':
+      return ' ORDER BY created_at DESC, id ASC'
+    case 'title':
+      return ' ORDER BY LOWER(title) ASC, title ASC, id ASC'
+    case 'lastStudied':
+      return ' ORDER BY last_studied_at DESC, id ASC'
+  }
+}
+
+function compareAscii(left: string, right: string): number {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
+
+function sortQueriedVideos(videos: Video[], sortBy: VideoSortBy): Video[] {
+  const sorted = [...videos]
+  switch (sortBy) {
+    case 'lastStudied':
+      sorted.sort((left, right) => right.lastStudiedAt - left.lastStudiedAt || compareAscii(left.id, right.id))
+      break
+    case 'createdAt':
+      sorted.sort((left, right) => right.createdAt - left.createdAt || compareAscii(left.id, right.id))
+      break
+    case 'title':
+      sorted.sort((left, right) =>
+        compareAscii(asciiLower(left.title), asciiLower(right.title))
+        || compareAscii(left.title, right.title)
+        || compareAscii(left.id, right.id),
+      )
+      break
+  }
+  return sorted
+}
+
+function asciiLower(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+}
+
+export async function queryVideos(
+  db: Database,
+  query: VideoQuery = {},
+): Promise<Video[]> {
+  const titleKeyword = query.titleKeyword?.trim() ?? ''
+  const sortBy = query.sortBy ?? 'lastStudied'
+
+  if (isSqlDatabase(db)) {
+    const sql = titleKeyword
+      ? `SELECT * FROM video WHERE instr(LOWER(title), LOWER($1)) > 0${sqlOrderBy(sortBy)}`
+      : `SELECT * FROM video${sqlOrderBy(sortBy)}`
+    const rows = titleKeyword
+      ? await db.query<TableRow>(sql, [titleKeyword])
+      : await db.query<TableRow>(sql)
+    return sortQueriedVideos(rows.map(rowToVideo), sortBy)
+  }
+
+  const normalizedKeyword = asciiLower(titleKeyword)
+  const videos = asMemoryDatabase(db)
+    .readTable('video')
+    .filter((row) => !normalizedKeyword || asciiLower(String(row.title)).includes(normalizedKeyword))
+    .map(rowToVideo)
+  return sortQueriedVideos(videos, sortBy)
+}
+
 export async function listVideos(
   db: Database,
   sortBy: string = 'lastStudied',

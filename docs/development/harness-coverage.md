@@ -138,7 +138,7 @@
 | AC-RL-20 | Active scope/AC/coverage 文档 | Partial | 控制面可提供 truth source；尚无目标 Release Notes 与 artifact、有效 Evidence、缺陷和回滚逐项发布对账 |
 | AC-VL-01 | `video-import-task-dialog.test.tsx`、`video-list-page-recovery.test.tsx`、M17 | Partial | 多持久状态、错误和动作已有生产 DOM 行为；规定信息层级与完整视觉 Evidence 未裁判 |
 | AC-VL-02 | `database-videos.test.ts` | Partial | SQLite 排序和稳定查询存在；生产 UI 三选项、默认最近学习和双 adapter 同义尚无纵切 Judge |
-| AC-VL-03 | `database-videos.test.ts` | Partial | 标题查询基础行为存在；生产搜索控件、排序组合、空白/无结果/数据库失败区分未形成完整 Judge |
+| AC-VL-03 | `video-title-query.test.ts`、`video-list-title-search.test.tsx` | Partial | 生产 `VideoListPage` 的具名标题控件、清理空白、无结果 live status、空库/数据库失败和导入刷新竞态均有 Judge；真实 Memory fixture、仅标题字段的 mutation proof、`%`/`_` 字面查询、SQLite 公开 SQL 合同与共享最终排序器均有 Judge；尚无真实 SQLite/Tauri 桌面 Judge 或所需 Evidence，不能提升为 Strong/Desktop/Evidence |
 | AC-VL-04 | `video-list-local-import.test.tsx`、`video-import-task-dialog.test.tsx` | Partial | 导入与非 ready 详情入口存在；排序/搜索/空库/无结果/失败的完整页面组合和桌面 DOM 未闭合 |
 | AC-VL-05 | `video-list-deletion.test.tsx`、Rust `video_deletion` tests | Partial | 数据库级联与源视频保留已有 Judge；提交后 app-owned 缩略图删除、非法路径和可重试文件失败未实现 |
 | AC-VL-06 | 尚无缩略图 GC Judge | Gap | 缺真实 keep-set、路径逃逸、并发新建、幂等与部分失败覆盖 |
