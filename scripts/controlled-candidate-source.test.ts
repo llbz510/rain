@@ -46,6 +46,31 @@ function candidateFixture(root: string) {
 afterEach(() => { for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('controlled candidate source module', () => {
+  it('keeps owned-directory reservation, cleanup, and candidate cross-step open callable after the workflow import order', () => {
+    const root = newRoot()
+    const ownedParent = join(root, 'runner-temp')
+    const ownedRoot = join(ownedParent, 'workflow-owned-root')
+    mkdirSync(ownedParent)
+    const result = invoke([
+      "$ErrorActionPreference = 'Stop'",
+      `Import-Module ${quote(ownedDirectoryModulePath)} -Force`,
+      `Import-Module ${quote(modulePath)} -Force`,
+      `$reservation = New-RainControlledDirectoryReservation -Path ${quote(ownedRoot)} -AllowedParent ${quote(ownedParent)} -OwnerId 'run-123-1' -CleanupAuthorityToken 'authority-secret'`,
+      `New-Item -ItemType Directory -Path ${quote(ownedRoot)} -ErrorAction Stop | Out-Null`,
+      `New-Item -ItemType Directory -Path ${quote(join(ownedRoot, 'candidate-source'))} -ErrorAction Stop | Out-Null`,
+      `$opened = Open-RainControlledCandidateSource -OwnedRoot ${quote(ownedRoot)} -SourceRoot ${quote(join(ownedRoot, 'candidate-source'))} -OwnedParent ${quote(ownedParent)} -OwnerId 'run-123-1' -ReservationToken $reservation.token -CleanupAuthorityToken 'authority-secret'`,
+      `$reservationCheck = Open-RainControlledDirectoryReservation -Path ${quote(ownedRoot)} -AllowedParent ${quote(ownedParent)} -OwnerId 'run-123-1' -ReservationToken $reservation.token -CleanupAuthorityToken 'authority-secret'`,
+      `$sourceIdentityMatches = [string]::Equals((Get-Item -LiteralPath $opened.sourceRoot).FullName, (Get-Item -LiteralPath ${quote(join(ownedRoot, 'candidate-source'))}).FullName, [System.StringComparison]::OrdinalIgnoreCase)`,
+      `$reservationIdentityMatches = [string]::Equals((Get-Item -LiteralPath $reservationCheck.path).FullName, (Get-Item -LiteralPath ${quote(ownedRoot)}).FullName, [System.StringComparison]::OrdinalIgnoreCase)`,
+      `Remove-RainControlledOwnedDirectory -Path ${quote(ownedRoot)} -AllowedParent ${quote(ownedParent)} -OwnerId 'run-123-1' -ReservationToken $reservation.token -CleanupAuthorityToken 'authority-secret'`,
+      '[ordered]@{ sourceIdentityMatches = $sourceIdentityMatches; reservationIdentityMatches = $reservationIdentityMatches; ownedRootExistsAfterCleanup = Test-Path -LiteralPath ' + quote(ownedRoot) + ' } | ConvertTo-Json -Compress',
+    ])
+
+    expect(result.sourceIdentityMatches).toBe(true)
+    expect(result.reservationIdentityMatches).toBe(true)
+    expect(result.ownedRootExistsAfterCleanup).toBe(false)
+  })
+
   it('exports only exact tracked files into a pure child and leaves the canonical repository byte-for-byte untouched', () => {
     const root = newRoot()
     const candidate = candidateFixture(root)

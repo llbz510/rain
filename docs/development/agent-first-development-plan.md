@@ -1,7 +1,7 @@
 # Rain Agent-first Development Plan
 
 > 状态：`Active`（会话与交付流程）
-> 更新日期：2026-08-02
+> 更新日期：2026-08-23
 
 > 产品语义边界：本文件不新增或修改 Active AC。下文标为 `Proposed` 的产品切片必须先由用户确认，才能进入 RED 或实现。
 > 方法依据：[`docs/research/2026-08-02-agent-first-harness-principles.md`](../research/2026-08-02-agent-first-harness-principles.md)
@@ -120,7 +120,7 @@ npm run harness:control
 
 ## 4. 候选工作队列（实际顺序以总交付计划为准）
 
-本节的 P0–P5 是候选优先级标签，不是独立于总交付路线图的执行顺序。唯一权威顺序见 `docs/development/rain-project-delivery-plan.md`：先完成 M1 发布范围冻结和 Release AC，再执行 M2 的 Hosted replay 与 Evidence freshness，之后才进入 M3 和产品实现。
+本节的 P0–P5 是候选优先级标签，不是独立于总交付路线图的执行顺序。唯一权威顺序见 `docs/development/rain-project-delivery-plan.md`：M1 发布范围冻结和 M2 当前证据重放已经完成；当前只收尾已启动的 M3 controlled merged-target artifact build。该构建 GREEN 后先执行一次只读的 Launch 功能完整性审计，再按审计结果关闭用户可见的 Confirmed 功能缺口；剩余 M3 Release Evidence、签名、许可和分发工作在功能面稳定后恢复，不得仅因候选包可构建就宣称产品完成。
 
 ### P0 — 重放执行时目标提交的 Hosted Runtime Settings Judge
 
@@ -232,3 +232,5 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 当前原子 Slice 是 **M3 controlled merged-target artifact build**。它从 `3006757838b972b511917663e4ba8328804607d6` 的精确候选源码构建受控 NSIS 候选，但 workflow/generator 位于后续、独立记录的 tooling commit；两者不得混淆。该 Slice 只建立固定 `windows-2022` hosted Windows 构建，不能改用会漂移到 VS2026 的 `windows-2025`/`windows-latest` 或自托管/变量 runner：固定且校验精确为 4.0.0 的 CMake 展开目录必须同时服务 CUDA worker 和独立 Tauri/Cargo 主构建，完成两个消费者后才在 always/finally cleanup 中删除；以 source-derived installer 文件名/kind 与基本 MZ/PE 形状进入唯一 TEMP 的真实静默安装，从实际 installed tree 反算 artifact manifest，同时保留 7-Zip installer archive 解包 hygiene Judge 作为增量扫描。读取真实 installed tree 完成后，finally 运行生成的 uninstaller `/S`、核对退出、完整 payload 与可观察系统副作用清理，并聚合清除安装根、archive 根、owned target 与 CMake TEMP 的错误；再生成独立 build record 和手工管理员 Evidence launcher。为避免循环，first core upload 仅含 installer/manifest/checksums；其 digest 才允许写入 record，随后才生成 launcher 并第二次上传 control artifact。它不 dispatch workflow、不生成 Release Evidence、不发布 GitHub Release、不运行本机 Cargo/installer/GPU/model/LLM，也不把 `AC-RL-01/02/08/10/12` 升级。
 
 先以 fake installed-tree、fake installer-archive、fake process/system-side-effect adapter、PowerShell CLI、runner provenance、launcher 与 workflow safety seams 完成 RED-to-GREEN；随后才可通过 PR、现有 Clean Windows Harness、独立 Spec/Standards review 和受保护合并。原 `AC-RL-12` 解包 Judge 未经 Harness Migration 不得退役；archive scan 是 installed-tree scan 的增量合同，不可互相替代。只有合并后由用户人工 dispatch 的 workflow 才能构建精确 target；只有用户手工以管理员身份运行生成 launcher 且 provider readiness 通过，才可考虑真实 M3-S3 Evidence。reviewer 必须独立核对 candidate target SHA、tooling SHA、record、artifact bytes、日志和证据边界。
+
+本 Slice 的退出动作已经由用户于 2026-08-23 调整：受保护合并并确认 controlled build GREEN 后，不继续自动进入 M3-S3 真实 GPU Evidence、签名、许可或下载 UX。下一唯一 Slice 改为只读的 **Launch 功能完整性审计**：逐项对照 Confirmed AC、`harness-coverage.md`、生产路由/界面和真实公开接口，把“真实可用”“部分实现”“只有测试或影子入口”“未实现”分开记录，并据此选择一个用户可见的 Confirmed 功能缺口进入下一次 RED-to-GREEN。审计本身不修改 AC、不实现 Proposed 行为，也不把测试存在等同于功能完成。

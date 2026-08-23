@@ -1603,7 +1603,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(rejected.output.error).toContain('Controlled-build record toolchain cuda.architectures must be exactly 120')
   })
 
-  it('requires an independent record to bind candidate target provenance separately from tooling provenance', async () => {
+  it('accepts an independent record that binds candidate target provenance separately from tooling provenance', async () => {
     const candidate = createArtifactFixture(newTemporaryRoot())
     const accepted = await invokeContract({
       operation: 'provenance',
@@ -1620,7 +1620,9 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       toolingCommit: candidate.toolingCommit,
       controlledBuildRecord: { targetCommit: candidate.targetCommit, toolingCommit: candidate.toolingCommit },
     })
+  })
 
+  it('rejects an independent provenance record that omits coreArtifact', async () => {
     const missingCoreArtifact = createArtifactFixture(newTemporaryRoot())
     const recordWithoutCoreArtifact = JSON.parse(readFileSync(missingCoreArtifact.controlledBuildRecordPath, 'utf8'))
     delete recordWithoutCoreArtifact.coreArtifact
@@ -1636,7 +1638,10 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     })
     expect(rejectedMissingCoreArtifact.status).toBe(1)
     expect(rejectedMissingCoreArtifact.output.error).toContain("Controlled-build record is missing required property 'coreArtifact'")
+  })
 
+  it('rejects an independent provenance record whose artifact-manifest SHA-256 is wrong', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
     const wrongManifestHash = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
     wrongManifestHash.artifactManifest.sha256 = '0'.repeat(64)
     writeFileSync(candidate.controlledBuildRecordPath, JSON.stringify(wrongManifestHash))
@@ -1651,7 +1656,10 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     })
     expect(rejectedHash.status).toBe(1)
     expect(rejectedHash.output.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
+  })
 
+  it('rejects an independent provenance record whose tooling commit does not match its artifact manifest', async () => {
+    const candidate = createArtifactFixture(newTemporaryRoot())
     const wrongTooling = JSON.parse(readFileSync(candidate.controlledBuildRecordPath, 'utf8'))
     wrongTooling.artifactManifest.sha256 = candidate.artifactManifestHash
     wrongTooling.toolingCommit = 'c'.repeat(40)

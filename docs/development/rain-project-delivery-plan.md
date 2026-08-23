@@ -1,7 +1,7 @@
 # Rain 项目完整落地计划
 
 > 状态：`Active`（项目交付路线图）
-> 更新日期：2026-08-10
+> 更新日期：2026-08-23
 > 适用范围：从当前已验证状态，持续推进到范围冻结、功能完成、Release Candidate、正式安装发布和上线后验证。
 > 产品授权边界：本计划规定顺序、门禁和候选工作，不自动把 Proposed 产品行为升级为 Confirmed。新增行为仍必须先由用户确认 AC。
 > 会话执行协议：`docs/development/agent-first-development-plan.md`
@@ -103,15 +103,14 @@ M1-S1 已确认本次首次正式落地至少包括：
 M0 控制基线
   -> M1 发布范围冻结
   -> M2 当前证据重放
-  -> M3 Release Engineering 与受支持 NVIDIA 证据
-  -> M4 数据/文件生命周期与架构深化
-  -> M5 视频列表产品闭环
-  -> M6 学习页交互闭环
+  -> M3a 当前 controlled-build 前置收尾
+  -> Launch 功能完整性审计
+  -> M4/M5/M6 与 M7 本地 Launch 功能缺口
+  -> M3b 剩余 Release Engineering 与受支持 NVIDIA 证据
   -> M9 视觉/可访问性/性能
   -> M10 Release Candidate 总验收
   -> M11 正式发布与上线后闭环
 
-M7 本地模型/ASR Launch 缺口 ------> 在 M9 前完成
 M7 云 ASR/语言/翻译扩展 ---------+
 M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 ```
@@ -125,7 +124,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 | M0 | 控制面与 agent-first 会话协议 | 2 | Complete | Active 计划、控制地图、独立审查规则可发现 |
 | M1 | 发布范围冻结与 Release AC | 2–4 | Complete — M1-S1 + M1-S2 confirmed and reviewed | 每个候选簇为 Launch/Post-release/Out-of-scope，发布 AC Confirmed |
 | M2 | 当前目标提交证据重放 | 1–3 | Complete — M2-S1 + M2-S2 | Hosted desktop Judge 对精确目标 SHA 通过或确定 RED 已关闭 |
-| M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | In progress — M3-S1 complete; M3-S2 superseded; M3-S3 next | 受支持 NVIDIA 安装证据、生命周期、签名和许可全部完成 |
+| M3 | 安装、GPU/CPU、签名、许可与分发 | 6–10 | In progress — current controlled-build prerequisite closes first; remaining M3 work then pauses for Launch feature completeness | 受支持 NVIDIA 安装证据、生命周期、签名和许可全部完成 |
 | M4 | 数据、派生文件、schema 与架构边界 | 5–8 | Partial | 升级兼容、缩略图生命周期、risk 22 和架构政策完成 |
 | M5 | 视频列表与导入任务产品闭环 | 6–9 | Partial | 排序/搜索/空状态/卡片/删除交互达到 Strong + 必要桌面证据；受控 URL 接口不被误写为真实站点承诺 |
 | M6 | 学习页基础产品闭环 | 5–9 | Partial | 布局、目录、字幕、右侧面板、快捷键和会话稳定性完成 |
@@ -686,5 +685,8 @@ Next single action:
 4. M2-S2：`Complete` — schema v2 包保留为 408b6db-era 历史 Evidence；独立 Spec/Standards gate 已通过。
 5. M3-S1：`Complete` — [`release-artifact-contract.md`](release-artifact-contract.md) 已定义正式产物合同，并通过独立 Spec + Standards review。
 6. M3-S2：`Superseded` — PR #29 runner 与 PR #30 NSIS prerequisite 保留历史；2026-08-03 GPU-required migration 退役无 NVIDIA 发布 Evidence。当前原子动作是 M3 controlled merged-target artifact build：hosted Windows 从精确、clean candidate source 构建，真实静默安装后从 installed tree 生成 manifest，并在读取完成后以生成的 uninstaller `/S` 清理；它仍不是 M3-S3 NVIDIA Windows Evidence。
+7. 当前 controlled-build Slice 经受保护合并并得到 GREEN 后，执行一次只读的 Launch 功能完整性审计。审计必须从 Confirmed AC 追到生产路由、真实界面、公开接口和当前 Judge，分别标记真实可用、部分实现、仅测试/影子入口和未实现；不得用 PRD 勾选、测试文件存在或候选包生成代替生产可用性。
+8. 按审计结果优先关闭用户可见的 Confirmed 功能缺口，每次只做一个 AC/一个独立缺口，并继续执行 TDD、完整允许门禁、Spec/Standards 独立审查和受保护 PR。优先级由影响核心本地学习流程的程度决定，而不是按文档编号机械排序。
+9. 当 Launch 功能面达到计划合同并重新审计后，再恢复 M3-S3 真实 NVIDIA Evidence、安装生命周期、签名、许可和分发工作。候选包构建成功本身不代表功能完成、GPU 实测或正式 Release。
 
-完成上述六个工作包所需的原子 Slice 前，不并行启动翻译、Vision 或高级树编辑。M3 之后依赖图允许 M4 和经确认的产品工作流并行，但每个独立 worktree 仍只承载一个可验证 Slice，并在合并前重新基于最新主线运行 Harness 与独立审查。
+在功能完整性审计前不并行启动翻译、Vision 或高级树编辑等 Post-release 能力。每个独立 worktree 仍只承载一个可验证 Slice，并在合并前重新基于最新主线运行 Harness 与独立审查。
