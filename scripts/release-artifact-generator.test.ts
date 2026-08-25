@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const repoRoot = join(__dirname, '..')
 const generatorModulePath = join(repoRoot, 'scripts', 'release-artifact-generator.psm1')
+const evidenceContractModulePath = join(repoRoot, 'scripts', 'nvidia-release-evidence-contract.psm1')
 const temporaryRoots: string[] = []
 const powerShellTestBudgets = Object.freeze({
   generatorProcessTimeoutMs: 10_000,
@@ -573,6 +574,22 @@ async function runControlledBuildRecord({
 afterEach(() => cleanupPowerShellTestResources())
 
 describe('controlled release artifact generator', () => {
+  it('preserves the NSIS install verifier when the controlled workflow imports the generator after the evidence contract', async () => {
+    const command = [
+      "$ErrorActionPreference = 'Stop'",
+      `Import-Module -Name ${psQuoted(evidenceContractModulePath)} -Force`,
+      `Import-Module -Name ${psQuoted(generatorModulePath)} -Force`,
+      "if (-not (Get-Command -Name 'Invoke-ReleaseEvidenceNsisInstallAndVerify' -ErrorAction SilentlyContinue)) { throw 'Controlled workflow import sequence lost the NSIS install verifier.' }",
+      "'retained'",
+    ].join('; ')
+
+    const stdout = await runPowerShell([
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ])
+
+    expect(stdout.trim()).toBe('retained')
+  })
+
   it('settles and reports a cleanup-denied PowerShell child without a later timer throw', async () => {
     const root = newTemporaryRoot()
     let completion!: ChildProcessCompletion
