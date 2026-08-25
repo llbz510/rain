@@ -223,7 +223,9 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M3-S3 NVIDIA Windows Evidence
 
-状态：`In progress — controlled artifact-build prerequisite`。runner safety enablement 已合并；确定性取消 fixture 和 session-scoped process-tree adapter 已存在，但未经权限验证的 provider subscription 继续 fail-closed。当前原子 Slice 从精确 candidate source target `3006757838b972b511917663e4ba8328804607d6` 建立独立、固定 `windows-2022` hosted controlled build、artifact manifest、build record 和手工管理员 launcher；不得改为 `windows-2025`/`windows-latest`、VS2026、self-hosted 或变量 runner，因为 CUDA 12.9 的受控 VS2022 边界需要稳定的 VS17 image。target source SHA 与 workflow/generator tooling SHA 必须分别记录和验证；workflow 按 `RUNNER_TEMP`、`GITHUB_WORKSPACE`、下载根和两个 target 根实际所在卷分别执行阶段磁盘门禁。native CUDA/LLVM/NSIS 和固定 CMake 4.0.0 的安装/下载清理/磁盘错误由一个深 module 聚合，只有 `cmakeReady` 后 workflow 才能消费 CMake root；展开目录必须贯穿 CUDA worker 与独立 Tauri/Cargo 主构建，之后在 always/finally cleanup 中删除。installer archive 解包根必须保留到 archive/installed-tree 双扫描完成后再聚合清理，且只有非空并含 AMD64 Rain 和 hash-matched release payload 的 7-Zip tree 才能声明 archive hygiene scope。它不 dispatch workflow、不构建本机候选、不执行短样本、不生成 Release Evidence，且不能通过保护合并直接重建候选或执行下列 Judge。
+状态：`Paused — remote compilation abandoned by user on 2026-08-25`。runner safety enablement 与受控构建实现保留，但 Controlled GPU Artifact Build run `32852597521` 已按用户要求在 CUDA worker/NSIS 远程构建阶段取消；后续 manifest、core/control artifacts、build record 和 launcher 步骤均未执行，清理步骤成功。没有候选 Artifact、GPU 实测、Evidence 或 Release，`AC-RL-08` 仍为 Partial。除非用户以后重新明确授权，不再 dispatch 或替代这条远程编译，也不得转为本机重型构建。
+
+以下条目保留为未来重新授权时才可执行的 M3-S3 Judge，不是当前工作队列：
 
 - 安装精确目标提交的正式 GPU 增强候选包。
 - 按 `CONTEXT.md` 的唯一资格谓词记录生产 worker probe、模型显存门禁、GPU/驱动/显存/协议和包/模型哈希；只签发该精确配置，不外推未验证型号。
