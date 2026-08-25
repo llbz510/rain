@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
 $runtimeFamilyClassifierModule = Join-Path $PSScriptRoot 'nvidia-release-evidence-contract.psm1'
-Import-Module -Name $runtimeFamilyClassifierModule -Force -ErrorAction Stop
+Import-Module -Name $runtimeFamilyClassifierModule -ErrorAction Stop
 
 $script:RequiredCudaPayloadFiles = @(
   'rain-whisper-cuda.exe',
