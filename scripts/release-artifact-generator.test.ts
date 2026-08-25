@@ -391,7 +391,7 @@ function writeControlledToolchainRecordFixture(root: string) {
 
 function createInstalledTreeFixture(root: string) {
   const installRoot = join(root, 'installed')
-  const payloadRoot = join(installRoot, 'resources', 'whisper-backends')
+  const payloadRoot = join(installRoot, 'whisper-backends')
   const installerPath = join(root, 'Rain_0.1.0_x64-setup.exe')
   const archiveRoot = join(root, 'installer-archive')
   const mainExecutable = join(installRoot, 'rain.exe')
@@ -411,7 +411,7 @@ function createInstalledTreeFixture(root: string) {
   const archivePayloadBase = archiveRoot
   mkdirSync(join(archiveRoot, '$PLUGINSDIR'), { recursive: true })
   writePeFixture(join(archivePayloadBase, 'Rain.exe'), 0x8664)
-  const archivePayloadRoot = join(archivePayloadBase, 'resources', 'whisper-backends')
+  const archivePayloadRoot = join(archivePayloadBase, 'whisper-backends')
   const archivePayloadFiles = [
     join(archivePayloadRoot, 'rain-whisper-cuda.exe'),
     join(archivePayloadRoot, 'cublas64_12.dll'),
@@ -459,7 +459,7 @@ function createNsisInstallationProof(installerPath: string, installRoot: string)
     installRoot,
     mainExecutable: join(installRoot, 'rain.exe'),
     mainExecutableMachine: 0x8664,
-    payloadManifestPath: join(installRoot, 'resources', 'whisper-backends', 'payload-manifest.json'),
+    payloadManifestPath: join(installRoot, 'whisper-backends', 'payload-manifest.json'),
     silentInstall: {
       arguments: ['/S', `/D=${installRoot}`],
       waited: true,
@@ -519,6 +519,22 @@ async function runGenerator({
     command,
   ])
   return JSON.parse(stdout)
+}
+
+async function assertArchiveContents(archiveRoot: string) {
+  return runPowerShell([
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    [
+      "$ErrorActionPreference = 'Stop'",
+      `Import-Module -Name ${psQuoted(generatorModulePath)} -Force`,
+      `Assert-RainReleaseArtifactArchiveContents -InstallerArchiveRoot ${psQuoted(archiveRoot)}`,
+      "'accepted'",
+    ].join('; '),
+  ])
 }
 
 async function runControlledBuildRecord({
@@ -750,9 +766,9 @@ describe('controlled release artifact generator', () => {
     expect(manifest.controlledBuild.targetCommit).toBe(candidateTarget)
     expect(manifest.controlledBuild.toolingCommit).toBe(toolingCommit)
     expect(manifest.mainExecutable.path).toBe('rain.exe')
-    expect(manifest.resources.cudaWorker.path).toBe('resources/whisper-backends/rain-whisper-cuda.exe')
+    expect(manifest.resources.cudaWorker.path).toBe('whisper-backends/rain-whisper-cuda.exe')
     expect(manifest.resources.cudaPayloadManifest).toMatchObject({
-      path: 'resources/whisper-backends/payload-manifest.json',
+      path: 'whisper-backends/payload-manifest.json',
       configuration: 'release',
     })
     expect(manifest.resources.cudaRuntime.files.map((file: { name: string }) => file.name).sort()).toEqual([
@@ -766,7 +782,7 @@ describe('controlled release artifact generator', () => {
       schemaVersion: 2,
       installerSha256: sha256(installerPath),
       mainExecutable: { path: 'rain.exe', machine: 0x8664 },
-      payloadManifest: { path: 'resources/whisper-backends/payload-manifest.json' },
+      payloadManifest: { path: 'whisper-backends/payload-manifest.json' },
       silentInstall: { mode: 'silent', destinationKind: 'unique-runner-temp', waited: true, exitCode: 0 },
     })
     expect(serializedManifest).not.toContain(installRoot)
@@ -808,6 +824,18 @@ describe('controlled release artifact generator', () => {
     const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
 
     await runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') })
+  })
+
+  it('rejects the legacy resources/whisper-backends archive payload location', async () => {
+    const root = newTemporaryRoot()
+    const { archiveRoot } = createInstalledTreeFixture(root)
+    const applicationPayload = join(archiveRoot, 'whisper-backends')
+    const legacyPayload = join(archiveRoot, 'resources', 'whisper-backends')
+    mkdirSync(join(archiveRoot, 'resources'), { recursive: true })
+    renameSync(applicationPayload, legacyPayload)
+
+    await expect(assertArchiveContents(archiveRoot))
+      .rejects.toThrow(/CUDA payload manifest must be located at whisper-backends\/payload-manifest\.json below the(?:\s|\x1b\[[0-9;]*m)*extraction(?:\s|\x1b\[[0-9;]*m)*root/i)
   })
 
   it('rejects an archive that omits the required direct NSIS plugin directory', async () => {
@@ -905,7 +933,7 @@ describe('controlled release artifact generator', () => {
   it('rejects an unexpected file in the NSIS CUDA payload directory instead of accepting a superset', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
-    writeFixtureFile(join(archiveRoot, 'resources', 'whisper-backends', 'unexpected.dll'), 'unexpected archive runtime')
+    writeFixtureFile(join(archiveRoot, 'whisper-backends', 'unexpected.dll'), 'unexpected archive runtime')
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
       .rejects.toThrow(/payload directory must contain exactly the payload manifest, worker, and three CUDA runtime DLLs/i)
@@ -914,20 +942,20 @@ describe('controlled release artifact generator', () => {
   it('rejects a CUDA payload moved into the plugin directory instead of the extraction-root application payload', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
-    const applicationPayload = join(archiveRoot, 'resources', 'whisper-backends')
-    const pluginPayload = join(archiveRoot, '$PLUGINSDIR', 'resources', 'whisper-backends')
+    const applicationPayload = join(archiveRoot, 'whisper-backends')
+    const pluginPayload = join(archiveRoot, '$PLUGINSDIR', 'whisper-backends')
     cpSync(applicationPayload, pluginPayload, { recursive: true })
     rmSync(applicationPayload, { recursive: true, force: true })
 
     await expect(runGenerator({ installerPath, installRoot, archiveRoot, outputRoot: join(root, 'candidate-output') }))
-      .rejects.toThrow(/CUDA payload manifest must be located at resources\/whisper-backends\/payload-manifest\.json below the(?:\s|\x1b\[[0-9;]*m)*extraction root/i)
+      .rejects.toThrow(/CUDA payload manifest must be located at whisper-backends\/payload-manifest\.json below the(?:\s|\x1b\[[0-9;]*m)*extraction(?:\s|\x1b\[[0-9;]*m)*root/i)
   })
 
   it('rejects a CUDA payload moved into a physical $INSTDIR directory instead of the extraction-root application payload', async () => {
     const root = newTemporaryRoot()
     const { installRoot, installerPath, archiveRoot } = createInstalledTreeFixture(root)
-    const applicationPayload = join(archiveRoot, 'resources', 'whisper-backends')
-    const instdirPayload = join(archiveRoot, '$INSTDIR', 'resources', 'whisper-backends')
+    const applicationPayload = join(archiveRoot, 'whisper-backends')
+    const instdirPayload = join(archiveRoot, '$INSTDIR', 'whisper-backends')
     cpSync(applicationPayload, instdirPayload, { recursive: true })
     rmSync(applicationPayload, { recursive: true, force: true })
 

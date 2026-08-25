@@ -477,7 +477,7 @@ function Assert-RainNsisInstallationProof {
       [int](Get-RainReleaseArtifactProperty $Proof 'mainExecutableMachine' 'NSIS installation proof') -ne 0x8664) {
     throw 'NSIS installation proof does not establish an AMD64 Rain.exe at the exact application-root layout.'
   }
-  $expectedPayloadManifest = Join-Path $installed 'resources\whisper-backends\payload-manifest.json'
+  $expectedPayloadManifest = Join-Path $installed 'whisper-backends\payload-manifest.json'
   $proofPayloadManifest = [string](Get-RainReleaseArtifactProperty $Proof 'payloadManifestPath' 'NSIS installation proof')
   if (-not (Test-RainReleaseArtifactSameExistingPath $proofPayloadManifest $expectedPayloadManifest $false)) {
     throw 'NSIS installation proof does not establish the exact CUDA payload layout.'
@@ -498,7 +498,7 @@ function Assert-RainNsisInstallationProof {
     schemaVersion = 2
     installerSha256 = Get-RainReleaseArtifactSha256 $installer
     mainExecutable = [ordered]@{ path = 'rain.exe'; machine = 0x8664 }
-    payloadManifest = [ordered]@{ path = 'resources/whisper-backends/payload-manifest.json' }
+    payloadManifest = [ordered]@{ path = 'whisper-backends/payload-manifest.json' }
     silentInstall = [ordered]@{
       mode = 'silent'
       destinationKind = 'unique-runner-temp'
@@ -689,10 +689,10 @@ function Assert-RainReleaseArtifactArchiveContents {
   if ($payloadManifests.Count -ne 1) {
     throw "Installer archive extraction must contain exactly one CUDA payload manifest; found $($payloadManifests.Count)."
   }
-  $payloadDirectory = Join-Path $installRoot 'resources\whisper-backends'
+  $payloadDirectory = Join-Path $installRoot 'whisper-backends'
   $expectedPayloadManifest = Join-Path $payloadDirectory 'payload-manifest.json'
   if (-not (Test-RainReleaseArtifactSameExistingPath $payloadManifests[0].FullName $expectedPayloadManifest $false)) {
-    throw 'Installer archive CUDA payload manifest must be located at resources/whisper-backends/payload-manifest.json below the extraction root.'
+    throw 'Installer archive CUDA payload manifest must be located at whisper-backends/payload-manifest.json below the extraction root.'
   }
   try {
     $payload = Get-Content -LiteralPath $payloadManifests[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -731,7 +731,7 @@ function Assert-RainReleaseArtifactArchiveContents {
     $file = $matches[0]
     $expectedFile = Join-Path $payloadDirectory $requiredName
     if (-not (Test-RainReleaseArtifactSameExistingPath $file.FullName $expectedFile $false)) {
-      throw "Installer archive CUDA payload file '$requiredName' must be located below the extraction-root resources/whisper-backends payload directory."
+      throw "Installer archive CUDA payload file '$requiredName' must be located below the extraction-root whisper-backends payload directory."
     }
     if ([int64](Get-RainReleaseArtifactProperty $entry 'sizeBytes' "Installer archive CUDA payload manifest file $requiredName") -ne $file.Length -or
         [string](Get-RainReleaseArtifactProperty $entry 'sha256' "Installer archive CUDA payload manifest file $requiredName") -ne (Get-RainReleaseArtifactSha256 $file.FullName)) {
@@ -1027,8 +1027,8 @@ function New-RainControlledReleaseArtifacts {
 
   $payloadDirectory = Split-Path -Parent $payloadManifestPath
   $payloadDirectoryRelative = Get-RainReleaseArtifactRelativePath $installed $payloadDirectory 'CUDA payload directory'
-  if ($payloadDirectoryRelative -ne 'resources/whisper-backends') {
-    throw "CUDA payload manifest must be located in resources/whisper-backends, found $payloadDirectoryRelative."
+  if ($payloadDirectoryRelative -ne 'whisper-backends') {
+    throw "CUDA payload manifest must be located in whisper-backends, found $payloadDirectoryRelative."
   }
   $payloadFiles = @{}
   foreach ($name in $script:RequiredCudaPayloadFiles) {

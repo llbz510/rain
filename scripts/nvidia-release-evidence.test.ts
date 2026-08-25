@@ -344,7 +344,7 @@ ${JSON.stringify(request)}
           throw 'The fake installer received an invalid NSIS /D argument.'
         }
         $installedRoot = $destinationArgument[0].Substring(3)
-        $payloadRoot = Join-Path $installedRoot 'resources\\whisper-backends'
+        $payloadRoot = Join-Path $installedRoot 'whisper-backends'
         New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
         Write-FakePe (Join-Path $installedRoot 'rain.exe') 0x8664
         [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
@@ -364,7 +364,7 @@ ${JSON.stringify(request)}
       Invoke-ReleaseEvidenceNsisInstallAndVerify -Installer 'C:\\fixture\\Rain_0.1.0_x64-setup.exe' -TemporaryRoot ([string]$request.temporaryRoot) -ProcessAdapter {
         param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru, [string]$WindowStyle)
         $installedRoot = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })[0].Substring(3)
-        $payloadRoot = Join-Path $installedRoot 'resources\\whisper-backends'
+        $payloadRoot = Join-Path $installedRoot 'whisper-backends'
         New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
         Write-FakePe (Join-Path $installedRoot 'rain.exe') 0x14c
         [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
@@ -384,13 +384,13 @@ ${JSON.stringify(request)}
         if ($FilePath -match '(?i)uninstall\.exe$') {
           $state.uninstall = [pscustomobject]@{ filePath = $FilePath; argumentList = @($ArgumentList); wait = $Wait.IsPresent; passThru = $PassThru.IsPresent; windowStyle = $WindowStyle }
           Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $FilePath) 'rain.exe') -Force
-          Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $FilePath) 'resources') -Recurse -Force
+          Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $FilePath) 'whisper-backends') -Recurse -Force
           Remove-Item -LiteralPath $FilePath -Force
           return [pscustomobject]@{ ExitCode = 0 }
         }
         $state.install = [pscustomobject]@{ filePath = $FilePath; argumentList = @($ArgumentList); wait = $Wait.IsPresent; passThru = $PassThru.IsPresent; windowStyle = $WindowStyle }
         $installedRoot = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })[0].Substring(3)
-        $payloadRoot = Join-Path $installedRoot 'resources\\whisper-backends'
+        $payloadRoot = Join-Path $installedRoot 'whisper-backends'
         New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
         Write-FakePe (Join-Path $installedRoot 'rain.exe') 0x8664
         [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
@@ -435,7 +435,7 @@ ${JSON.stringify(request)}
           return [pscustomobject]@{ ExitCode = 0 }
         }
         $installedRoot = @($ArgumentList | Where-Object { $_.StartsWith('/D=') })[0].Substring(3)
-        $payloadRoot = Join-Path $installedRoot 'resources\whisper-backends'
+        $payloadRoot = Join-Path $installedRoot 'whisper-backends'
         New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $installedRoot 'rain.exe'), 'not an AMD64 PE')
         [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'payload-manifest.json'), '{"schemaVersion":1}')
@@ -853,7 +853,7 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
   writeFileSync(installerPath, 'candidate installer bytes')
   const installerHash = sha256(installerPath)
   const installedRoot = join(root, 'installed-rain')
-  const payloadRoot = join(installedRoot, 'resources', 'whisper-backends')
+  const payloadRoot = join(installedRoot, 'whisper-backends')
   mkdirSync(payloadRoot, { recursive: true })
   const mainExecutablePath = join(installedRoot, 'Rain.exe')
   const workerPath = join(payloadRoot, 'rain-whisper-cuda.exe')
@@ -950,7 +950,7 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
       schemaVersion: 2,
       installerSha256: installerHash,
       mainExecutable: { path: 'Rain.exe', machine: 0x8664 },
-      payloadManifest: { path: 'resources\\whisper-backends\\payload-manifest.json' },
+      payloadManifest: { path: 'whisper-backends\\payload-manifest.json' },
       silentInstall: { mode: 'silent', destinationKind: 'unique-runner-temp', waited: true, exitCode: 0 },
     },
     hygieneScopes: ['installed-tree', 'installer-archive'],
@@ -962,14 +962,14 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
     },
     resources: {
       cudaWorker: {
-        path: 'resources\\whisper-backends\\rain-whisper-cuda.exe',
+        path: 'whisper-backends\\rain-whisper-cuda.exe',
         sizeBytes: readFileSync(workerPath).byteLength,
         sha256: sha256(workerPath),
         protocolVersion: 1,
         configuration: 'release',
       },
       cudaPayloadManifest: {
-        path: 'resources\\whisper-backends\\payload-manifest.json',
+        path: 'whisper-backends\\payload-manifest.json',
         sizeBytes: readFileSync(payloadManifestPath).byteLength,
         sha256: sha256(payloadManifestPath),
         schemaVersion: 1,
@@ -978,7 +978,7 @@ function createArtifactFixture(root: string, targetCommit = 'a'.repeat(40)) {
       cudaRuntime: {
         files: runtimeFileNames.map((name) => ({
           name,
-          path: `resources\\whisper-backends\\${name}`,
+          path: `whisper-backends\\${name}`,
           sizeBytes: readFileSync(join(payloadRoot, name)).byteLength,
           sha256: sha256(join(payloadRoot, name)),
         })),
@@ -1423,6 +1423,67 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(wrongHash.output.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
   }, 15_000)
 
+  it('rejects provenance whose CUDA worker or runtime declarations leave the canonical whisper-backends payload set', async () => {
+    const cases: Array<{ name: string; mutate: (manifest: any) => void; error: RegExp }> = [
+      {
+        name: 'CUDA worker path',
+        mutate: (manifest) => { manifest.resources.cudaWorker.path = 'resources/whisper-backends/rain-whisper-cuda.exe' },
+        error: /CUDA worker path must be whisper-backends\/rain-whisper-cuda\.exe/i,
+      },
+      ...['cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll'].map((name) => ({
+        name: `CUDA runtime ${name} path`,
+        mutate: (manifest: any) => {
+          manifest.resources.cudaRuntime.files.find((file: { name: string }) => file.name === name).path = `resources/whisper-backends/${name}`
+        },
+        error: new RegExp(`CUDA runtime file '${name.replace('.', '\\.')}' path must be whisper-backends/${name.replace('.', '\\.')}`, 'i'),
+      })),
+      {
+        name: 'unknown CUDA runtime file',
+        mutate: (manifest) => {
+          manifest.resources.cudaRuntime.files[0].name = 'unexpected.dll'
+          manifest.resources.cudaRuntime.files[0].path = 'whisper-backends/unexpected.dll'
+        },
+        error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+      },
+      {
+        name: 'duplicate CUDA runtime file',
+        mutate: (manifest) => {
+          manifest.resources.cudaRuntime.files[1].name = 'cublas64_12.dll'
+          manifest.resources.cudaRuntime.files[1].path = 'whisper-backends/cublas64_12.dll'
+        },
+        error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+      },
+      {
+        name: 'missing CUDA runtime file',
+        mutate: (manifest) => { manifest.resources.cudaRuntime.files.pop() },
+        error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+      },
+    ]
+
+    const results = await Promise.all(cases.map(async (testCase) => {
+      const candidate = createArtifactFixture(newTemporaryRoot())
+      const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+      testCase.mutate(manifest)
+      writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
+      syncArtifactFixtureRecordManifestIdentity(candidate)
+      const result = await invokeContract({
+        operation: 'provenance',
+        installerPath: candidate.installerPath,
+        expectedTargetCommit: candidate.targetCommit,
+        expectedInstallerSha256: candidate.installerHash,
+        artifactManifestPath: candidate.artifactManifestPath,
+        expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
+        controlledBuildRecordPath: candidate.controlledBuildRecordPath,
+      })
+      return { ...testCase, result }
+    }))
+
+    expect(results.map(({ result }) => result.status)).toEqual(cases.map(() => 1))
+    for (const { name, error, result } of results) {
+      expect(result.output.error, name).toMatch(error)
+    }
+  }, 15_000)
+
   it('rejects the legacy NSIS HTML download page even when both provenance records retain the pinned SHA-256', async () => {
     const candidate = createArtifactFixture(newTemporaryRoot())
     const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
@@ -1836,7 +1897,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     assertContractSucceeded(result)
     expect(result.output.value.installRoot).toMatch(new RegExp(`^${temporaryRoot.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\\\rain-nsis-installed-[0-9a-f]{32}$`, 'i'))
     expect(realpathSync.native(result.output.value.mainExecutable)).toBe(realpathSync.native(join(result.output.value.installRoot, 'rain.exe')))
-    expect(realpathSync.native(result.output.value.payloadManifestPath)).toBe(realpathSync.native(join(result.output.value.installRoot, 'resources', 'whisper-backends', 'payload-manifest.json')))
+    expect(realpathSync.native(result.output.value.payloadManifestPath)).toBe(realpathSync.native(join(result.output.value.installRoot, 'whisper-backends', 'payload-manifest.json')))
     expect(existsSync(result.output.value.mainExecutable)).toBe(true)
     expect(existsSync(result.output.value.payloadManifestPath)).toBe(true)
     expect(result.output.value.process).toMatchObject({ wait: true, passThru: true, windowStyle: 'Hidden' })
@@ -1893,7 +1954,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       process: { ExitCode: 0 },
     })
     expect(existsSync(join(result.output.value.installation.installRoot, 'rain.exe'))).toBe(false)
-    expect(existsSync(join(result.output.value.installation.installRoot, 'resources', 'whisper-backends', 'payload-manifest.json'))).toBe(false)
+    expect(existsSync(join(result.output.value.installation.installRoot, 'whisper-backends', 'payload-manifest.json'))).toBe(false)
   })
 
   it('fails closed when a generated NSIS uninstaller exits nonzero', async () => {
@@ -1932,18 +1993,18 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     assertContractSucceeded(accepted)
     expect(accepted.output.value.files.map((file: { relativePath: string }) => file.relativePath).sort()).toEqual([
       'Rain.exe',
-      'resources\\whisper-backends\\cublas64_12.dll',
-      'resources\\whisper-backends\\cublasLt64_12.dll',
-      'resources\\whisper-backends\\cudart64_12.dll',
-      'resources\\whisper-backends\\payload-manifest.json',
-      'resources\\whisper-backends\\rain-whisper-cuda.exe',
+      'whisper-backends\\cublas64_12.dll',
+      'whisper-backends\\cublasLt64_12.dll',
+      'whisper-backends\\cudart64_12.dll',
+      'whisper-backends\\payload-manifest.json',
+      'whisper-backends\\rain-whisper-cuda.exe',
     ])
 
     const cases = [
       { name: 'main executable', relativePath: 'Rain.exe' },
-      { name: 'CUDA worker', relativePath: 'resources\\whisper-backends\\rain-whisper-cuda.exe' },
-      { name: 'CUDA runtime DLL', relativePath: 'resources\\whisper-backends\\cudart64_12.dll' },
-      { name: 'CUDA payload manifest', relativePath: 'resources\\whisper-backends\\payload-manifest.json' },
+      { name: 'CUDA worker', relativePath: 'whisper-backends\\rain-whisper-cuda.exe' },
+      { name: 'CUDA runtime DLL', relativePath: 'whisper-backends\\cudart64_12.dll' },
+      { name: 'CUDA payload manifest', relativePath: 'whisper-backends\\payload-manifest.json' },
     ] as const
     for (const testCase of cases) {
       const candidate = createArtifactFixture(newTemporaryRoot())
@@ -1987,7 +2048,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     }
 
     const outsideRoot = newTemporaryRoot()
-    const payloadRoot = join(outsideRoot, 'resources', 'whisper-backends')
+    const payloadRoot = join(outsideRoot, 'whisper-backends')
     const outsideManifest = createPayloadFixture(payloadRoot)
     mkdirSync(join(outsideRoot, 'unexpected'), { recursive: true })
     writeFileSync(join(outsideRoot, 'unexpected', 'cufft64_12.dll'), 'unapproved CUDA DLL')
@@ -1996,7 +2057,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(outsidePayload.output.error).toContain('Installed tree contains unapproved CUDA/driver DLL outside the payload root')
 
     const outsideDriverRoot = newTemporaryRoot()
-    const outsideDriverPayloadRoot = join(outsideDriverRoot, 'resources', 'whisper-backends')
+    const outsideDriverPayloadRoot = join(outsideDriverRoot, 'whisper-backends')
     const outsideDriverManifest = createPayloadFixture(outsideDriverPayloadRoot)
     mkdirSync(join(outsideDriverRoot, 'unexpected'), { recursive: true })
     writeFileSync(join(outsideDriverRoot, 'unexpected', 'cudnn64_9.dll'), 'unapproved CUDA runtime DLL')
@@ -2006,7 +2067,7 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
 
     for (const unapprovedDll of ['cupti64_2025.1.dll', 'cufile.dll', 'nvblas64_12.dll']) {
       const root = newTemporaryRoot()
-      const payloadRoot = join(root, 'resources', 'whisper-backends')
+      const payloadRoot = join(root, 'whisper-backends')
       const manifestPath = createPayloadFixture(payloadRoot)
       mkdirSync(join(root, 'unexpected'), { recursive: true })
       writeFileSync(join(root, 'unexpected', unapprovedDll), 'unapproved CUDA or NVIDIA DLL')

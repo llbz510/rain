@@ -1,7 +1,7 @@
 # Rain Release Artifact Contract
 
 > 状态：`Active`
-> 更新日期：2026-08-11
+> 更新日期：2026-08-24
 > 路线图位置：M3-S1 Release artifact contract
 > 授权边界：本文件只确认正式发布产物的可执行合同。它不构建安装器、不签发 Release Evidence、不批准 CUDA runtime 许可、不修改产品代码、不运行 GPU/CPU 短样本、不生成真实视频 Evidence。
 > 支持矩阵修订：2026-08-03 用户确认 Core Release 只支持具备受支持 NVIDIA GPU + 兼容驱动的 Windows x64 主机；`AC-RL-07` 和 M3-S2 no-NVIDIA Judge 已退役。
@@ -114,7 +114,7 @@ Required minimum fields:
 | `generatedAt` | Generation timestamp |
 | `generator` | Script/tool identity and version |
 
-Before a generator may declare the `installer-archive` scope clean, the 7-Zip extraction must be nonempty and structurally prove one AMD64 `Rain.exe` plus the canonical `resources/whisper-backends/payload-manifest.json`. That manifest must declare the release protocol and hash/size-match every required CUDA payload file. An empty extraction, a bootstrapper-only extraction, or an archive without that valid Rain payload is a failed Judge, not a clean scope.
+Before a generator may declare the `installer-archive` scope clean, the 7-Zip extraction must be nonempty and structurally prove one AMD64 `Rain.exe` plus the canonical `whisper-backends/payload-manifest.json` at the application root. That manifest must declare the release protocol and hash/size-match every required CUDA payload file. An empty extraction, a bootstrapper-only extraction, or an archive without that valid Rain payload is a failed Judge, not a clean scope.
 
 The accompanying `controlled-build-record.json` must contain its own schema version, canonical source repository, `targetCommit`, `toolingCommit`, `cleanTree=true`, generator identity/version, build record id/time, workflow file/definition commit/run id/run attempt, the bound hosted runner and toolchain facts, pinned download URLs/SHA-256 values, the first core-upload artifact name/digest, and the exact installer plus artifact-manifest names, sizes and SHA-256 values. The record's artifact-manifest SHA-256 is the sole acceptable origin for `ExpectedArtifactManifestSha256`. The record, manifest, installer and generated administrator launcher are one candidate bundle; none is a public release asset.
 
