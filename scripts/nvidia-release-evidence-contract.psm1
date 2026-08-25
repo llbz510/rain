@@ -1174,6 +1174,9 @@ function Assert-CandidateArtifactProvenance {
   $resources = Get-ObjectProperty $manifest 'resources' 'Artifact manifest'
   $cudaWorker = Get-ObjectProperty $resources 'cudaWorker' 'Artifact manifest resources'
   $cudaWorkerPath = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $cudaWorker 'path' 'Artifact manifest CUDA worker')) 'Artifact manifest CUDA worker.path'
+  if ($cudaWorkerPath.Replace('\', '/') -ne 'whisper-backends/rain-whisper-cuda.exe') {
+    throw 'Artifact manifest CUDA worker path must be whisper-backends/rain-whisper-cuda.exe.'
+  }
   $cudaWorkerSize = [int64](Get-ObjectProperty $cudaWorker 'sizeBytes' 'Artifact manifest CUDA worker')
   if ($cudaWorkerSize -lt 0) { throw 'Artifact manifest CUDA worker.sizeBytes must not be negative.' }
   $cudaWorkerHash = Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $cudaWorker 'sha256' 'Artifact manifest CUDA worker')) 'Artifact manifest CUDA worker.sha256'
@@ -1186,8 +1189,8 @@ function Assert-CandidateArtifactProvenance {
 
   $cudaPayloadManifest = Get-ObjectProperty $resources 'cudaPayloadManifest' 'Artifact manifest resources'
   $cudaPayloadManifestPath = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $cudaPayloadManifest 'path' 'Artifact manifest CUDA payload manifest')) 'Artifact manifest CUDA payload manifest.path'
-  if ($cudaPayloadManifestPath.Replace('\', '/') -ne 'resources/whisper-backends/payload-manifest.json') {
-    throw 'Artifact manifest CUDA payload manifest path must be resources/whisper-backends/payload-manifest.json.'
+  if ($cudaPayloadManifestPath.Replace('\', '/') -ne 'whisper-backends/payload-manifest.json') {
+    throw 'Artifact manifest CUDA payload manifest path must be whisper-backends/payload-manifest.json.'
   }
   $cudaPayloadManifestSize = [int64](Get-ObjectProperty $cudaPayloadManifest 'sizeBytes' 'Artifact manifest CUDA payload manifest')
   if ($cudaPayloadManifestSize -lt 0) { throw 'Artifact manifest CUDA payload manifest sizeBytes must not be negative.' }
@@ -1204,12 +1207,24 @@ function Assert-CandidateArtifactProvenance {
   if ($cudaRuntimeFiles.Count -eq 0) {
     throw 'Artifact manifest CUDA runtime files must not be empty.'
   }
+  $expectedCudaRuntimeNames = @('cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll')
+  $observedCudaRuntimeNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   foreach ($runtimeFile in $cudaRuntimeFiles) {
-    [void](Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $runtimeFile 'name' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.name')
-    [void](Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $runtimeFile 'path' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.path')
+    $runtimeName = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $runtimeFile 'name' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.name'
+    if (-not ($expectedCudaRuntimeNames | Where-Object { $_ -ceq $runtimeName }) -or -not $observedCudaRuntimeNames.Add($runtimeName)) {
+      throw 'Artifact manifest CUDA runtime files must be exactly the canonical whisper-backends runtime set.'
+    }
+    $runtimePath = Assert-ReleaseEvidenceManifestNonBlankString ([string](Get-ObjectProperty $runtimeFile 'path' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.path'
+    $expectedRuntimePath = "whisper-backends/$runtimeName"
+    if ($runtimePath.Replace('\', '/') -ne $expectedRuntimePath) {
+      throw "Artifact manifest CUDA runtime file '$runtimeName' path must be $expectedRuntimePath."
+    }
     $runtimeSize = [int64](Get-ObjectProperty $runtimeFile 'sizeBytes' 'Artifact manifest CUDA runtime file')
     if ($runtimeSize -lt 0) { throw 'Artifact manifest CUDA runtime file.sizeBytes must not be negative.' }
     [void](Assert-ReleaseEvidenceManifestSha256 ([string](Get-ObjectProperty $runtimeFile 'sha256' 'Artifact manifest CUDA runtime file')) 'Artifact manifest CUDA runtime file.sha256')
+  }
+  if ($observedCudaRuntimeNames.Count -ne $expectedCudaRuntimeNames.Count) {
+    throw 'Artifact manifest CUDA runtime files must be exactly the canonical whisper-backends runtime set.'
   }
   if ((Get-ObjectProperty $cudaRuntime 'driverLibraryBundled' 'Artifact manifest CUDA runtime') -ne $false) {
     throw 'Artifact manifest CUDA runtime driverLibraryBundled must be false.'
@@ -1358,7 +1373,7 @@ function Assert-CandidateArtifactProvenance {
   }
   $proofPayloadManifest = Get-ObjectProperty $installationProof 'payloadManifest' 'Artifact manifest installationProof'
   $proofPayloadPath = ([string](Get-ObjectProperty $proofPayloadManifest 'path' 'Artifact manifest installationProof payloadManifest')).Replace('\', '/').ToLowerInvariant()
-  if ($proofPayloadPath -ne 'resources/whisper-backends/payload-manifest.json') {
+  if ($proofPayloadPath -ne 'whisper-backends/payload-manifest.json') {
     throw 'Artifact manifest installationProof must establish the logical CUDA payload-manifest layout.'
   }
   $proofSilentInstall = Get-ObjectProperty $installationProof 'silentInstall' 'Artifact manifest installationProof'
@@ -1391,7 +1406,7 @@ function Assert-CandidateArtifactProvenance {
       installationProof = [ordered]@{
         kind = 'rain-nsis-install-proof-v2'; schemaVersion = 2; installerSha256 = $proofInstallerHash
         mainExecutable = [ordered]@{ path = 'rain.exe'; machine = 0x8664 }
-        payloadManifest = [ordered]@{ path = 'resources/whisper-backends/payload-manifest.json' }
+        payloadManifest = [ordered]@{ path = 'whisper-backends/payload-manifest.json' }
         silentInstall = [ordered]@{ mode = 'silent'; destinationKind = 'unique-runner-temp'; waited = $true; exitCode = 0 }
       }
       mainExecutable = [ordered]@{ path = $mainExecutablePath; sizeBytes = $mainExecutableSize; sha256 = $mainExecutableHash; cudaImportsPresent = $false }
