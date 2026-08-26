@@ -1,13 +1,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDb, resetDb } from '@/models/db-singleton'
 import {
   getNotesByVideoId,
+  insertNote,
   insertNodes,
   insertSentences,
   insertVideo,
 } from '@/models/database'
-import type { Node, Sentence, Video } from '@/models/types'
+import { asMemoryDatabase } from '@/models/database-adapter'
+import type { Node, Note, Sentence, Video } from '@/models/types'
 import { StudyInterface } from '@/pages/StudyInterface'
 import { useRainStore } from '@/store/rain-store'
 
@@ -70,6 +73,16 @@ const sentences: Sentence[] = [
     sortOrder: 1,
   },
 ]
+
+const existingNote: Note = {
+  id: 'notes-existing-note',
+  videoId: video.id,
+  content: 'Original saved note.',
+  source: 'user',
+  sentenceIds: [],
+  createdAt: 2,
+  sortOrder: 0,
+}
 
 async function seedStudyVideo(): Promise<void> {
   const db = await getDb()
@@ -181,5 +194,71 @@ describe('AC-ST-06 persisted notes workflow', () => {
     expect(player.paused).toBe(false)
     expect(play).not.toHaveBeenCalled()
     expect(pause).not.toHaveBeenCalled()
+  })
+})
+
+describe('AC-SU-03 unsaved Note draft across right-panel Tabs', () => {
+  it('keeps an existing Note draft through an initially hidden AI Tab without writing until explicit save', async () => {
+    const user = userEvent.setup()
+    await seedStudyVideo()
+    const database = asMemoryDatabase(await getDb())
+    await insertNote(database, existingNote)
+    expect(await useRainStore.getState().loadVideo(video.id)).toEqual({ ok: true })
+
+    const write = vi.spyOn(database, 'replaceTable')
+    render(<StudyInterface />)
+
+    const notesPanel = screen.getByTestId('notes-panel')
+    const notesTabPanel = notesPanel.parentElement
+    expect(notesTabPanel).toHaveAttribute('hidden')
+    expect(screen.queryByRole('textbox', { name: '随记内容' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
+    expect(write).not.toHaveBeenCalled()
+
+    const hiddenEditor = screen.getByRole('textbox', { name: '随记内容', hidden: true })
+    const hiddenSave = screen.getByRole('button', { name: '保存', hidden: true })
+    const chatInput = screen.getByPlaceholderText('输入消息...')
+    chatInput.focus()
+    await user.tab()
+    expect(notesTabPanel?.contains(document.activeElement)).toBe(false)
+    expect(document.activeElement).not.toBe(hiddenEditor)
+    expect(document.activeElement).not.toBe(hiddenSave)
+
+    fireEvent.click(screen.getByRole('button', { name: '随记' }))
+    const editor = screen.getByRole('textbox', { name: '随记内容' })
+    expect(editor).toHaveValue('Original saved note.')
+    expect(write).not.toHaveBeenCalled()
+
+    fireEvent.change(editor, { target: { value: 'Saved note.' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(async () => {
+      expect(await getNotesByVideoId(database, video.id)).toEqual([
+        expect.objectContaining({ content: 'Saved note.' }),
+      ])
+      expect(write).toHaveBeenCalledTimes(1)
+    })
+    write.mockClear()
+
+    fireEvent.change(editor, { target: { value: 'Unsaved draft.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'AI' }))
+    expect(notesTabPanel).toHaveAttribute('hidden')
+    expect(screen.queryByRole('textbox', { name: '随记内容' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
+    expect(write).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '随记' }))
+    expect(screen.getByRole('textbox', { name: '随记内容' })).toHaveValue('Unsaved draft.')
+    expect(write).not.toHaveBeenCalled()
+    expect(await getNotesByVideoId(database, video.id)).toEqual([
+      expect.objectContaining({ content: 'Saved note.' }),
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(async () => {
+      expect(write).toHaveBeenCalledTimes(1)
+      expect(await getNotesByVideoId(database, video.id)).toEqual([
+        expect.objectContaining({ content: 'Unsaved draft.' }),
+      ])
+    })
   })
 })

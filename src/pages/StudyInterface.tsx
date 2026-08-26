@@ -425,19 +425,20 @@ export function StudyInterface() {
             </button>
           </div>
           <div style={tabContentStyle}>
-            {aiPanelState === 'ai' ? (
+            {aiPanelState === 'ai' && (
               <>
                 {quickParagraphType && <div style={quickActionsStyle}><QuickActions paragraphType={quickParagraphType} onAction={(action) => handleSendMessage(action.label, 'paragraph')} /></div>}
                 <AiAssistant messages={chatMessages} isStreaming={isStreaming} onStop={handleStopMessage} onSeekSource={handleSeek} />
                 <ChatInput onSend={handleSendMessage} />
               </>
-            ) : (
+            )}
+            <div hidden={aiPanelState !== 'notes'}>
               <NotesPanel
                 onCreateNote={handleCreateFreeNote}
                 onSaveNote={handleSaveNote}
                 onSeekSentence={handleSentenceNavigate}
               />
-            )}
+            </div>
           </div>
         </aside>
       )}
