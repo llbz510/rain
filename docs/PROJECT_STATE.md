@@ -2399,6 +2399,12 @@ The final same-diff independent Spec and Standards reviews both return `PASS`, w
 
 Final allowed verification is GREEN: `npm.cmd exec -- vitest run src/__tests__/study-playback.test.tsx harness/m06-video-component.test.tsx` passed 17/17; `npm.cmd run build` passed with only existing Vite dynamic/static-import warnings; `npm.cmd run harness:control` and `git diff --check` passed. No locked Harness changed and no prohibited Cargo/Rust/GPU/installer/model/LLM/remote workflow operation occurred. The stable local diff is ready to enter a protected PR, but has not been committed, PR'd or merged. `AC-SU-05` remains `Partial` and blocked on its required real media/Tauri/Desktop/Visual/screenshot Evidence; this review result does not complete the AC.
 
+### 2026-08-26 PR #48 Clean Windows Harness follow-up
+
+Protected PR #48's automatic `Clean Windows Harness` run `32927388926` is RED. Its frontend result was 97 files passed, 2 failed and 1 skipped; 722 tests passed, 3 failed and 1 skipped. One deterministic failure belongs to this Slice: `AC-ST-03` in unlocked `study-navigation.test.tsx` queried `Second sentence.` across the entire page after AC-SU-05 made the same real current sentence legitimately visible in both the subtitle overlay and transcript. The test now scopes its First/Second sentence highlight assertions to production `text-zone`, preserving the real transcription assertion rather than broadly using `getAllByText`.
+
+The other two failures are in unchanged `scripts/nvidia-release-evidence.test.ts`: an empty-value failure and a 5-second timeout. They are not attributed to this diff and are not modified or targeted here; no GPU, Release, installer, model, LLM, Cargo/Rust, manual workflow dispatch or rerun is authorized. This follow-up only repairs the deterministic AC-ST-03 selector regression. Its allowed verification is GREEN: the navigation/playback/locked-M06 focused Vitest set passes 22/22; production build, control-plane validation and `git diff --check` pass. The final same-diff independent Spec and Standards reviews both return `PASS`, with no P0/P1/P2; it is safe to append this follow-up as a commit so a new push can automatically trigger the required check. It remains uncommitted and unpushed; no CI GREEN or merge result is claimed.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
