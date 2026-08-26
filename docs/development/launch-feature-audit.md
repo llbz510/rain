@@ -1,7 +1,7 @@
 # Rain Launch 功能路径审计
 
 > 状态：Active
-> 更新日期：2026-08-25
+> 更新日期：2026-08-26
 
 本审计只回答当前生产路径是 `Present`、`Partial`、`Shadow/adjacent` 还是 `Absent`，并记录局部入口与 blocker ledger；它不是第三份 AC 或“完成状态”事实源。AC 语义唯一来自 `acceptance-standard.md`，Judge 与 tier 唯一来自 `harness-coverage.md`。路径存在绝不等于 AC 已完成：除明确写为“无”“无新增必需”“仅补强”或“条件性未来重放”的行外，Required Evidence 状态中的任何未闭合项都是当前 blocker；`阻断：`只是显式强调，不是唯一判定条件。ledger 采用同一规则。
 
@@ -79,7 +79,7 @@
 | VL-07 | Partial | VideoCard thumbnail rendering | M17/thumbnail UI — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |
 | SU-01 | Partial | StudyInterface/SideTree follow | M05/navigation/playback — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
 | SU-02 | Shadow/adjacent | playPosition progress exists；无横向滑动产品路径 | M05/playback — Partial | 阻断：Strong + Desktop/Visual Evidence | 不把相邻进度当完成 |
-| SU-03 | Partial | layout + assistant/notes composition | layout/assistant/notes — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
+| SU-03 | Partial | StudyInterface 在 AI Tab 时以原生 `hidden` 保留 NotesPanel；NoteItem 本地草稿不 remount | study-notes/layout/M08 — Partial | 阻断：Strong + Desktop Evidence；本 Slice 已 Judge 初始 AI hidden 的已有 Note、默认 a11y/Tab 隔离、实际 memory 写入计数为 0 的 Tab 往返及显式保存恰 1 次；未完成助手流/其余隐藏副作用未闭合 | 禁用 jsdom/假截图替代 |
 | SU-04 | Partial | three-mode media reuse | study-layout — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
 | SU-05 | Partial（本 diff 将字幕生产接线由 Shadow 提升） | StudyInterface exact sentence → VideoZone；`subtitleOn` | study-playback、M07 — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁止 nearest fallback、译文开关或假截图 |
 | SU-06 | Partial | StudyInterface navigation/DiagramZone | navigation/M05 — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |

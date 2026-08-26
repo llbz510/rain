@@ -44,7 +44,7 @@ function NoteItem({
 
   return (
     <div data-testid={`note-${note.id}`}>
-      <textarea value={content} onChange={(e) => setContent(e.target.value)} />
+      <textarea aria-label="随记内容" value={content} onChange={(e) => setContent(e.target.value)} />
       {onSave && <button onClick={() => onSave(note.id, content)}>保存</button>}
       {note.sentenceIds.length > 0 && (
         <div>
