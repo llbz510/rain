@@ -77,5 +77,5 @@ export function ChatInput({ onSend }: ChatInputProps) {
       if (text.trim()) { onSend?.(text.trim()); setText('') }
     }
   }
-  return <textarea role="textbox" value={text} onChange={(event) => setText(event.target.value)} onKeyDown={handleKeyDown} placeholder="输入消息..." />
+  return <textarea aria-label="AI 输入" role="textbox" value={text} onChange={(event) => setText(event.target.value)} onKeyDown={handleKeyDown} placeholder="输入消息..." />
 }

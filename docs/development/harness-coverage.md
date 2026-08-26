@@ -145,7 +145,7 @@
 | AC-VL-07 | M17、`video-thumbnail-ownership.test.tsx` | Partial | 卡片内容与真实缩略图桥接有局部覆盖；240px/16:9/窄宽主操作和多 viewport 独立视觉 Evidence 未签发 |
 | AC-SU-01 | M05、`study-navigation.test.tsx`、`study-playback.test.tsx` | Partial | 当前项、滚动和统一播放事实有局部行为；双行长目录、边缘渐隐、暂停手动控制的生产纵切未完整裁判 |
 | AC-SU-02 | M05、`study-playback.test.tsx` | Partial | 进度来自 `playPosition`；章节/小节约 200ms 横向滑动、DOM 和 reduced-motion Evidence 未闭合 |
-| AC-SU-03 | `study-layout.test.tsx`、`study-notes.test.tsx`、M08 | Partial | 生产 `StudyInterface` Judge 从初始 AI Tab 下已有持久 Note 开始：native `hidden` wrapper 使具名随记编辑/保存默认 a11y 不可见、键盘 Tab 不进入，且初始挂载不写 memory adapter；初次显式保存后清零实际 `replaceTable` 写入计数，AI/随记往返仍为 0，随后显式保存恰为 1 并更新 DB、保留同一草稿。未完成助手流、其余隐藏面板副作用与 Desktop Judge 仍未闭合 |
+| AC-SU-03 | `study-layout.test.tsx`、`study-notes.test.tsx`、M08/M10 | Partial | 生产 `StudyInterface` Judge 覆盖两侧 retained mount：已有 Note 的 native `hidden`/a11y/Tab 隔离与实际 memory 写入计数；以及 `loadVideo` 后以真实 `aiPanelState: 'notes'` fixture 首次挂载 AI hidden、具名 ChatInput 默认 a11y 不可见且 Tab 不进入、公开 Tab 往返后未发送草稿恢复。可见 AI wrapper 仍为列 flex；mocked `streamAiChat` 在初始隐藏、Tab 往返及输入未发送时均为 0。未完成助手流、其余隐藏面板副作用与 Desktop Judge 仍未闭合 |
 | AC-SU-04 | `study-layout.test.tsx` | Partial | 三模式复用媒体事实已 Strong；比例拖拽、跨会话持久化与真实桌面重启仍是 Gap |
 | AC-SU-05 | `study-playback.test.tsx`、M07 | Partial | 生产 `StudyInterface` 在默认 follow 路径以精确半开区间 `[startTime,endTime)` 将真实当前原文句传给 `VideoZone`；既有单一动态“字幕 ON/OFF”控制继续复用会话级 `subtitleOn`。定向 Judge 断言页面仅有一个字幕按钮、无译文控件；关闭后调用生产返回动作、显式 unmount 并以未设置 `subtitleOn` 的同会话 fixture 新挂载，再证明关闭态恢复。真实 media、Tauri/Desktop、半透明视觉和截图 Evidence 仍缺，故不得升级为 Strong/Desktop/Evidence |
 | AC-SU-06 | `study-navigation.test.tsx`、M05 | Partial | 选择/双击导航与真实结构有覆盖；正交圆弧视觉、有界缩放/平移和完整桌面 Judge 未闭合 |

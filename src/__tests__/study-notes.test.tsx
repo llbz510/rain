@@ -14,6 +14,12 @@ import type { Node, Note, Sentence, Video } from '@/models/types'
 import { StudyInterface } from '@/pages/StudyInterface'
 import { useRainStore } from '@/store/rain-store'
 
+const { streamAiChat } = vi.hoisted(() => ({ streamAiChat: vi.fn() }))
+vi.mock('@/llm/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/llm/client')>()),
+  streamAiChat,
+}))
+
 const video: Video = {
   id: 'notes-video',
   title: 'Notes lecture',
@@ -94,6 +100,7 @@ async function seedStudyVideo(): Promise<void> {
 beforeEach(() => {
   resetDb()
   useRainStore.getState().reset()
+  streamAiChat.mockReset()
 })
 
 afterEach(() => {
@@ -260,5 +267,44 @@ describe('AC-SU-03 unsaved Note draft across right-panel Tabs', () => {
         expect.objectContaining({ content: 'Unsaved draft.' }),
       ])
     })
+  })
+})
+
+describe('AC-SU-03 unsent AI draft across right-panel Tabs', () => {
+  it('keeps an unsent ChatInput draft while its hidden panel stays inert and unfocusable', async () => {
+    const user = userEvent.setup()
+    await seedStudyVideo()
+    expect(await useRainStore.getState().loadVideo(video.id)).toEqual({ ok: true })
+    useRainStore.setState({ aiPanelState: 'notes' })
+    render(<StudyInterface />)
+
+    const hiddenAiInput = screen.getByPlaceholderText('输入消息...')
+    const aiTabPanel = hiddenAiInput.closest('[hidden]')
+    expect(aiTabPanel).not.toBeNull()
+    if (!aiTabPanel) throw new Error('AI tab panel should exist')
+    expect(hiddenAiInput).toHaveAttribute('aria-label', 'AI 输入')
+    expect(aiTabPanel).toHaveAttribute('hidden')
+    expect(screen.queryByRole('textbox', { name: 'AI 输入' })).not.toBeInTheDocument()
+    expect(streamAiChat).not.toHaveBeenCalled()
+
+    const notesTab = screen.getByRole('button', { name: '随记' })
+    notesTab.focus()
+    await user.tab()
+    expect(aiTabPanel?.contains(document.activeElement)).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI' }))
+    expect(aiTabPanel).toHaveStyle({ display: 'flex', flexDirection: 'column' })
+    const aiInput = screen.getByRole('textbox', { name: 'AI 输入' })
+    fireEvent.change(aiInput, { target: { value: 'Keep this unsent AI draft.' } })
+    expect(streamAiChat).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '随记' }))
+    expect(aiTabPanel).toHaveAttribute('hidden')
+    expect(screen.queryByRole('textbox', { name: 'AI 输入' })).not.toBeInTheDocument()
+    expect(streamAiChat).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI' }))
+    expect(screen.getByRole('textbox', { name: 'AI 输入' })).toHaveValue('Keep this unsent AI draft.')
+    expect(streamAiChat).not.toHaveBeenCalled()
   })
 })

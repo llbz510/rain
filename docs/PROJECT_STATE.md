@@ -2413,6 +2413,14 @@ TDD RED first added the unlocked production `StudyInterface` + memory-DB path in
 
 `AC-SU-03` remains `Partial`: this local Judge does not close unfinished assistant-stream behavior, other hidden-panel side effects, or required Desktop Evidence. It deliberately does not add Tab/focus shortcuts (`AC-SU-07`), assistant/ChatInput draft ownership, or any new Note persistence behavior. No locked Harness was changed and no Cargo/Rust/Whisper/CUDA build, `harness:check`, installer/GPU/model/LLM execution, remote workflow dispatch, artifact, Evidence, signing, license or Release action occurred.
 
+### 2026-08-26 Launch Slice — AC-SU-03 unsent AI draft across right-panel Tabs
+
+This Slice was developed on `codex/launch-su03-ai-draft`, created from exact `master@17264bb5421368f0eda85274615ee7f550f0f1fa`. It closes only the complementary local ChatInput remount gap: `StudyInterface` retains the existing AI content under a native `hidden` wrapper while Notes is active, symmetric with the existing retained NotesPanel. `ChatInput` receives the public accessible name `AI 输入`; no second input, persistence, LLM request, stream-owner move, Tab shortcut, or new business state is introduced.
+
+TDD RED first added an independent `AC-SU-03` production-page Judge through the public AI/随记 buttons and ChatInput. The targeted `study-notes` run had 5 tests: 4 passed and 1 failed because conditional rendering removed the AI ChatInput after switching to Notes. GREEN changes only that conditional AI mount to native-hidden retained composition. Review follow-up keeps the visible AI wrapper as a column flex child of the scrolling tab-content owner, while hidden has no inline display override and remains native-hidden. The Judge sets the real Store fixture `aiPanelState: 'notes'` after `loadVideo`, so first render proves the initially hidden AI wrapper's default a11y and container-level keyboard exclusion; it then uses public Tabs to verify typed-but-unsent draft restoration. The mocked `streamAiChat` system boundary remains at 0 calls during initial hidden mounting, Tab switching and input without send. The focused production test plus `study-layout` and locked M08/M10 are GREEN at 18/18; `npm.cmd run build` is GREEN with only existing Vite dynamic/static-import warnings; `harness:control` and `git diff --check` are GREEN.
+
+`AC-SU-03` remains `Partial`: no real unfinished assistant stream, full hidden-side-effect matrix, Tauri/Desktop Judge or Desktop Evidence has been supplied. This Slice does not expand `AC-SU-07` keyboard behavior and makes no claim that the whole AC is complete.
+
 ## Maintenance checklist for every future session
 
 Before making changes:

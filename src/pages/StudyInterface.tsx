@@ -155,6 +155,11 @@ const quickActionsStyle: React.CSSProperties = {
   marginBottom: 'var(--spacing-3)',
 }
 
+const activeAiPanelStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+}
+
 const controlBarStyle: React.CSSProperties = {
   gridColumn: '1 / -1',
   gridRow: '3',
@@ -425,13 +430,14 @@ export function StudyInterface() {
             </button>
           </div>
           <div style={tabContentStyle}>
-            {aiPanelState === 'ai' && (
-              <>
-                {quickParagraphType && <div style={quickActionsStyle}><QuickActions paragraphType={quickParagraphType} onAction={(action) => handleSendMessage(action.label, 'paragraph')} /></div>}
-                <AiAssistant messages={chatMessages} isStreaming={isStreaming} onStop={handleStopMessage} onSeekSource={handleSeek} />
-                <ChatInput onSend={handleSendMessage} />
-              </>
-            )}
+            <div
+              hidden={aiPanelState !== 'ai'}
+              style={aiPanelState === 'ai' ? activeAiPanelStyle : undefined}
+            >
+              {quickParagraphType && <div style={quickActionsStyle}><QuickActions paragraphType={quickParagraphType} onAction={(action) => handleSendMessage(action.label, 'paragraph')} /></div>}
+              <AiAssistant messages={chatMessages} isStreaming={isStreaming} onStop={handleStopMessage} onSeekSource={handleSeek} />
+              <ChatInput onSend={handleSendMessage} />
+            </div>
             <div hidden={aiPanelState !== 'notes'}>
               <NotesPanel
                 onCreateNote={handleCreateFreeNote}
