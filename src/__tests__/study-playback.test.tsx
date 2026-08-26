@@ -53,6 +53,23 @@ function configureAssistantStudy() {
   })
 }
 
+function configureSubtitleStudy() {
+  useRainStore.setState({
+    currentPage: 'study',
+    currentVideoId: 'video-subtitles',
+    currentVideoFilePath: 'https://example.test/subtitles.mp4',
+    currentVideoTitle: 'Subtitle course',
+    currentVideoLanguage: 'en',
+    layoutMode: 'follow',
+    playPosition: 0,
+    nodeTree: [{ id: 'subtitle-paragraph', videoId: 'video-subtitles', parentId: null, kind: 'paragraph', title: 'Subtitle paragraph', type: 'concept', startTime: 0, endTime: 5, text: null, sortOrder: 0 }],
+    sentences: [
+      { id: 'subtitle-first', nodeId: 'subtitle-paragraph', text: 'First original sentence.', startTime: 1, endTime: 2, sortOrder: 0 },
+      { id: 'subtitle-second', nodeId: 'subtitle-paragraph', text: 'Second original sentence.', startTime: 3, endTime: 4, sortOrder: 1 },
+    ],
+  })
+}
+
 describe('real study playback', () => {
   it('uses Tauri convertFileSrc for a local video and surfaces a media load failure', () => {
     ;(window as unknown as Window & { __TAURI_INTERNALS__: { convertFileSrc: (path: string) => string } }).__TAURI_INTERNALS__ = { convertFileSrc: (path) => `asset://local/${encodeURIComponent(path)}` }
@@ -207,5 +224,56 @@ describe('real study playback', () => {
     expect(screen.getByRole('button', { name: /暂停/ })).toBeInTheDocument()
     fireEvent.pause(video)
     expect(screen.getByRole('button', { name: /播放/ })).toBeInTheDocument()
+  })
+
+  it('shows only the exact current original sentence through the StudyInterface subtitle control and keeps that choice for this app session', () => {
+    configureSubtitleStudy()
+
+    const firstMount = render(<StudyInterface />)
+
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+    const subtitleControls = screen.getAllByRole('button', { name: /字幕/ })
+    expect(subtitleControls).toHaveLength(1)
+    const subtitleToggle = subtitleControls[0]
+    expect(screen.queryByRole('button', { name: /译文/ })).not.toBeInTheDocument()
+    expect(screen.getByTestId('text-zone')).toHaveTextContent('First original sentence.')
+
+    fireEvent.timeUpdate(video, { target: { currentTime: 0 } })
+    expect(screen.queryByTestId('subtitle-overlay')).not.toBeInTheDocument()
+
+    fireEvent.timeUpdate(video, { target: { currentTime: 1 } })
+    expect(screen.getByTestId('subtitle-overlay')).toHaveTextContent('First original sentence.')
+
+    fireEvent.timeUpdate(video, { target: { currentTime: 2 } })
+    expect(screen.queryByTestId('subtitle-overlay')).not.toBeInTheDocument()
+
+    fireEvent.timeUpdate(video, { target: { currentTime: 3 } })
+    expect(screen.getByTestId('subtitle-overlay')).toHaveTextContent('Second original sentence.')
+
+    fireEvent.timeUpdate(video, { target: { currentTime: 4 } })
+    expect(screen.queryByTestId('subtitle-overlay')).not.toBeInTheDocument()
+
+    fireEvent.timeUpdate(video, { target: { currentTime: 3 } })
+    expect(screen.getByTestId('subtitle-overlay')).toHaveTextContent('Second original sentence.')
+    fireEvent.click(subtitleToggle)
+    expect(screen.queryByTestId('subtitle-overlay')).not.toBeInTheDocument()
+    expect(screen.getByTestId('text-zone')).toHaveTextContent('Second original sentence.')
+
+    fireEvent.click(subtitleToggle)
+    expect(screen.getByTestId('subtitle-overlay')).toHaveTextContent('Second original sentence.')
+
+    fireEvent.click(subtitleToggle)
+    expect(screen.queryByTestId('subtitle-overlay')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '← 返回' }))
+    firstMount.unmount()
+    configureSubtitleStudy()
+    render(<StudyInterface />)
+    const reopenedSubtitleControls = screen.getAllByRole('button', { name: /字幕/ })
+    expect(reopenedSubtitleControls).toHaveLength(1)
+    expect(reopenedSubtitleControls[0]).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(reopenedSubtitleControls[0])
+    fireEvent.timeUpdate(screen.getByTestId('video-player'), { target: { currentTime: 3 } })
+    expect(screen.getByTestId('subtitle-overlay')).toHaveTextContent('Second original sentence.')
   })
 })

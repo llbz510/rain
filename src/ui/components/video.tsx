@@ -65,6 +65,7 @@ export function VideoControls() {
   const subtitleOn = useRainStore((s) => s.subtitleOn)
   const switchLayoutMode = useRainStore((s) => s.switchLayoutMode)
   const isPlaying = useRainStore((s) => s.isPlaying)
+  const toggleSubtitle = () => useRainStore.setState({ subtitleOn: !subtitleOn })
 
   const togglePlayback = () => {
     if (!activeVideo) return
@@ -78,7 +79,10 @@ export function VideoControls() {
 
   return <div data-testid="control-bar">
     <button onClick={togglePlayback}>{isPlaying ? '暂停' : '播放'}</button>
-    <button onClick={() => useRainStore.setState({ subtitleOn: !subtitleOn })}>字幕{subtitleOn ? ' ON' : ' OFF'}</button>
+    <button
+      aria-pressed={subtitleOn}
+      onClick={toggleSubtitle}
+    >字幕{subtitleOn ? ' ON' : ' OFF'}</button>
     <button onClick={() => switchLayoutMode('textExpand')}>文本展开</button>
     <button onClick={() => switchLayoutMode('mapExpand')}>导图展开</button>
   </div>

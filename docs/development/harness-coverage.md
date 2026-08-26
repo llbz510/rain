@@ -1,7 +1,7 @@
 # Rain Harness 覆盖矩阵
 
 > 状态：Active
-> 更新日期：2026-08-02
+> 更新日期：2026-08-25
 > 作用：说明每条 AC 由谁检查，以及现有检查能证明到什么程度。
 
 ## 1. 覆盖等级
@@ -112,7 +112,7 @@
 
 以下 50 条 AC 最初于 2026-08-02 确认产品语义。2026-08-03 Harness Migration 将 `AC-RL-07` 标为 `Superseded`，其余 49 条继续 Confirmed；本行保留退役 AC 的覆盖记录以便审计。`Partial`/`Gap` 是正式开发队列，`Retired` 不是完成或 Evidence 升级。
 
-2026-08-11 的 controlled merged-target artifact-build Slice 正在为 `AC-RL-01/02/08/10/12` 建立生成器、独立 build record 和 hosted workflow；`release-artifact-generator.test.ts`、`generate-nvidia-evidence-admin-launcher.test.ts` 和 `controlled-gpu-artifact-build.workflow.test.ts` 只裁判 fake bytes、provenance、两次上传顺序与安全门。真实目标 workflow 成功、其 output 被独立审查前，本表等级保持不变，尤其不能把行为合同或 workflow 静态检查写成 Release Evidence。
+受控 GPU artifact build 已由用户暂停：被取消的 run 未生成或上传 manifest、core/control artifact、build record 或 launcher。`AC-RL-*` 保持既有 Confirmed 与 Partial/Gap，不因静态生成器、取消 run 或本地 adapter enablement 升级。当前唯一开发方向是 Launch feature Slices；只有用户明确恢复才可重新排期受控 hosted build、GPU Evidence、签名、许可或分发。
 
 | AC | 当前裁判 | 等级 | 当前结论与缺口 |
 | --- | --- | --- | --- |
@@ -147,7 +147,7 @@
 | AC-SU-02 | M05、`study-playback.test.tsx` | Partial | 进度来自 `playPosition`；章节/小节约 200ms 横向滑动、DOM 和 reduced-motion Evidence 未闭合 |
 | AC-SU-03 | `study-layout.test.tsx`、助手/笔记生产测试 | Partial | 会话与学习事实已有相邻覆盖；Tab 隐藏区无重复副作用、未完成流/草稿恢复和桌面 Judge 未闭合 |
 | AC-SU-04 | `study-layout.test.tsx` | Partial | 三模式复用媒体事实已 Strong；比例拖拽、跨会话持久化与真实桌面重启仍是 Gap |
-| AC-SU-05 | `study-playback.test.tsx`、M07 | Partial | 真实当前句和媒体播放存在；原文字幕开关、半透明视觉、重开恢复和无译文控件未完整裁判 |
+| AC-SU-05 | `study-playback.test.tsx`、M07 | Partial | 生产 `StudyInterface` 在默认 follow 路径以精确半开区间 `[startTime,endTime)` 将真实当前原文句传给 `VideoZone`；既有单一动态“字幕 ON/OFF”控制继续复用会话级 `subtitleOn`。定向 Judge 断言页面仅有一个字幕按钮、无译文控件；关闭后调用生产返回动作、显式 unmount 并以未设置 `subtitleOn` 的同会话 fixture 新挂载，再证明关闭态恢复。真实 media、Tauri/Desktop、半透明视觉和截图 Evidence 仍缺，故不得升级为 Strong/Desktop/Evidence |
 | AC-SU-06 | `study-navigation.test.tsx`、M05 | Partial | 选择/双击导航与真实结构有覆盖；正交圆弧视觉、有界缩放/平移和完整桌面 Judge 未闭合 |
 | AC-SU-07 | M14、`study-playback.test.tsx`、`study-navigation.test.tsx` | Partial | 局部快捷键与基础副作用已有组件覆盖；完整生产焦点矩阵、精确布局映射、N/P/Tab 副作用和禁用删除未签发 |
 | AC-UX-01 | `m13-visual.test.ts`、`src/index.css` | Partial | 真实 CSS token 受锁定 Harness 读取；全部 Launch 页面 dark-only/无品牌强调色的独立 visual review 缺失 |

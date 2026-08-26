@@ -171,6 +171,7 @@ describe('AC-ST-03 playback synchronization', () => {
     })
     render(<StudyInterface />)
     const video = screen.getByTestId('video-player') as HTMLVideoElement
+    const textZone = within(screen.getByTestId('text-zone'))
 
     fireEvent.play(video)
     expect(useRainStore.getState().isPlaying).toBe(true)
@@ -180,8 +181,8 @@ describe('AC-ST-03 playback synchronization', () => {
 
     await waitFor(() => {
       expect(useRainStore.getState().playPosition).toBe(10)
-      expect(screen.getByText('First sentence.')).toHaveAttribute('data-highlighted', 'false')
-      expect(screen.getByText('Second sentence.')).toHaveAttribute('data-highlighted', 'true')
+      expect(textZone.getByText('First sentence.')).toHaveAttribute('data-highlighted', 'false')
+      expect(textZone.getByText('Second sentence.')).toHaveAttribute('data-highlighted', 'true')
       expect(screen.getByTestId('progress-indicator-paragraph-1')).toHaveTextContent('■')
       expect(screen.getByTestId('progress-indicator-paragraph-2')).toHaveTextContent('▶')
       expect(scrollIntoView).toHaveBeenCalled()
@@ -193,7 +194,7 @@ describe('AC-ST-03 playback synchronization', () => {
     video.currentTime = 5
     fireEvent.timeUpdate(video)
     await waitFor(() => {
-      expect(screen.getByText('First sentence.')).toHaveAttribute('data-highlighted', 'true')
+      expect(textZone.getByText('First sentence.')).toHaveAttribute('data-highlighted', 'true')
     })
     expect(scrollIntoView).not.toHaveBeenCalled()
   })
