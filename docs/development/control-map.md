@@ -1,7 +1,7 @@
 # Rain 项目控制地图
 
 > 状态：Active
-> 更新日期：2026-08-02
+> 更新日期：2026-08-25
 > 作用：告诉人和 AI 在不同问题上应该相信哪份资料，以及资料冲突时如何处理。
 
 ## 1. 事实源不是一个文件
@@ -14,6 +14,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 项目中的核心词语是什么意思 | `CONTEXT.md` | 统一领域语言；不能单独证明实现已完成 |
 | 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 当前状态、最近验证和已知风险 |
 | 跨会话开发切片按什么流程和优先级执行 | `docs/development/agent-first-development-plan.md` | Active 会话/交付协议与候选队列；不新增产品语义，Proposed 切片仍需用户确认 |
+| 当前 Confirmed AC 的生产路径、局部入口与阻断项 | `docs/development/launch-feature-audit.md` | Active Launch 审计；只记录 Present/Partial/Shadow/Absent，不定义 AC、Judge、tier 或完成状态 |
 | 从当前状态到正式发布按什么里程碑推进 | `docs/development/rain-project-delivery-plan.md` | Active 项目交付路线、Release 完成定义、全部 Proposed 决策路由和 RC/上线门禁；不自动授权新行为 |
 | 本次 Core Release 包含什么 | `docs/development/release-scope-contract.md` | Active、用户已确认并于 2026-08-03 修订的范围合同；记录 Launch/Post-release 去向、单一 GPU 增强安装包和受支持 NVIDIA 最低要求 |
 | 本次 Core Release 用什么 AC 验收 | `docs/development/acceptance-standard.md` | M1-S2 原确认 50 条合同；2026-08-03 Harness Migration 后 49 条仍 Confirmed，`AC-RL-07` 已 Superseded；`release-acceptance-contract.md` 保留确认历史和 31 条 Launch traceability |

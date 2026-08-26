@@ -193,6 +193,9 @@ export function StudyInterface() {
   const selectedNodeId = useRainStore((s) => s.selectedNodeId)
   const nodeTree = useRainStore((s) => s.nodeTree)
   const sentences = useRainStore((s) => s.sentences)
+  const currentSubtitle = sentences.find(
+    (sentence) => sentence.startTime <= playPosition && playPosition < sentence.endTime,
+  )?.text
 
   // AI chat state
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; sources?: AssistantSource[] }>>([])
@@ -373,6 +376,7 @@ export function StudyInterface() {
         >
           <VideoZone
             filePath={filePath}
+            currentSubtitle={currentSubtitle}
             resumePosition={playPosition}
             onProgress={handlePlaybackProgress}
           />
