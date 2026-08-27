@@ -73,6 +73,84 @@ function currentNode(nodes: Node[], allNodes: Node[], position: number): Node | 
   return current
 }
 
+const EDGE_FADE_EPSILON = 0.5
+
+function useEdgeFades(nodes: Node[]) {
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const [fades, setFades] = React.useState({ left: false, right: false })
+  const updateFades = React.useCallback(() => {
+    const row = scrollRef.current
+    if (!row) return
+    const maximumScrollLeft = Math.max(0, row.scrollWidth - row.clientWidth)
+    const scrollLeft = Math.min(maximumScrollLeft, Math.max(0, row.scrollLeft))
+    const nextFades = {
+      left: maximumScrollLeft > EDGE_FADE_EPSILON && scrollLeft > EDGE_FADE_EPSILON,
+      right: maximumScrollLeft > EDGE_FADE_EPSILON && maximumScrollLeft - scrollLeft > EDGE_FADE_EPSILON,
+    }
+    setFades((previousFades) => (
+      previousFades.left === nextFades.left && previousFades.right === nextFades.right
+        ? previousFades
+        : nextFades
+    ))
+  }, [])
+
+  React.useLayoutEffect(() => {
+    updateFades()
+  }, [nodes, updateFades])
+
+  React.useEffect(() => {
+    window.addEventListener('resize', updateFades)
+    return () => window.removeEventListener('resize', updateFades)
+  }, [updateFades])
+
+  return { scrollRef, fades, updateFades }
+}
+
+const catalogRowShellStyle: React.CSSProperties = {
+  position: 'relative',
+}
+
+const catalogRowStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'nowrap',
+  gap: 'var(--spacing-2)',
+  overflowX: 'auto',
+}
+
+function fadeStyle(direction: 'left' | 'right'): React.CSSProperties {
+  return {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    [direction]: 0,
+    width: 24,
+    pointerEvents: 'none',
+    background: `linear-gradient(to ${direction === 'left' ? 'right' : 'left'}, var(--color-bg), transparent)`,
+  }
+}
+
+interface CatalogRowProps {
+  level: 'structure' | 'paragraph'
+  nodes: Node[]
+  currentNodeId: string | null
+  currentNodeRef: React.Ref<HTMLSpanElement>
+  renderNode: (node: Node, currentNodeId: string | null, currentNodeRef: React.Ref<HTMLSpanElement>) => React.ReactNode
+}
+
+function CatalogRow({ level, nodes, currentNodeId, currentNodeRef, renderNode }: CatalogRowProps) {
+  const { scrollRef, fades, updateFades } = useEdgeFades(nodes)
+
+  return (
+    <div data-catalog-row={level} style={catalogRowShellStyle}>
+      <div ref={scrollRef} data-catalog-scroll-row={level} style={catalogRowStyle} onScroll={updateFades}>
+        {nodes.map((node) => renderNode(node, currentNodeId, currentNodeRef))}
+      </div>
+      {fades.left && <div data-testid={`catalog-fade-left-${level}`} aria-hidden="true" style={fadeStyle('left')} />}
+      {fades.right && <div data-testid={`catalog-fade-right-${level}`} aria-hidden="true" style={fadeStyle('right')} />}
+    </div>
+  )
+}
+
 export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }: CatalogProps & { playPosition?: number }) {
   const nodes = useRainStore((s) => s.nodeTree)
   const selectedNodeId = useRainStore((s) => s.selectedNodeId)
@@ -128,8 +206,14 @@ export function CatalogBar({ onSeek }: CatalogProps) {
   const nodes = useRainStore((s) => s.nodeTree)
   const playPosition = useRainStore((s) => s.playPosition)
   const isPlaying = useRainStore((s) => s.isPlaying)
-  const structureNodes = nodes.filter((node) => node.kind === 'chapter' || node.kind === 'section')
-  const paragraphNodes = nodes.filter((node) => node.kind === 'paragraph')
+  const structureNodes = React.useMemo(
+    () => nodes.filter((node) => node.kind === 'chapter' || node.kind === 'section'),
+    [nodes],
+  )
+  const paragraphNodes = React.useMemo(
+    () => nodes.filter((node) => node.kind === 'paragraph'),
+    [nodes],
+  )
   const currentStructureNode = currentNode(structureNodes, nodes, playPosition)
   const currentParagraphNode = currentNode(paragraphNodes, nodes, playPosition)
   const currentStructureRef = React.useRef<HTMLSpanElement>(null)
@@ -161,13 +245,6 @@ export function CatalogBar({ onSeek }: CatalogProps) {
     previousParagraphNodeId.current = currentNodeId
   }, [currentParagraphNode?.id, isPlaying])
 
-  const rowStyle: React.CSSProperties = {
-    display: 'flex',
-    flexWrap: 'nowrap',
-    gap: 'var(--spacing-2)',
-    overflowX: 'auto',
-  }
-
   const nodeStyle: React.CSSProperties = {
     cursor: 'pointer',
     flex: '0 0 auto',
@@ -187,8 +264,8 @@ export function CatalogBar({ onSeek }: CatalogProps) {
 
   return (
     <div data-testid="catalog-bar">
-      <div data-catalog-row="structure" style={rowStyle}>{structureNodes.map((node) => renderNode(node, currentStructureNode?.id ?? null, currentStructureRef))}</div>
-      <div data-catalog-row="paragraph" style={rowStyle}>{paragraphNodes.map((node) => renderNode(node, currentParagraphNode?.id ?? null, currentParagraphRef))}</div>
+      <CatalogRow level="structure" nodes={structureNodes} currentNodeId={currentStructureNode?.id ?? null} currentNodeRef={currentStructureRef} renderNode={renderNode} />
+      <CatalogRow level="paragraph" nodes={paragraphNodes} currentNodeId={currentParagraphNode?.id ?? null} currentNodeRef={currentParagraphRef} renderNode={renderNode} />
     </div>
   )
 }

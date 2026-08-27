@@ -220,11 +220,13 @@ describe('AC-SU-01 two-row study catalog', () => {
     const catalog = screen.getByTestId('catalog-bar')
     const structureRow = catalog.querySelector<HTMLDivElement>('[data-catalog-row="structure"]')
     const paragraphRow = catalog.querySelector<HTMLDivElement>('[data-catalog-row="paragraph"]')
+    const structureScrollRow = structureRow?.querySelector<HTMLDivElement>('[data-catalog-scroll-row="structure"]')
+    const paragraphScrollRow = paragraphRow?.querySelector<HTMLDivElement>('[data-catalog-scroll-row="paragraph"]')
 
     expect(catalog.children[0]).toBe(structureRow)
     expect(catalog.children[1]).toBe(paragraphRow)
-    expect(structureRow).toHaveStyle({ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' })
-    expect(paragraphRow).toHaveStyle({ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' })
+    expect(structureScrollRow).toHaveStyle({ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' })
+    expect(paragraphScrollRow).toHaveStyle({ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' })
     const chapter = within(structureRow!).getByText('Chapter one')
     const section = within(structureRow!).getByText('Section one')
     const firstParagraph = within(paragraphRow!).getByText('Paragraph one')
@@ -329,6 +331,172 @@ describe('AC-SU-01 two-row study catalog', () => {
       video.currentTime = 12
       fireEvent.timeUpdate(video)
     }).not.toThrow()
+  })
+
+  it('shows directional, non-interactive edge fades from each production row scroll geometry', async () => {
+    const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+    const originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth')
+    const originalScrollLeft = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollLeft')
+    const widths = { structure: 300, paragraph: 300 }
+    const positions = { structure: 0, paragraph: 0 }
+    const geometryReads = { structure: 0, paragraph: 0 }
+    const rowKey = (element: HTMLElement) => element.dataset.catalogScrollRow as keyof typeof widths | undefined
+    const addEventListener = vi.spyOn(window, 'addEventListener')
+    const removeEventListener = vi.spyOn(window, 'removeEventListener')
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        const key = rowKey(this)
+        if (key) geometryReads[key] += 1
+        return key ? 100 : originalClientWidth?.get?.call(this) ?? 0
+      },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get() {
+        const key = rowKey(this)
+        if (key) geometryReads[key] += 1
+        return key ? widths[key] : originalScrollWidth?.get?.call(this) ?? 0
+      },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollLeft', {
+      configurable: true,
+      get() {
+        const key = rowKey(this)
+        return key ? positions[key] : originalScrollLeft?.get?.call(this) ?? 0
+      },
+      set(value: number) {
+        const key = rowKey(this)
+        if (key) positions[key] = value
+      },
+    })
+
+    try {
+      configureTwoRowCatalog()
+      useRainStore.setState({
+        nodeTree: [...useRainStore.getState().nodeTree,
+          { id: 'chapter-2', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter two', type: null, startTime: 30, endTime: 60, text: null, sortOrder: 1 },
+          { id: 'section-2', videoId: 'video-1', parentId: 'chapter-2', kind: 'section', title: 'Section two', type: null, startTime: 30, endTime: 60, text: null, sortOrder: 0 },
+          { id: 'paragraph-3', videoId: 'video-1', parentId: 'section-2', kind: 'paragraph', title: 'Paragraph three', type: 'transition', startTime: 30, endTime: 40, text: null, sortOrder: 0 },
+          { id: 'paragraph-4', videoId: 'video-1', parentId: 'section-2', kind: 'paragraph', title: 'Paragraph four', type: 'concept', startTime: 40, endTime: 50, text: null, sortOrder: 1 },
+        ],
+      })
+      render(<StudyInterface />)
+      const catalog = screen.getByTestId('catalog-bar')
+      const structureRow = catalog.querySelector<HTMLElement>('[data-catalog-scroll-row="structure"]')!
+      const paragraphRow = catalog.querySelector<HTMLElement>('[data-catalog-scroll-row="paragraph"]')!
+
+      expect(structureRow).toHaveAttribute('data-catalog-scroll-row', 'structure')
+      expect(structureRow.parentElement).toHaveAttribute('data-catalog-row', 'structure')
+      expect(paragraphRow).toHaveAttribute('data-catalog-scroll-row', 'paragraph')
+      expect(paragraphRow.parentElement).toHaveAttribute('data-catalog-row', 'paragraph')
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('catalog-fade-left-structure')).not.toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-right-structure')).toHaveAttribute('aria-hidden', 'true')
+        expect(screen.queryByTestId('catalog-fade-left-paragraph')).not.toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-right-paragraph')).toHaveAttribute('aria-hidden', 'true')
+      })
+      expect(screen.getByTestId('catalog-fade-right-structure')).toHaveStyle({ pointerEvents: 'none' })
+      expect(screen.getByTestId('catalog-fade-right-structure').getAttribute('style')).toContain('linear-gradient(to left, var(--color-bg), transparent)')
+      expect(screen.getByTestId('catalog-fade-right-paragraph').getAttribute('style')).toContain('linear-gradient(to left, var(--color-bg), transparent)')
+
+      positions.structure = 100
+      positions.paragraph = 100
+      fireEvent.scroll(structureRow)
+      fireEvent.scroll(paragraphRow)
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-fade-left-structure')).toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-right-structure')).toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-left-paragraph')).toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-right-paragraph')).toBeInTheDocument()
+      })
+
+      positions.structure = 0.25
+      positions.paragraph = 0.25
+      fireEvent.scroll(structureRow)
+      fireEvent.scroll(paragraphRow)
+      await waitFor(() => {
+        expect(screen.queryByTestId('catalog-fade-left-structure')).not.toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-right-structure')).toBeInTheDocument()
+        expect(screen.queryByTestId('catalog-fade-left-paragraph')).not.toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-right-paragraph')).toBeInTheDocument()
+      })
+
+      positions.structure = 199.75
+      positions.paragraph = 199.75
+      fireEvent.scroll(structureRow)
+      fireEvent.scroll(paragraphRow)
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-fade-left-structure')).toBeInTheDocument()
+        expect(screen.queryByTestId('catalog-fade-right-structure')).not.toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-left-paragraph')).toBeInTheDocument()
+        expect(screen.queryByTestId('catalog-fade-right-paragraph')).not.toBeInTheDocument()
+      })
+
+      positions.structure = 200
+      positions.paragraph = 200
+      fireEvent.scroll(structureRow)
+      fireEvent.scroll(paragraphRow)
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-fade-left-structure').getAttribute('style')).toContain('linear-gradient(to right, var(--color-bg), transparent)')
+        expect(screen.queryByTestId('catalog-fade-right-structure')).not.toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-left-paragraph').getAttribute('style')).toContain('linear-gradient(to right, var(--color-bg), transparent)')
+        expect(screen.queryByTestId('catalog-fade-right-paragraph')).not.toBeInTheDocument()
+      })
+
+      widths.structure = 100
+      widths.paragraph = 100
+      positions.structure = 0
+      positions.paragraph = 0
+      fireEvent.resize(window)
+      await waitFor(() => {
+        expect(screen.queryByTestId('catalog-fade-left-structure')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('catalog-fade-right-structure')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('catalog-fade-left-paragraph')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('catalog-fade-right-paragraph')).not.toBeInTheDocument()
+      })
+
+      widths.structure = 300
+      widths.paragraph = 300
+      act(() => {
+        useRainStore.setState({
+          nodeTree: [...useRainStore.getState().nodeTree, {
+            id: 'paragraph-5',
+            videoId: 'video-1',
+            parentId: 'section-1',
+            kind: 'paragraph',
+            title: 'Paragraph five',
+            type: 'transition',
+            startTime: 30,
+            endTime: 40,
+            text: null,
+            sortOrder: 2,
+          }],
+        })
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-fade-right-structure')).toBeInTheDocument()
+        expect(screen.getByTestId('catalog-fade-right-paragraph')).toBeInTheDocument()
+      })
+
+      const geometryBeforePositionChange = { ...geometryReads }
+      const resizeAddsBeforePositionChange = addEventListener.mock.calls.filter(([type]) => type === 'resize').length
+      const resizeRemovesBeforePositionChange = removeEventListener.mock.calls.filter(([type]) => type === 'resize').length
+      act(() => useRainStore.setState({ playPosition: 6 }))
+      expect(geometryReads).toEqual(geometryBeforePositionChange)
+      expect(addEventListener.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(resizeAddsBeforePositionChange)
+      expect(removeEventListener.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(resizeRemovesBeforePositionChange)
+    } finally {
+      addEventListener.mockRestore()
+      removeEventListener.mockRestore()
+      if (originalClientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
+      if (originalScrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollWidth')
+      if (originalScrollLeft) Object.defineProperty(HTMLElement.prototype, 'scrollLeft', originalScrollLeft)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollLeft')
+    }
   })
 })
 
