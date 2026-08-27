@@ -77,7 +77,7 @@
 | VL-05 | Partial | database delete/Rust delete | deletion/Rust — Partial | 阻断：隔离真实文件系统 + 真实 SQLite | 建立生产文件生命周期 Judge |
 | VL-06 | Absent | 无 app-owned thumbnail GC | 无 — Gap | 阻断：keep-set/path/concurrency/file Evidence | 实现该 Confirmed Slice/建立生产 Judge |
 | VL-07 | Partial | VideoCard thumbnail rendering | M17/thumbnail UI — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |
-| SU-01 | Partial | StudyInterface/SideTree follow | M05/navigation/playback — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
+| SU-01 | Partial | StudyInterface → CatalogBar 两行目录；SideTree follow | M05/navigation/playback — Partial | 阻断：Strong + Desktop Evidence；生产 DOM Judge 已覆盖章节/小节顶行、段落底行的横向不换行与公开点击到 Store `playPosition`，长目录滚动/自动定位、边缘渐隐、暂停后的手动控制仍缺 | 禁用 jsdom/假截图替代 |
 | SU-02 | Shadow/adjacent | playPosition progress exists；无横向滑动产品路径 | M05/playback — Partial | 阻断：Strong + Desktop/Visual Evidence | 不把相邻进度当完成 |
 | SU-03 | Partial | StudyInterface 以原生 `hidden` 对称保留 AI/NotesPanel；可见 AI wrapper 为列 flex，NoteItem 与 ChatInput 本地草稿不 remount | study-notes/layout/M08/M10 — Partial | 阻断：Strong + Desktop Evidence；本 Slice 已 Judge Note memory 写入与 loadVideo 后初始 Notes fixture 的 AI 未发送草稿 hidden/a11y/Tab 隔离、切回恢复和 0 次 mocked `streamAiChat`；未完成助手流/其余隐藏副作用未闭合 | 禁用 jsdom/假截图替代 |
 | SU-04 | Partial | three-mode media reuse | study-layout — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
