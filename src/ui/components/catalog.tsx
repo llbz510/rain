@@ -72,18 +72,36 @@ export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }:
 
 export function CatalogBar({ onSeek }: CatalogProps) {
   const nodes = useRainStore((s) => s.nodeTree)
+  const structureNodes = nodes.filter((node) => node.kind === 'chapter' || node.kind === 'section')
+  const paragraphNodes = nodes.filter((node) => node.kind === 'paragraph')
+
+  const rowStyle: React.CSSProperties = {
+    display: 'flex',
+    flexWrap: 'nowrap',
+    gap: 'var(--spacing-2)',
+    overflowX: 'auto',
+  }
+
+  const nodeStyle: React.CSSProperties = {
+    cursor: 'pointer',
+    flex: '0 0 auto',
+    whiteSpace: 'nowrap',
+  }
+
+  const renderNode = (node: Node) => (
+    <span
+      key={node.id}
+      style={nodeStyle}
+      onClick={() => onSeek?.(node.startTime)}
+    >
+      {node.title}
+    </span>
+  )
 
   return (
     <div data-testid="catalog-bar">
-      {nodes.map((node) => (
-        <span
-          key={node.id}
-          style={{ cursor: 'pointer' }}
-          onClick={() => onSeek?.(node.startTime)}
-        >
-          {node.title}
-        </span>
-      ))}
+      <div data-catalog-row="structure" style={rowStyle}>{structureNodes.map(renderNode)}</div>
+      <div data-catalog-row="paragraph" style={rowStyle}>{paragraphNodes.map(renderNode)}</div>
     </div>
   )
 }

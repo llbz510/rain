@@ -86,6 +86,18 @@ function configureContainerNavigation(layoutMode: 'follow' | 'mapExpand' = 'foll
   })
 }
 
+function configureTwoRowCatalog() {
+  configureStudy()
+  useRainStore.setState({
+    nodeTree: [
+      { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter one', type: null, startTime: 1, endTime: 30, text: null, sortOrder: 0 },
+      { id: 'section-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'section', title: 'Section one', type: null, startTime: 5, endTime: 30, text: null, sortOrder: 0 },
+      { id: 'paragraph-1', videoId: 'video-1', parentId: 'section-1', kind: 'paragraph', title: 'Paragraph one', type: 'concept', startTime: 12, endTime: 20, text: null, sortOrder: 0 },
+      { id: 'paragraph-2', videoId: 'video-1', parentId: 'section-1', kind: 'paragraph', title: 'Paragraph two', type: 'example', startTime: 20, endTime: 30, text: null, sortOrder: 1 },
+    ],
+  })
+}
+
 beforeEach(() => {
   useRainStore.getState().reset()
   streamAiChat.mockReset()
@@ -197,6 +209,36 @@ describe('AC-ST-03 playback synchronization', () => {
       expect(textZone.getByText('First sentence.')).toHaveAttribute('data-highlighted', 'true')
     })
     expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+})
+
+describe('AC-SU-01 two-row study catalog', () => {
+  it('keeps chapter and section above paragraphs in horizontal no-wrap rows and seeks through the production page', () => {
+    configureTwoRowCatalog()
+    render(<StudyInterface />)
+
+    const catalog = screen.getByTestId('catalog-bar')
+    const structureRow = catalog.querySelector<HTMLDivElement>('[data-catalog-row="structure"]')
+    const paragraphRow = catalog.querySelector<HTMLDivElement>('[data-catalog-row="paragraph"]')
+
+    expect(catalog.children[0]).toBe(structureRow)
+    expect(catalog.children[1]).toBe(paragraphRow)
+    expect(structureRow).toHaveStyle({ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' })
+    expect(paragraphRow).toHaveStyle({ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' })
+    const chapter = within(structureRow!).getByText('Chapter one')
+    const section = within(structureRow!).getByText('Section one')
+    const firstParagraph = within(paragraphRow!).getByText('Paragraph one')
+    const secondParagraph = within(paragraphRow!).getByText('Paragraph two')
+    for (const node of [chapter, section, firstParagraph, secondParagraph]) {
+      expect(node).toHaveStyle({ flex: '0 0 auto', whiteSpace: 'nowrap' })
+    }
+
+    fireEvent.click(chapter)
+    expect(useRainStore.getState().playPosition).toBe(1)
+    fireEvent.click(section)
+    expect(useRainStore.getState().playPosition).toBe(5)
+    fireEvent.click(firstParagraph)
+    expect(useRainStore.getState().playPosition).toBe(12)
   })
 })
 
