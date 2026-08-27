@@ -1,7 +1,7 @@
 # Rain Harness 覆盖矩阵
 
 > 状态：Active
-> 更新日期：2026-08-26
+> 更新日期：2026-08-27
 > 作用：说明每条 AC 由谁检查，以及现有检查能证明到什么程度。
 
 ## 1. 覆盖等级
@@ -143,7 +143,7 @@
 | AC-VL-05 | `video-list-deletion.test.tsx`、Rust `video_deletion` tests | Partial | 数据库级联与源视频保留已有 Judge；提交后 app-owned 缩略图删除、非法路径和可重试文件失败未实现 |
 | AC-VL-06 | 尚无缩略图 GC Judge | Gap | 缺真实 keep-set、路径逃逸、并发新建、幂等与部分失败覆盖 |
 | AC-VL-07 | M17、`video-thumbnail-ownership.test.tsx` | Partial | 卡片内容与真实缩略图桥接有局部覆盖；240px/16:9/窄宽主操作和多 viewport 独立视觉 Evidence 未签发 |
-| AC-SU-01 | M05、`study-navigation.test.tsx`、`study-playback.test.tsx` | Partial | 生产 `StudyInterface → CatalogBar` Judge 已证明章节/小节顶行、段落底行均横向不换行，公开点击仍经既有 `onSeek` 写入真实 Store `playPosition`；长目录滚动/自动定位、边缘渐隐、暂停后的手动控制和 Desktop Evidence 未闭合 |
+| AC-SU-01 | M05、`study-navigation.test.tsx`、`study-playback.test.tsx` | Partial | 生产 `StudyInterface → CatalogBar` Judge 已证明章节/小节顶行、段落底行均横向不换行，公开点击仍经既有 `onSeek` 写入真实 Store `playPosition`；真实 media Judge 证明当前结构/段落项各以 `scrollIntoView({ block: 'nearest', inline: 'center' })` 定位，同边界的 child section 确定性优先于父 chapter，暂停时真实 media `timeupdate` 到 10 后公开目录点击使 `playPosition` 从 10 seek 到 0 仍不强制滚动、恢复播放立即重新居中；浏览器没有该 API 时不抛。长目录真实滚动可见性、边缘渐隐和 Desktop Evidence 未闭合 |
 | AC-SU-02 | M05、`study-playback.test.tsx` | Partial | 进度来自 `playPosition`；章节/小节约 200ms 横向滑动、DOM 和 reduced-motion Evidence 未闭合 |
 | AC-SU-03 | `study-layout.test.tsx`、`study-notes.test.tsx`、M08/M10 | Partial | 生产 `StudyInterface` Judge 覆盖两侧 retained mount：已有 Note 的 native `hidden`/a11y/Tab 隔离与实际 memory 写入计数；以及 `loadVideo` 后以真实 `aiPanelState: 'notes'` fixture 首次挂载 AI hidden、具名 ChatInput 默认 a11y 不可见且 Tab 不进入、公开 Tab 往返后未发送草稿恢复。可见 AI wrapper 仍为列 flex；mocked `streamAiChat` 在初始隐藏、Tab 往返及输入未发送时均为 0。未完成助手流、其余隐藏面板副作用与 Desktop Judge 仍未闭合 |
 | AC-SU-04 | `study-layout.test.tsx` | Partial | 三模式复用媒体事实已 Strong；比例拖拽、跨会话持久化与真实桌面重启仍是 Gap |

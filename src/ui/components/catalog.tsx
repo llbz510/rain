@@ -19,6 +19,60 @@ function getChildren(nodes: Node[], parentId: string | null): Node[] {
     .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
+function nodeDepth(node: Node, nodesById: Map<string, Node>): number {
+  let depth = 0
+  let parentId = node.parentId
+  const visited = new Set([node.id])
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId)
+    const parent = nodesById.get(parentId)
+    if (!parent) break
+    depth += 1
+    parentId = parent.parentId
+  }
+  return depth
+}
+
+function currentNode(nodes: Node[], allNodes: Node[], position: number): Node | undefined {
+  const nodesById = new Map(allNodes.map((node) => [node.id, node]))
+  let current: Node | undefined
+  for (const candidate of nodes) {
+    if (candidate.startTime > position || position >= candidate.endTime) continue
+    if (!current) {
+      current = candidate
+      continue
+    }
+    if (candidate.startTime !== current.startTime) {
+      if (candidate.startTime > current.startTime) current = candidate
+      continue
+    }
+    const candidateDepth = nodeDepth(candidate, nodesById)
+    const currentDepth = nodeDepth(current, nodesById)
+    if (candidateDepth !== currentDepth) {
+      if (candidateDepth > currentDepth) current = candidate
+      continue
+    }
+    const candidateKindSpecificity = candidate.kind === 'section' ? 1 : 0
+    const currentKindSpecificity = current.kind === 'section' ? 1 : 0
+    if (candidateKindSpecificity !== currentKindSpecificity) {
+      if (candidateKindSpecificity > currentKindSpecificity) current = candidate
+      continue
+    }
+    const candidateDuration = candidate.endTime - candidate.startTime
+    const currentDuration = current.endTime - current.startTime
+    if (candidateDuration !== currentDuration) {
+      if (candidateDuration < currentDuration) current = candidate
+      continue
+    }
+    if (candidate.sortOrder !== current.sortOrder) {
+      if (candidate.sortOrder < current.sortOrder) current = candidate
+      continue
+    }
+    if (candidate.id.localeCompare(current.id) < 0) current = candidate
+  }
+  return current
+}
+
 export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }: CatalogProps & { playPosition?: number }) {
   const nodes = useRainStore((s) => s.nodeTree)
   const selectedNodeId = useRainStore((s) => s.selectedNodeId)
@@ -72,8 +126,40 @@ export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }:
 
 export function CatalogBar({ onSeek }: CatalogProps) {
   const nodes = useRainStore((s) => s.nodeTree)
+  const playPosition = useRainStore((s) => s.playPosition)
+  const isPlaying = useRainStore((s) => s.isPlaying)
   const structureNodes = nodes.filter((node) => node.kind === 'chapter' || node.kind === 'section')
   const paragraphNodes = nodes.filter((node) => node.kind === 'paragraph')
+  const currentStructureNode = currentNode(structureNodes, nodes, playPosition)
+  const currentParagraphNode = currentNode(paragraphNodes, nodes, playPosition)
+  const currentStructureRef = React.useRef<HTMLSpanElement>(null)
+  const currentParagraphRef = React.useRef<HTMLSpanElement>(null)
+  const previousStructureNodeId = React.useRef<string | null>(null)
+  const previousParagraphNodeId = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    if (!isPlaying) {
+      previousStructureNodeId.current = null
+      return
+    }
+    const currentNodeId = currentStructureNode?.id ?? null
+    if (currentNodeId && previousStructureNodeId.current !== currentNodeId) {
+      currentStructureRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
+    }
+    previousStructureNodeId.current = currentNodeId
+  }, [currentStructureNode?.id, isPlaying])
+
+  React.useEffect(() => {
+    if (!isPlaying) {
+      previousParagraphNodeId.current = null
+      return
+    }
+    const currentNodeId = currentParagraphNode?.id ?? null
+    if (currentNodeId && previousParagraphNodeId.current !== currentNodeId) {
+      currentParagraphRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
+    }
+    previousParagraphNodeId.current = currentNodeId
+  }, [currentParagraphNode?.id, isPlaying])
 
   const rowStyle: React.CSSProperties = {
     display: 'flex',
@@ -88,9 +174,10 @@ export function CatalogBar({ onSeek }: CatalogProps) {
     whiteSpace: 'nowrap',
   }
 
-  const renderNode = (node: Node) => (
+  const renderNode = (node: Node, currentNodeId: string | null, currentNodeRef: React.Ref<HTMLSpanElement>) => (
     <span
       key={node.id}
+      ref={node.id === currentNodeId ? currentNodeRef : undefined}
       style={nodeStyle}
       onClick={() => onSeek?.(node.startTime)}
     >
@@ -100,8 +187,8 @@ export function CatalogBar({ onSeek }: CatalogProps) {
 
   return (
     <div data-testid="catalog-bar">
-      <div data-catalog-row="structure" style={rowStyle}>{structureNodes.map(renderNode)}</div>
-      <div data-catalog-row="paragraph" style={rowStyle}>{paragraphNodes.map(renderNode)}</div>
+      <div data-catalog-row="structure" style={rowStyle}>{structureNodes.map((node) => renderNode(node, currentStructureNode?.id ?? null, currentStructureRef))}</div>
+      <div data-catalog-row="paragraph" style={rowStyle}>{paragraphNodes.map((node) => renderNode(node, currentParagraphNode?.id ?? null, currentParagraphRef))}</div>
     </div>
   )
 }
