@@ -240,6 +240,96 @@ describe('AC-SU-01 two-row study catalog', () => {
     fireEvent.click(firstParagraph)
     expect(useRainStore.getState().playPosition).toBe(12)
   })
+
+  it('follows the current structure and paragraph items while playing, but preserves manual position changes after pause', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    configureStudy()
+    useRainStore.setState({
+      nodeTree: [
+        { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter one', type: null, startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'paragraph-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'paragraph', title: 'Paragraph one', type: 'concept', startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'chapter-2', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter two', type: null, startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+        { id: 'section-2', videoId: 'video-1', parentId: 'chapter-2', kind: 'section', title: 'Section two', type: null, startTime: 10, endTime: 20, text: null, sortOrder: 0 },
+        { id: 'paragraph-2', videoId: 'video-1', parentId: 'section-2', kind: 'paragraph', title: 'Paragraph two', type: 'example', startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+        { id: 'chapter-3', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter three', type: null, startTime: 20, endTime: 30, text: null, sortOrder: 2 },
+        { id: 'paragraph-3', videoId: 'video-1', parentId: 'chapter-3', kind: 'paragraph', title: 'Paragraph three', type: 'transition', startTime: 20, endTime: 30, text: null, sortOrder: 2 },
+      ],
+    })
+    render(<StudyInterface />)
+
+    const catalog = screen.getByTestId('catalog-bar')
+    const structureRow = catalog.querySelector<HTMLDivElement>('[data-catalog-row="structure"]')!
+    const paragraphRow = catalog.querySelector<HTMLDivElement>('[data-catalog-row="paragraph"]')!
+    const chapterOne = within(structureRow).getByText('Chapter one')
+    const sectionTwo = within(structureRow).getByText('Section two')
+    const chapterThree = within(structureRow).getByText('Chapter three')
+    const paragraphTwo = within(paragraphRow).getByText('Paragraph two')
+    const paragraphThree = within(paragraphRow).getByText('Paragraph three')
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+    const expectCenteredCatalogCalls = (...nodes: Element[]) => {
+      expect(nodes.map((node) => scrollIntoView.mock.calls[scrollIntoView.mock.instances.indexOf(node)])).toEqual(
+        nodes.map(() => [{ block: 'nearest', inline: 'center' }]),
+      )
+    }
+
+    fireEvent.play(video)
+    scrollIntoView.mockClear()
+    video.currentTime = 10
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(10)
+      expect(scrollIntoView.mock.instances).toEqual(expect.arrayContaining([sectionTwo, paragraphTwo]))
+    })
+    expectCenteredCatalogCalls(sectionTwo, paragraphTwo)
+
+    scrollIntoView.mockClear()
+    video.currentTime = 20
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(scrollIntoView.mock.instances).toEqual(expect.arrayContaining([chapterThree, paragraphThree]))
+    })
+    expectCenteredCatalogCalls(chapterThree, paragraphThree)
+
+    fireEvent.pause(video)
+    scrollIntoView.mockClear()
+    video.currentTime = 10
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(10)
+    })
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    fireEvent.click(chapterOne)
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(0)
+    })
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    fireEvent.play(video)
+    await waitFor(() => {
+      expect(scrollIntoView.mock.instances).toEqual(expect.arrayContaining([chapterOne, within(paragraphRow).getByText('Paragraph one')]))
+    })
+    expectCenteredCatalogCalls(chapterOne, within(paragraphRow).getByText('Paragraph one'))
+  })
+
+  it('does not throw when the browser does not provide scrollIntoView', () => {
+    Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
+    configureTwoRowCatalog()
+    render(<StudyInterface />)
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+
+    expect(() => {
+      fireEvent.play(video)
+      video.currentTime = 12
+      fireEvent.timeUpdate(video)
+    }).not.toThrow()
+  })
 })
 
 describe('AC-ST-04 directory navigation', () => {
