@@ -2497,6 +2497,10 @@ Seventh corrective verification is GREEN: `npm.cmd exec -- vitest run src/__test
 
 The final eighth-round independent Standards and Spec reviews both return `PASS`, with P0/P1/P2 empty. This uncommitted `AC-SU-02` Slice remains based on `7ce27f37a07e9e778fd8dd724c4b0075f972ddcc` and is ready only for the protected-PR path; it does not complete the AC. Final allowed local verification is GREEN: focused `study-navigation` 15/15; focused plus read-only locked M05/M13 26/26; `tsc --noEmit`, ordinary production `build`, `harness:control`, and `git diff --check` pass. `harness:check`, Rust/Cargo, Desktop execution, and Desktop/Visual/Strong Evidence were not run or signed; those remaining real-world proof gaps keep `AC-SU-02` at `Partial`.
 
+### 2026-08-28 PR #55 Clean Windows Harness failure record
+
+Protected PR #55 head commit `4ca1a755c01ab1e12c14c088be97da2f5b83f613` has automatic Harness run `33147560303`/job `98771861483` (`Clean Windows Harness`) in `failure`. The clean Windows log confirms this Slice's `src/__tests__/study-navigation.test.tsx` passed 15/15. The full-suite `npm test` stage then failed on three tests outside this Slice: two 5-second timeouts in `scripts/release-artifact-generator.test.ts` and one `scripts/nvidia-release-evidence.test.ts` assertion where `result.status` was `null` rather than `1`. The cause is not established and this record does not call it a flake. Because `npm test` failed, the workflow did not enter `build:e2e`, ordinary build, or Rust testing. No Release/GPU code, test, Harness, production code, coverage, or audit was changed here; no local execution of those failing targets, rerun, or workflow dispatch occurred. After this state record is committed, a normal PR push will automatically obtain a new Clean Windows Harness judgment; PR #55 must not merge before that run succeeds.
+
 ## Maintenance checklist for every future session
 
 Before making changes:
