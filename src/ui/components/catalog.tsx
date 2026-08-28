@@ -75,6 +75,50 @@ function currentNode(nodes: Node[], allNodes: Node[], position: number): Node | 
 
 const EDGE_FADE_EPSILON = 0.5
 
+type StructureSwitchDirection = 'none' | 'forward' | 'backward'
+interface StructureSwitch {
+  direction: StructureSwitchDirection
+  animationId: number
+}
+
+function useReducedMotion(): boolean {
+  const getReducedMotion = () => (
+    typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+  const [reducedMotion, setReducedMotion] = React.useState(getReducedMotion)
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const updateReducedMotion = () => setReducedMotion(mediaQuery.matches)
+    mediaQuery.addEventListener?.('change', updateReducedMotion)
+    updateReducedMotion()
+    return () => mediaQuery.removeEventListener?.('change', updateReducedMotion)
+  }, [])
+
+  return reducedMotion
+}
+
+function structureSwitchDirection(
+  previous: Node,
+  current: Node,
+  previousPosition: number | null,
+  currentPosition: number,
+): Exclude<StructureSwitchDirection, 'none'> {
+  if (previousPosition !== null && previousPosition !== currentPosition) {
+    return currentPosition > previousPosition ? 'forward' : 'backward'
+  }
+  if (current.startTime !== previous.startTime) {
+    return current.startTime > previous.startTime ? 'forward' : 'backward'
+  }
+  if (current.endTime !== previous.endTime) {
+    return current.endTime > previous.endTime ? 'forward' : 'backward'
+  }
+  return current.id.localeCompare(previous.id) >= 0 ? 'forward' : 'backward'
+}
+
 function useEdgeFades(nodes: Node[]) {
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const [fades, setFades] = React.useState({ left: false, right: false })
@@ -134,14 +178,31 @@ interface CatalogRowProps {
   nodes: Node[]
   currentNodeId: string | null
   currentNodeRef: React.Ref<HTMLSpanElement>
+  structureSwitch?: StructureSwitch
   renderNode: (node: Node, currentNodeId: string | null, currentNodeRef: React.Ref<HTMLSpanElement>) => React.ReactNode
 }
 
-function CatalogRow({ level, nodes, currentNodeId, currentNodeRef, renderNode }: CatalogRowProps) {
+function CatalogRow({ level, nodes, currentNodeId, currentNodeRef, structureSwitch, renderNode }: CatalogRowProps) {
   const { scrollRef, fades, updateFades } = useEdgeFades(nodes)
+  const switchDirection = structureSwitch?.direction ?? 'none'
+  const animationVariant = structureSwitch && structureSwitch.animationId % 2 === 0 ? 'b' : 'a'
+  const switchStyle: React.CSSProperties = switchDirection === 'none'
+    ? { animationName: 'none', transform: 'none' }
+    : {
+        '--catalog-structure-slide-offset': switchDirection === 'forward' ? '12px' : '-12px',
+        animationName: `catalog-structure-slide-${animationVariant}`,
+        animationDuration: 'var(--anim-base)',
+        animationTimingFunction: 'ease-out',
+        animationFillMode: 'both',
+      } as React.CSSProperties
 
   return (
-    <div data-catalog-row={level} style={catalogRowShellStyle}>
+    <div
+      data-catalog-row={level}
+      data-catalog-structure-switch={level === 'structure' ? switchDirection : undefined}
+      data-catalog-structure-animation-id={level === 'structure' && switchDirection !== 'none' ? structureSwitch?.animationId : undefined}
+      style={{ ...catalogRowShellStyle, ...switchStyle }}
+    >
       <div ref={scrollRef} data-catalog-scroll-row={level} style={catalogRowStyle} onScroll={updateFades}>
         {nodes.map((node) => renderNode(node, currentNodeId, currentNodeRef))}
       </div>
@@ -220,6 +281,27 @@ export function CatalogBar({ onSeek }: CatalogProps) {
   const currentParagraphRef = React.useRef<HTMLSpanElement>(null)
   const previousStructureNodeId = React.useRef<string | null>(null)
   const previousParagraphNodeId = React.useRef<string | null>(null)
+  const previousStructureNode = React.useRef<Node | null>(null)
+  // Presentation-only motion delta: never a current/progress source and never persisted or written to the Store.
+  const previousStructurePosition = React.useRef<number | null>(null)
+  const [structureSwitch, setStructureSwitch] = React.useState<StructureSwitch>({ direction: 'none', animationId: 0 })
+  const reducedMotion = useReducedMotion()
+
+  React.useEffect(() => {
+    const current = currentStructureNode
+    const previous = previousStructureNode.current
+    const previousPosition = previousStructurePosition.current
+    if (!current || !previous || reducedMotion) {
+      setStructureSwitch((priorSwitch) => (
+        priorSwitch.direction === 'none' ? priorSwitch : { ...priorSwitch, direction: 'none' }
+      ))
+    } else if (current.id !== previous.id) {
+      const direction = structureSwitchDirection(previous, current, previousPosition, playPosition)
+      setStructureSwitch((priorSwitch) => ({ direction, animationId: priorSwitch.animationId + 1 }))
+    }
+    previousStructureNode.current = current ?? null
+    previousStructurePosition.current = playPosition
+  }, [currentStructureNode, playPosition, reducedMotion])
 
   React.useEffect(() => {
     if (!isPlaying) {
@@ -255,6 +337,7 @@ export function CatalogBar({ onSeek }: CatalogProps) {
     <span
       key={node.id}
       ref={node.id === currentNodeId ? currentNodeRef : undefined}
+      data-catalog-current={node.id === currentNodeId ? 'true' : 'false'}
       style={nodeStyle}
       onClick={() => onSeek?.(node.startTime)}
     >
@@ -264,7 +347,7 @@ export function CatalogBar({ onSeek }: CatalogProps) {
 
   return (
     <div data-testid="catalog-bar">
-      <CatalogRow level="structure" nodes={structureNodes} currentNodeId={currentStructureNode?.id ?? null} currentNodeRef={currentStructureRef} renderNode={renderNode} />
+      <CatalogRow level="structure" nodes={structureNodes} currentNodeId={currentStructureNode?.id ?? null} currentNodeRef={currentStructureRef} structureSwitch={structureSwitch} renderNode={renderNode} />
       <CatalogRow level="paragraph" nodes={paragraphNodes} currentNodeId={currentParagraphNode?.id ?? null} currentNodeRef={currentParagraphRef} renderNode={renderNode} />
     </div>
   )

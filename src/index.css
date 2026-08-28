@@ -87,6 +87,16 @@ body {
   line-height: 1.7;
 }
 
+@keyframes catalog-structure-slide-a {
+  from { transform: translateX(var(--catalog-structure-slide-offset)); opacity: 0.88; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes catalog-structure-slide-b {
+  from { transform: translateX(var(--catalog-structure-slide-offset)); opacity: 0.88; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
 /* ===== 减少动效支持（决策81）===== */
 @media (prefers-reduced-motion: reduce) {
   * {
