@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { recordCapabilityCheck } from '@/settings/model-capabilities'
@@ -11,6 +12,33 @@ vi.mock('@/llm/client', async (importOriginal) => ({
 }))
 
 import { StudyInterface } from '@/pages/StudyInterface'
+const productionStyles = readFileSync('src/index.css', 'utf8')
+
+function keyframesInRules(rules: CSSRuleList | CSSRule[]): CSSKeyframesRule[] {
+  return [...rules].flatMap((rule) => {
+    if (rule.type === CSSRule.KEYFRAMES_RULE) return [rule as CSSKeyframesRule]
+    if ('cssRules' in rule) return keyframesInRules((rule as CSSRule & { cssRules: CSSRuleList }).cssRules)
+    return []
+  })
+}
+
+function catalogStructureKeyframes(styles: string) {
+  const style = document.createElement('style')
+  style.textContent = styles
+  document.head.append(style)
+  try {
+    return keyframesInRules(style.sheet!.cssRules)
+      .filter((rule) => rule.name.startsWith('catalog-structure-slide-'))
+      .map((rule) => ({
+        name: rule.name,
+        frames: [...rule.cssRules]
+          .filter((frame): frame is CSSKeyframeRule => frame.type === CSSRule.KEYFRAME_RULE)
+          .map((frame) => ({ keyText: frame.keyText, transform: frame.style.transform })),
+      }))
+  } finally {
+    style.remove()
+  }
+}
 
 const originalScrollIntoView = Element.prototype.scrollIntoView
 
@@ -106,6 +134,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   act(() => useRainStore.getState().reset())
+  vi.unstubAllGlobals()
   if (originalScrollIntoView) {
     Element.prototype.scrollIntoView = originalScrollIntoView
   } else {
@@ -497,6 +526,280 @@ describe('AC-SU-01 two-row study catalog', () => {
       if (originalScrollLeft) Object.defineProperty(HTMLElement.prototype, 'scrollLeft', originalScrollLeft)
       else Reflect.deleteProperty(HTMLElement.prototype, 'scrollLeft')
     }
+  })
+})
+
+describe('AC-SU-02 structure catalog switch feedback', () => {
+  it('uses adjacent Store playPosition samples for nested parent-child playback and user seek direction', async () => {
+    configureStudy()
+    useRainStore.setState({
+      playPosition: 6,
+      nodeTree: [
+        { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter one', type: null, startTime: 0, endTime: 20, text: null, sortOrder: 0 },
+        { id: 'section-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'section', title: 'Section one', type: null, startTime: 5, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'paragraph-1', videoId: 'video-1', parentId: 'section-1', kind: 'paragraph', title: 'Paragraph one', type: 'concept', startTime: 5, endTime: 10, text: null, sortOrder: 0 },
+      ],
+    })
+    render(<StudyInterface />)
+
+    const structureRow = screen.getByTestId('catalog-bar').querySelector<HTMLElement>('[data-catalog-row="structure"]')!
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+    expect(within(structureRow).getByText('Section one')).toHaveAttribute('data-catalog-current', 'true')
+
+    video.currentTime = 11
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(11)
+      expect(within(structureRow).getByText('Chapter one')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'forward')
+    })
+    const animationIdAtEleven = structureRow.getAttribute('data-catalog-structure-animation-id')
+    const animationNameAtEleven = structureRow.style.animationName
+    const animationStyleAtEleven = structureRow.getAttribute('style')
+
+    video.currentTime = 11.05
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(11.05)
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'forward')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-animation-id', animationIdAtEleven)
+      expect(structureRow.style.animationName).toBe(animationNameAtEleven)
+      expect(structureRow.getAttribute('style')).toBe(animationStyleAtEleven)
+    })
+
+    video.currentTime = 6
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(6)
+      expect(within(structureRow).getByText('Section one')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'backward')
+    })
+  })
+
+  it('loads the production CSS contract for exactly one of each restartable horizontal keyframe and the sole 200ms token', () => {
+    const keyframeNames = [
+      'catalog-structure-slide-a',
+      'catalog-structure-slide-b',
+    ]
+    const styleCount = document.head.querySelectorAll('style').length
+    const targetRules = catalogStructureKeyframes(productionStyles)
+    expect(document.head.querySelectorAll('style')).toHaveLength(styleCount)
+    expect(targetRules.map(({ name }) => name)).toEqual(keyframeNames)
+    expect(catalogStructureKeyframes(`${productionStyles}\n@media (min-width: 0px) { @keyframes unrelated-legal-fade { from { opacity: 0; } to { opacity: 1; } } }`).map(({ name }) => name)).toEqual(keyframeNames)
+    expect(document.head.querySelectorAll('style')).toHaveLength(styleCount)
+    for (const name of keyframeNames) {
+      const rules = targetRules.filter((rule) => rule.name === name)
+      expect(rules, `${name} must appear exactly once in the production stylesheet`).toHaveLength(1)
+      expect(rules[0].frames.map((frame) => frame.keyText)).toEqual(['from', 'to'])
+      expect(rules[0].frames[0].transform).toBe('translateX(var(--catalog-structure-slide-offset))')
+      expect(rules[0].frames[1].transform).toBe('translateX(0)')
+    }
+    expect(productionStyles.match(/\b200ms\b/g)).toEqual(['200ms'])
+    expect(productionStyles).toContain('--anim-base: 200ms')
+  })
+
+  it('restarts each forward and backward structure switch without remounting the horizontal scroll owner', async () => {
+    configureStudy()
+    useRainStore.setState({
+      nodeTree: [
+        { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter one', type: null, startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'section-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'section', title: 'Section one', type: null, startTime: 5, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'paragraph-1', videoId: 'video-1', parentId: 'section-1', kind: 'paragraph', title: 'Paragraph one', type: 'concept', startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'chapter-2', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter two', type: null, startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+        { id: 'section-2', videoId: 'video-1', parentId: 'chapter-2', kind: 'section', title: 'Section two', type: null, startTime: 10, endTime: 20, text: null, sortOrder: 0 },
+        { id: 'paragraph-2', videoId: 'video-1', parentId: 'section-2', kind: 'paragraph', title: 'Paragraph two', type: 'example', startTime: 10, endTime: 15, text: null, sortOrder: 1 },
+        { id: 'paragraph-3', videoId: 'video-1', parentId: 'section-2', kind: 'paragraph', title: 'Paragraph three', type: 'transition', startTime: 15, endTime: 20, text: null, sortOrder: 2 },
+        { id: 'chapter-3', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter three', type: null, startTime: 20, endTime: 30, text: null, sortOrder: 2 },
+        { id: 'section-3', videoId: 'video-1', parentId: 'chapter-3', kind: 'section', title: 'Section three', type: null, startTime: 20, endTime: 30, text: null, sortOrder: 0 },
+        { id: 'paragraph-4', videoId: 'video-1', parentId: 'section-3', kind: 'paragraph', title: 'Paragraph four', type: 'concept', startTime: 20, endTime: 30, text: null, sortOrder: 3 },
+      ],
+    })
+    render(<StudyInterface />)
+
+    const catalog = screen.getByTestId('catalog-bar')
+    const structureRow = catalog.querySelector<HTMLElement>('[data-catalog-row="structure"]')!
+    const structureScrollRow = catalog.querySelector<HTMLElement>('[data-catalog-scroll-row="structure"]')!
+    const paragraphRow = catalog.querySelector<HTMLElement>('[data-catalog-row="paragraph"]')!
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+
+    expect(within(structureRow).getByText('Chapter one')).toHaveAttribute('data-catalog-current', 'true')
+
+    video.currentTime = 10
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(10)
+      expect(within(structureRow).getByText('Section two')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'forward')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-animation-id', '1')
+      expect(structureRow).toHaveStyle({ animationName: 'catalog-structure-slide-a', animationDuration: 'var(--anim-base)' })
+      expect(structureRow.getAttribute('style')).toContain('--catalog-structure-slide-offset: 12px')
+    })
+
+    video.currentTime = 15
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(within(structureRow).getByText('Section two')).toHaveAttribute('data-catalog-current', 'true')
+      expect(within(paragraphRow).getByText('Paragraph three')).toHaveAttribute('data-catalog-current', 'true')
+      expect(paragraphRow).toHaveStyle({ animationName: 'none', transform: 'none' })
+    })
+
+    structureScrollRow.scrollLeft = 31
+    video.currentTime = 20
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(within(structureRow).getByText('Section three')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-animation-id', '2')
+      expect(structureRow).toHaveStyle({ animationName: 'catalog-structure-slide-b', animationDuration: 'var(--anim-base)' })
+      expect(structureScrollRow).toBe(catalog.querySelector('[data-catalog-scroll-row="structure"]'))
+      expect(structureScrollRow.scrollLeft).toBe(31)
+    })
+
+    fireEvent.click(within(structureRow).getByText('Chapter two'))
+
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(10)
+      expect(within(structureRow).getByText('Section two')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'backward')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-animation-id', '3')
+      expect(structureRow).toHaveStyle({ animationName: 'catalog-structure-slide-a', animationDuration: 'var(--anim-base)' })
+      expect(structureRow.getAttribute('style')).toContain('--catalog-structure-slide-offset: -12px')
+    })
+
+    fireEvent.click(within(structureRow).getByText('Chapter one'))
+
+    await waitFor(() => {
+      expect(useRainStore.getState().playPosition).toBe(0)
+      expect(within(structureRow).getByText('Chapter one')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-animation-id', '4')
+      expect(structureRow).toHaveStyle({ animationName: 'catalog-structure-slide-b', animationDuration: 'var(--anim-base)' })
+    })
+  })
+
+  it('uses time direction at equal-start parent-child boundaries', async () => {
+    configureStudy()
+    useRainStore.setState({
+      playPosition: 1,
+      nodeTree: [
+        { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter one', type: null, startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'section-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'section', title: 'Section one', type: null, startTime: 0, endTime: 5, text: null, sortOrder: 0 },
+        { id: 'paragraph-1', videoId: 'video-1', parentId: 'section-1', kind: 'paragraph', title: 'Paragraph one', type: 'concept', startTime: 0, endTime: 5, text: null, sortOrder: 0 },
+      ],
+    })
+    render(<StudyInterface />)
+
+    const structureRow = screen.getByTestId('catalog-bar').querySelector<HTMLElement>('[data-catalog-row="structure"]')!
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+    expect(within(structureRow).getByText('Section one')).toHaveAttribute('data-catalog-current', 'true')
+
+    video.currentTime = 5
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(within(structureRow).getByText('Chapter one')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'forward')
+    })
+
+    video.currentTime = 4
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(within(structureRow).getByText('Section one')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'backward')
+    })
+  })
+
+  it('cancels active displacement when reduced motion changes and resumes motion after preference is removed', async () => {
+    const mediaQuery = {
+      matches: false,
+      media: '(prefers-reduced-motion: reduce)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }
+    const matchMedia = vi.fn().mockReturnValue(mediaQuery)
+    vi.stubGlobal('matchMedia', matchMedia)
+    configureStudy()
+    useRainStore.setState({
+      nodeTree: [
+        { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter one', type: null, startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'paragraph-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'paragraph', title: 'Paragraph one', type: 'concept', startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'chapter-2', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter two', type: null, startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+        { id: 'section-2', videoId: 'video-1', parentId: 'chapter-2', kind: 'section', title: 'Section two', type: null, startTime: 10, endTime: 20, text: null, sortOrder: 0 },
+        { id: 'paragraph-2', videoId: 'video-1', parentId: 'section-2', kind: 'paragraph', title: 'Paragraph two', type: 'example', startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+      ],
+    })
+    render(<StudyInterface />)
+
+    const catalog = screen.getByTestId('catalog-bar')
+    const structureRow = catalog.querySelector<HTMLElement>('[data-catalog-row="structure"]')!
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+    video.currentTime = 10
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(within(structureRow).getByText('Section two')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'forward')
+    })
+    const changeListener = mediaQuery.addEventListener.mock.calls.find(([type]) => type === 'change')?.[1] as (() => void) | undefined
+    expect(changeListener).toBeDefined()
+    act(() => {
+      mediaQuery.matches = true
+      changeListener?.()
+    })
+    await waitFor(() => {
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'none')
+      expect(structureRow).toHaveStyle({ animationName: 'none', transform: 'none' })
+    })
+
+    act(() => {
+      mediaQuery.matches = false
+      changeListener?.()
+    })
+    video.currentTime = 0
+    fireEvent.timeUpdate(video)
+    await waitFor(() => {
+      expect(within(structureRow).getByText('Chapter one')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'backward')
+    })
+    expect(matchMedia).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)')
+    cleanup()
+    expect(mediaQuery.removeEventListener).toHaveBeenCalledWith('change', changeListener)
+  })
+
+  it('synchronizes the subscribed reduced-motion snapshot before a structure switch can animate', async () => {
+    const initialSnapshot = { matches: false }
+    const subscribedMediaQuery = {
+      matches: true,
+      media: '(prefers-reduced-motion: reduce)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }
+    const matchMedia = vi.fn()
+      .mockReturnValueOnce(initialSnapshot)
+      .mockReturnValue(subscribedMediaQuery)
+    vi.stubGlobal('matchMedia', matchMedia)
+    configureStudy()
+    useRainStore.setState({
+      nodeTree: [
+        { id: 'chapter-1', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter one', type: null, startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'paragraph-1', videoId: 'video-1', parentId: 'chapter-1', kind: 'paragraph', title: 'Paragraph one', type: 'concept', startTime: 0, endTime: 10, text: null, sortOrder: 0 },
+        { id: 'chapter-2', videoId: 'video-1', parentId: null, kind: 'chapter', title: 'Chapter two', type: null, startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+        { id: 'paragraph-2', videoId: 'video-1', parentId: 'chapter-2', kind: 'paragraph', title: 'Paragraph two', type: 'example', startTime: 10, endTime: 20, text: null, sortOrder: 1 },
+      ],
+    })
+    render(<StudyInterface />)
+
+    const structureRow = screen.getByTestId('catalog-bar').querySelector<HTMLElement>('[data-catalog-row="structure"]')!
+    const video = screen.getByTestId('video-player') as HTMLVideoElement
+    video.currentTime = 10
+    fireEvent.timeUpdate(video)
+
+    await waitFor(() => {
+      expect(within(structureRow).getByText('Chapter two')).toHaveAttribute('data-catalog-current', 'true')
+      expect(structureRow).toHaveAttribute('data-catalog-structure-switch', 'none')
+      expect(structureRow).toHaveStyle({ animationName: 'none', transform: 'none' })
+    })
+    expect(subscribedMediaQuery.addEventListener).toHaveBeenCalledWith('change', expect.any(Function))
   })
 })
 
