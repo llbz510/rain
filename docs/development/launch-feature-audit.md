@@ -72,7 +72,7 @@
 | RL-20 | Partial | Active control documents | scope/AC/coverage docs — Partial | target notes/artifact/Evidence/rollback reconciliation | 用户暂停 RL |
 | VL-01 | Partial | VideoListPage task states/actions | dialog/page/M17 — Partial | 阻断：Strong + Visual Evidence | 禁用 jsdom/假截图替代 |
 | VL-02 | Present | queryVideos → VideoListPage sort | video-list-sorting/database-videos — Strong | 无新增必需 | 同一 fixture 的 Memory 与故意无序 SQLite adapter、以及生产 VideoListPage 已锁定默认最近学习、最近学习/导入时间/名称三档和每档稳定 ID tie-breaker；不外推 Desktop、Visual、Evidence 或其他列表 AC |
-| VL-03 | Present（proof Partial） | queryVideos → VideoListPage title search | title-query/list DOM — Partial | 阻断：Strong（双 adapter + 生产 UI）；无 Desktop 要求 | 只补轻量公开 Judge |
+| VL-03 | Present | queryVideos → VideoListPage title search | title-query/list DOM — Strong（公开双 adapter + 生产 UI） | 无新增必需；无 Desktop 要求 | 同一 fixture 的 Memory、故意无序 SQLite public adapter 与生产页面已锁定 title-only、trim、ASCII case-insensitive、非空无匹配为空列表及清空搜索保留选定排序；不外推 AC-VL-04 或 Evidence |
 | VL-04 | Present（proof Partial） | list import/task dialog entry | local-import/dialog — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
 | VL-05 | Partial | database delete/Rust delete | deletion/Rust — Partial | 阻断：隔离真实文件系统 + 真实 SQLite | 建立生产文件生命周期 Judge |
 | VL-06 | Absent | 无 app-owned thumbnail GC | 无 — Gap | 阻断：keep-set/path/concurrency/file Evidence | 实现该 Confirmed Slice/建立生产 Judge |
