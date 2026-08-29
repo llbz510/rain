@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SqlDatabaseAdapter } from '@/models/database-adapter'
 
 const mocks = vi.hoisted(() => ({
   delayedOldResolvers: [] as Array<(value: unknown) => void>,
@@ -55,7 +56,7 @@ vi.mock('@/models/db-singleton', async (importOriginal) => {
   }
 })
 
-import { insertVideo } from '@/models/database'
+import { createDatabase, insertVideo, queryVideos } from '@/models/database'
 import { getDb, resetDb } from '@/models/db-singleton'
 import { VideoListPage } from '@/pages/VideoListPage'
 import type { Video } from '@/models/types'
@@ -76,6 +77,57 @@ function video(id: string, title: string, createdAt: number, lastStudiedAt: numb
   }
 }
 
+const pathOnlySearchFixture = {
+  ...video('path-only', 'Other course', 30, 50),
+  filePath: 'D:\\courses\\SIGNAL-in-file-path.mp4',
+  errorMessage: 'SIGNAL only in an import diagnostic',
+}
+
+const sharedSearchFixture = [
+  video('z-signal', 'signal Zebra', 10, 40),
+  video('a-signal', 'Signal Alpha', 20, 40),
+  pathOnlySearchFixture,
+]
+
+function sqliteRow(record: Video) {
+  return {
+    id: record.id,
+    title: record.title,
+    source: record.source,
+    source_url: record.sourceUrl ?? null,
+    file_path: record.filePath ?? null,
+    thumbnail: record.thumbnail,
+    duration: record.duration,
+    language: record.language,
+    status: record.status,
+    stage: record.stage ?? null,
+    error_message: record.errorMessage ?? null,
+    created_at: record.createdAt,
+    position: record.position,
+    last_studied_at: record.lastStudiedAt,
+  }
+}
+
+function deliberatelyUnorderedSqlite(records: Video[]): SqlDatabaseAdapter {
+  const query: SqlDatabaseAdapter['query'] = async <T = unknown>(
+    _sql: string,
+    params: unknown[] = [],
+  ): Promise<T[]> => {
+    const keyword = typeof params[0] === 'string' ? params[0].toLowerCase() : ''
+    return [...records]
+      .filter((record) => !keyword || record.title.toLowerCase().includes(keyword))
+      .reverse()
+      .map(sqliteRow) as T[]
+  }
+  return {
+    adapterKind: 'sqlite',
+    listTables: vi.fn(),
+    getTableColumns: vi.fn(),
+    exec: vi.fn(),
+    query,
+  }
+}
+
 beforeEach(() => {
   resetDb()
   mocks.delayedOldResolvers = []
@@ -92,28 +144,37 @@ afterEach(() => {
 })
 
 describe('AC-VL-03 VideoListPage title search', () => {
-  it('trims the title keyword, matches case-insensitively, and keeps the selected ordering when search is cleared', async () => {
-    const db = await getDb()
-    await insertVideo(db, video('z-last-studied', 'Signal Zebra', 10, 20))
-    await insertVideo(db, video('a-last-studied', 'signal Alpha', 30, 40))
-    const pathOnly = video('path-only', 'Other course', 40, 50)
-    pathOnly.filePath = 'D:\\courses\\SIGNAL-in-file-path.mp4'
-    pathOnly.errorMessage = 'SIGNAL only in an import diagnostic'
-    await insertVideo(db, pathOnly)
+  it('uses one fixture through both public adapters and the production page for title-only search and cleared selected sorting', async () => {
+    const memory = await createDatabase()
+    for (const record of sharedSearchFixture) await insertVideo(memory, record)
+    const sqlite = deliberatelyUnorderedSqlite(sharedSearchFixture)
+    const expectedMatches = ['a-signal', 'z-signal']
+    const expectedClearedTitleOrder = ['path-only', 'a-signal', 'z-signal']
 
+    for (const db of [memory, sqlite]) {
+      await expect(queryVideos(db, { titleKeyword: '  SIGNAL  ', sortBy: 'title' }))
+        .resolves.toMatchObject(expectedMatches.map((id) => ({ id })))
+      await expect(queryVideos(db, { titleKeyword: 'absent title', sortBy: 'title' }))
+        .resolves.toEqual([])
+      await expect(queryVideos(db, { titleKeyword: '   ', sortBy: 'title' }))
+        .resolves.toMatchObject(expectedClearedTitleOrder.map((id) => ({ id })))
+    }
+
+    const pageDb = await getDb()
+    for (const record of sharedSearchFixture) await insertVideo(pageDb, record)
     render(<VideoListPage />)
+
     const search = await screen.findByRole('textbox', { name: '搜索视频标题' })
     const sort = screen.getByRole('combobox', { name: '排序' })
     fireEvent.change(sort, { target: { value: 'title' } })
     fireEvent.change(search, { target: { value: '  SIGNAL  ' } })
-
-    await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((card) => card.getAttribute('data-testid')))
-      .toEqual(['card-a-last-studied', 'card-z-last-studied']))
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((card) => card.dataset.testid))
+      .toEqual(expectedMatches.map((id) => `card-${id}`)))
     expect(screen.queryByTestId('card-path-only')).not.toBeInTheDocument()
 
     fireEvent.change(search, { target: { value: '   ' } })
-    await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((card) => card.getAttribute('data-testid')))
-      .toEqual(['card-path-only', 'card-a-last-studied', 'card-z-last-studied']))
+    await waitFor(() => expect(screen.getAllByTestId(/^card-/).map((card) => card.dataset.testid))
+      .toEqual(expectedClearedTitleOrder.map((id) => `card-${id}`)))
   })
 
   it('shows a no-title-match state instead of the empty-library state', async () => {
