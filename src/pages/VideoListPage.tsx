@@ -484,7 +484,7 @@ export function VideoListPage() {
           style={sortStyle}
         >
           <option value="lastStudied">最近学习</option>
-          <option value="createdAt">创建时间</option>
+          <option value="createdAt">导入时间</option>
           <option value="title">名称</option>
         </select>
         <div style={importWrapperStyle}>
