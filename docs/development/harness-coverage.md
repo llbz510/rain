@@ -1,7 +1,7 @@
 # Rain Harness 覆盖矩阵
 
 > 状态：Active
-> 更新日期：2026-08-27
+> 更新日期：2026-08-29
 > 作用：说明每条 AC 由谁检查，以及现有检查能证明到什么程度。
 
 ## 1. 覆盖等级
@@ -137,7 +137,7 @@
 | AC-RL-19 | 尚无回滚演练 | Gap | 缺签名已知版本的安装回滚、数据库兼容拒绝和数据保留 Evidence |
 | AC-RL-20 | Active scope/AC/coverage 文档 | Partial | 控制面可提供 truth source；尚无目标 Release Notes 与 artifact、有效 Evidence、缺陷和回滚逐项发布对账 |
 | AC-VL-01 | `video-import-task-dialog.test.tsx`、`video-list-page-recovery.test.tsx`、M17 | Partial | 多持久状态、错误和动作已有生产 DOM 行为；规定信息层级与完整视觉 Evidence 未裁判 |
-| AC-VL-02 | `database-videos.test.ts` | Partial | SQLite 排序和稳定查询存在；生产 UI 三选项、默认最近学习和双 adapter 同义尚无纵切 Judge |
+| AC-VL-02 | `video-list-sorting.test.tsx`、`database-videos.test.ts` | Strong（公开双 adapter + 生产页面） | 同一 fixture 经真实 Memory 与故意无序的 SQLite adapter public seam，锁定最近学习、导入时间、名称三档的完整稳定 ID 顺序；每档均含主排序键相同而 ID 不同的并列项。生产 `VideoListPage` Judge 锁定默认最近学习、具名三选项和每次切换后的卡片顺序；不签发 Desktop、Visual 或 Evidence，也不外推 AC-VL-03/04 |
 | AC-VL-03 | `video-title-query.test.ts`、`video-list-title-search.test.tsx` | Partial | 生产 `VideoListPage` 的具名标题控件、清理空白、无结果 live status、空库/数据库失败和导入刷新竞态均有 Judge；真实 Memory fixture、仅标题字段的 mutation proof、`%`/`_` 字面查询、SQLite 公开 SQL 合同与共享最终排序器均有 Judge；尚无真实 SQLite/Tauri 桌面 Judge 或所需 Evidence，不能提升为 Strong/Desktop/Evidence |
 | AC-VL-04 | `video-list-local-import.test.tsx`、`video-import-task-dialog.test.tsx` | Partial | 导入与非 ready 详情入口存在；排序/搜索/空库/无结果/失败的完整页面组合和桌面 DOM 未闭合 |
 | AC-VL-05 | `video-list-deletion.test.tsx`、Rust `video_deletion` tests | Partial | 数据库级联与源视频保留已有 Judge；提交后 app-owned 缩略图删除、非法路径和可重试文件失败未实现 |

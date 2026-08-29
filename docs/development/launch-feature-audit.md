@@ -1,7 +1,7 @@
 # Rain Launch 功能路径审计
 
 > 状态：Active
-> 更新日期：2026-08-27
+> 更新日期：2026-08-29
 
 本审计只回答当前生产路径是 `Present`、`Partial`、`Shadow/adjacent` 还是 `Absent`，并记录局部入口与 blocker ledger；它不是第三份 AC 或“完成状态”事实源。AC 语义唯一来自 `acceptance-standard.md`，Judge 与 tier 唯一来自 `harness-coverage.md`。路径存在绝不等于 AC 已完成：除明确写为“无”“无新增必需”“仅补强”或“条件性未来重放”的行外，Required Evidence 状态中的任何未闭合项都是当前 blocker；`阻断：`只是显式强调，不是唯一判定条件。ledger 采用同一规则。
 
@@ -71,7 +71,7 @@
 | RL-19 | Absent | 无 rollback exercise | 无 — Gap | signed rollback/data Evidence | 用户暂停 RL |
 | RL-20 | Partial | Active control documents | scope/AC/coverage docs — Partial | target notes/artifact/Evidence/rollback reconciliation | 用户暂停 RL |
 | VL-01 | Partial | VideoListPage task states/actions | dialog/page/M17 — Partial | 阻断：Strong + Visual Evidence | 禁用 jsdom/假截图替代 |
-| VL-02 | Present（proof Partial） | queryVideos → VideoListPage sort | database-videos — Partial | 阻断：Strong（双 adapter + 生产 UI）；无 Desktop 要求 | 只补轻量公开 Judge |
+| VL-02 | Present | queryVideos → VideoListPage sort | video-list-sorting/database-videos — Strong | 无新增必需 | 同一 fixture 的 Memory 与故意无序 SQLite adapter、以及生产 VideoListPage 已锁定默认最近学习、最近学习/导入时间/名称三档和每档稳定 ID tie-breaker；不外推 Desktop、Visual、Evidence 或其他列表 AC |
 | VL-03 | Present（proof Partial） | queryVideos → VideoListPage title search | title-query/list DOM — Partial | 阻断：Strong（双 adapter + 生产 UI）；无 Desktop 要求 | 只补轻量公开 Judge |
 | VL-04 | Present（proof Partial） | list import/task dialog entry | local-import/dialog — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
 | VL-05 | Partial | database delete/Rust delete | deletion/Rust — Partial | 阻断：隔离真实文件系统 + 真实 SQLite | 建立生产文件生命周期 Judge |
@@ -104,7 +104,7 @@
 ## Proof closure / blocker ledger
 
 - `LV/ST`：带 Historical Evidence/current-target Gap 的行仍被精确目标 Evidence 阻断：`LV-03/05/07/08/09/11/12`、`ST-01/07`；此外 `LV-21` 的目标 NVIDIA Release Evidence Gap 也是 blocker（当前 user-paused）。`LV-01/04/10` 已 Strong，桌面/SQLite/真实事件仅为非阻断补强；不能用 jsdom、旧包或假截图替代真正 Required Evidence。
-- `VL`：阻断 Desktop/Visual 的只有 `VL-01`（Visual）、`VL-04`（Desktop）与 `VL-07`（Desktop/Visual）。`VL-02/03` 只需 Strong 的双 adapter 与生产 UI Judge，不需 Desktop；`VL-05` 需隔离真实文件系统与真实 SQLite，`VL-06` 需实现其 Confirmed Slice/生产 Judge。
+- `VL`：阻断 Desktop/Visual 的只有 `VL-01`（Visual）、`VL-04`（Desktop）与 `VL-07`（Desktop/Visual）。`VL-02` 已由 Strong 的双 adapter 与生产 UI Judge 覆盖，无 Desktop 要求；`VL-03` 仍只需 Strong 的双 adapter 与生产 UI Judge，不需 Desktop；`VL-05` 需隔离真实文件系统与真实 SQLite，`VL-06` 需实现其 Confirmed Slice/生产 Judge。
 - `SU/UX`：Desktop/Visual blocker 仅为 `SU-01`（Desktop）、`SU-02`（Desktop/Visual）、`SU-03`（Desktop）、`SU-04`（Desktop）、`SU-05`（Desktop/Visual）、`SU-06`（Desktop/Visual）、`UX-01/02/04`（Visual）、`UX-03`（Visual/Accessibility）、`UX-05/06`（Desktop/Accessibility）。`SU-07` 只需 Strong，不要求 Desktop；截图只能作附件，不能单独裁判。
 - `HE`：`HE-05` 只能由改变该桌面边界后的目标提交 workflow_dispatch 重放；本 Slice 不 dispatch。
 - `PF`：每条都缺冻结主机、fixture、样本/p95 或 soak Evidence，不能由开发机感觉代替。
