@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { forwardRef, useState } from 'react'
 import { getQuickActionsForType, type QuickAction } from '@/ai/assistant'
 import type { AssistantSource } from '@/ai/assistant-context'
 import type { ParagraphType } from '@/models/types'
@@ -69,13 +69,26 @@ export function AiAssistant({ messages, isStreaming = false, onStop, onSeekSourc
 }
 
 interface ChatInputProps { onSend?: (text: string) => void }
-export function ChatInput({ onSend }: ChatInputProps) {
+export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(function ChatInput({ onSend }, ref) {
   const [text, setText] = useState('')
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
+    if (event.nativeEvent.isComposing) return
+    const hasNonAltModifier = event.ctrlKey || event.metaKey || event.shiftKey
+    if (event.key === 'Enter' && event.altKey && !hasNonAltModifier) {
+      event.preventDefault()
+      const input = event.currentTarget
+      const start = input.selectionStart ?? text.length
+      const end = input.selectionEnd ?? start
+      const nextText = `${text.slice(0, start)}\n${text.slice(end)}`
+      const cursor = start + 1
+      setText(nextText)
+      queueMicrotask(() => input.setSelectionRange(cursor, cursor))
+      return
+    }
+    if (event.key === 'Enter' && !event.altKey && !hasNonAltModifier) {
       event.preventDefault()
       if (text.trim()) { onSend?.(text.trim()); setText('') }
     }
   }
-  return <textarea aria-label="AI 输入" role="textbox" value={text} onChange={(event) => setText(event.target.value)} onKeyDown={handleKeyDown} placeholder="输入消息..." />
-}
+  return <textarea ref={ref} aria-label="AI 输入" role="textbox" value={text} onChange={(event) => setText(event.target.value)} onKeyDown={handleKeyDown} placeholder="输入消息..." />
+})

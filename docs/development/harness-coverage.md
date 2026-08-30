@@ -149,7 +149,7 @@
 | AC-SU-04 | `study-layout.test.tsx` | Partial | 三模式复用媒体事实已 Strong；比例拖拽、跨会话持久化与真实桌面重启仍是 Gap |
 | AC-SU-05 | `study-playback.test.tsx`、M07 | Partial | 生产 `StudyInterface` 在默认 follow 路径以精确半开区间 `[startTime,endTime)` 将真实当前原文句传给 `VideoZone`；既有单一动态“字幕 ON/OFF”控制继续复用会话级 `subtitleOn`。定向 Judge 断言页面仅有一个字幕按钮、无译文控件；关闭后调用生产返回动作、显式 unmount 并以未设置 `subtitleOn` 的同会话 fixture 新挂载，再证明关闭态恢复。真实 media、Tauri/Desktop、半透明视觉和截图 Evidence 仍缺，故不得升级为 Strong/Desktop/Evidence |
 | AC-SU-06 | `study-navigation.test.tsx`、M05 | Partial | 选择/双击导航与真实结构有覆盖；正交圆弧视觉、有界缩放/平移和完整桌面 Judge 未闭合 |
-| AC-SU-07 | M14、`study-playback.test.tsx`、`study-navigation.test.tsx` | Partial | 局部快捷键与基础副作用已有组件覆盖；完整生产焦点矩阵、精确布局映射、N/P/Tab 副作用和禁用删除未签发 |
+| AC-SU-07 | `study-shortcuts.test.tsx`、`study-notes.test.tsx`、`study-playback.test.tsx`、`study-navigation.test.tsx`、`study-layout.test.tsx` | Strong | 第四轮 Spec/Standards 独立复审 PASS（P0/P1/P2=0）。公开生产 Judge 覆盖精准 non-input shortcut、真实 AI/既有 Note/zero-note composer 全键门禁、IME/Enter modifier、Tab、显式 single-flight 持久化/pending edit、modifier 无副作用、media/volume 边界、N/P 与单一 Notes focus owner；generic input/select/contenteditable/link/tabindex 仅为焦点政策 fixture，含 plaintext-only/继承/false。无 Desktop/Visual/GPU/Release Evidence |
 | AC-UX-01 | `m13-visual.test.ts`、`src/index.css` | Partial | 真实 CSS token 受锁定 Harness 读取；全部 Launch 页面 dark-only/无品牌强调色的独立 visual review 缺失 |
 | AC-UX-02 | `m13-visual.test.ts`、生产组件相邻测试 | Partial | 四类型 token 存在；跨目录/文本/导图/列表的选中、播放、状态与进度组合 Evidence 未闭合 |
 | AC-UX-03 | `m13-visual.test.ts` | Partial | 字体/字号 token 有局部裁判；全应用实际用途、行距、长文本多 viewport 与 accessibility review 缺失 |

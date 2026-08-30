@@ -13,6 +13,7 @@ import { asMemoryDatabase } from '@/models/database-adapter'
 import type { Node, Note, Sentence, Video } from '@/models/types'
 import { StudyInterface } from '@/pages/StudyInterface'
 import { useRainStore } from '@/store/rain-store'
+import { NotesPanel } from '@/ui/components/notes'
 
 const { streamAiChat } = vi.hoisted(() => ({ streamAiChat: vi.fn() }))
 vi.mock('@/llm/client', async (importOriginal) => ({
@@ -146,10 +147,9 @@ describe('AC-ST-06 persisted notes workflow', () => {
     const firstView = render(<StudyInterface />)
     fireEvent.click(screen.getByRole('button', { name: '随记' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '新建随记' }))
-    const editor = await screen.findByRole('textbox')
+    const editor = screen.getByRole('textbox', { name: '新随记内容' })
     fireEvent.change(editor, { target: { value: 'A durable free note.' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存新随记' }))
 
     await waitFor(async () => {
       expect(await getNotesByVideoId(await getDb(), video.id)).toEqual([
@@ -290,7 +290,7 @@ describe('AC-SU-03 unsent AI draft across right-panel Tabs', () => {
     const notesTab = screen.getByRole('button', { name: '随记' })
     notesTab.focus()
     await user.tab()
-    expect(aiTabPanel?.contains(document.activeElement)).toBe(false)
+    expect(aiTabPanel?.contains(document.activeElement)).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'AI' }))
     expect(aiTabPanel).toHaveStyle({ display: 'flex', flexDirection: 'column' })
@@ -306,5 +306,41 @@ describe('AC-SU-03 unsent AI draft across right-panel Tabs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'AI' }))
     expect(screen.getByRole('textbox', { name: 'AI 输入' })).toHaveValue('Keep this unsent AI draft.')
     expect(streamAiChat).not.toHaveBeenCalled()
+  })
+})
+
+describe('AC-SU-07 zero-note composer persistence', () => {
+  it('submits the untrimmed draft only once while a create is pending, then clears it on success', async () => {
+    const user = userEvent.setup()
+    let resolveCreate: ((created: boolean) => void) | undefined
+    const onCreateNote = vi.fn(() => new Promise<boolean>((resolve) => { resolveCreate = resolve }))
+    render(<NotesPanel onCreateNote={onCreateNote} />)
+
+    const composer = screen.getByRole('textbox', { name: '新随记内容' })
+    fireEvent.change(composer, { target: { value: '  preserve these spaces  ' } })
+    const save = screen.getByRole('button', { name: '保存新随记' })
+    fireEvent.click(save)
+    fireEvent.click(save)
+    expect(onCreateNote).toHaveBeenCalledTimes(1)
+    expect(onCreateNote).toHaveBeenCalledWith('  preserve these spaces  ')
+    expect(save).toBeDisabled()
+    await user.type(composer, 'must not replace the pending draft')
+    expect(composer).toHaveValue('  preserve these spaces  ')
+
+    resolveCreate?.(true)
+    await waitFor(() => expect(composer).toHaveValue(''))
+    expect(save).not.toBeDisabled()
+  })
+
+  it('keeps the draft after a failed explicit create', async () => {
+    const onCreateNote = vi.fn().mockResolvedValue(false)
+    render(<NotesPanel onCreateNote={onCreateNote} />)
+
+    const composer = screen.getByRole('textbox', { name: '新随记内容' })
+    fireEvent.change(composer, { target: { value: 'keep after failure' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存新随记' }))
+
+    await waitFor(() => expect(onCreateNote).toHaveBeenCalledWith('keep after failure'))
+    expect(composer).toHaveValue('keep after failure')
   })
 })

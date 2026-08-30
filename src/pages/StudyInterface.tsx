@@ -25,6 +25,8 @@ import { runtimeModelFromPoolEntry } from '@/settings/model-pool'
 import { resolveNodeNavigationTarget, resolveSentenceNavigationTarget } from '@/study/navigation'
 import { recordPlaybackProgress } from '@/study/session'
 import { createFreeNote, createParagraphExcerpt, saveNoteContent } from '@/study/notes'
+import { useStudyShortcutController } from '@/study/shortcut-controller'
+import { activeStudyMediaActions } from '@/study/media-session'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
@@ -209,6 +211,9 @@ export function StudyInterface() {
   const cleanupRef = useRef<(() => void) | null>(null)
   const requestIdRef = useRef(0)
   const navigationRequestIdRef = useRef(0)
+  const aiInputRef = useRef<HTMLTextAreaElement>(null)
+  const notesFocusRef = useRef<HTMLTextAreaElement>(null)
+  const [panelFocusTarget, setPanelFocusTarget] = useState<'ai' | 'notes' | null>(null)
   useEffect(() => () => {
     requestIdRef.current += 1
     cleanupRef.current?.()
@@ -329,10 +334,14 @@ export function StudyInterface() {
     })
   }, [])
 
-  const handleCreateFreeNote = useCallback(() => {
-    void createFreeNote().catch((error) => {
+  const handleCreateFreeNote = useCallback(async (content: string = '') => {
+    try {
+      await createFreeNote(content)
+      return true
+    } catch (error) {
       console.error('Unable to create free note', error)
-    })
+      return false
+    }
   }, [])
 
   const handleSaveNote = useCallback((noteId: string, content: string) => {
@@ -344,6 +353,26 @@ export function StudyInterface() {
   const setAiPanel = (panel: 'ai' | 'notes') => {
     useRainStore.setState({ aiPanelState: panel })
   }
+
+  useEffect(() => {
+    if (!panelFocusTarget) return
+    const input = panelFocusTarget === 'ai' ? aiInputRef.current : notesFocusRef.current
+    input?.focus()
+    setPanelFocusTarget(null)
+  }, [aiPanelState, panelFocusTarget])
+
+  const handleShortcutPanelToggle = useCallback((panel: 'ai' | 'notes') => {
+    setAiPanel(panel)
+    setPanelFocusTarget(panel)
+  }, [])
+
+  useStudyShortcutController({
+    nodes: nodeTree,
+    onExcerpt: handleExcerpt,
+    onNavigateParagraph: handleNodeNavigate,
+    onTogglePanel: handleShortcutPanelToggle,
+    media: activeStudyMediaActions,
+  })
 
   const quickParagraphType = currentParagraphType(nodeTree, sentences, playPosition, selectedNodeId)
 
@@ -436,13 +465,14 @@ export function StudyInterface() {
             >
               {quickParagraphType && <div style={quickActionsStyle}><QuickActions paragraphType={quickParagraphType} onAction={(action) => handleSendMessage(action.label, 'paragraph')} /></div>}
               <AiAssistant messages={chatMessages} isStreaming={isStreaming} onStop={handleStopMessage} onSeekSource={handleSeek} />
-              <ChatInput onSend={handleSendMessage} />
+              <ChatInput ref={aiInputRef} onSend={handleSendMessage} />
             </div>
             <div hidden={aiPanelState !== 'notes'}>
               <NotesPanel
                 onCreateNote={handleCreateFreeNote}
                 onSaveNote={handleSaveNote}
                 onSeekSentence={handleSentenceNavigate}
+                focusRef={notesFocusRef}
               />
             </div>
           </div>

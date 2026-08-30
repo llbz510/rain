@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { isTauri } from '@/lib/tauri-env'
 import { useRainStore } from '@/store/rain-store'
+import { activeStudyMediaActions, registerStudyVideo } from '@/study/media-session'
 
 interface VideoZoneProps {
   filePath: string
@@ -9,8 +10,6 @@ interface VideoZoneProps {
   resumePosition?: number
   onProgress?: (position: number) => void
 }
-
-let activeVideo: HTMLVideoElement | null = null
 
 function setPlaybackState(playing: boolean) {
   useRainStore.setState({ isPlaying: playing })
@@ -30,13 +29,7 @@ export function VideoZone({ filePath, currentSubtitle, resumePosition, onProgres
 
   useEffect(() => {
     setMediaError(null)
-    activeVideo = videoRef.current
-    return () => {
-      if (activeVideo === videoRef.current) {
-        activeVideo = null
-        setPlaybackState(false)
-      }
-    }
+    return registerStudyVideo(videoRef.current)
   }, [videoSrc])
 
   useEffect(() => {
@@ -68,13 +61,7 @@ export function VideoControls() {
   const toggleSubtitle = () => useRainStore.setState({ subtitleOn: !subtitleOn })
 
   const togglePlayback = () => {
-    if (!activeVideo) return
-    if (activeVideo.paused) {
-      void activeVideo.play().then(() => setPlaybackState(true)).catch(() => setPlaybackState(false))
-    } else {
-      activeVideo.pause()
-      setPlaybackState(false)
-    }
+    activeStudyMediaActions.togglePlayback()
   }
 
   return <div data-testid="control-bar">
