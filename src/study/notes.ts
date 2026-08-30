@@ -37,7 +37,7 @@ export async function createParagraphExcerpt(paragraphId: string): Promise<Note>
   return note
 }
 
-export async function createFreeNote(): Promise<Note> {
+export async function createFreeNote(content: string = ''): Promise<Note> {
   const state = useRainStore.getState()
   const videoId = state.currentVideoId
   if (!videoId) throw new Error('没有打开可记录随记的视频')
@@ -45,7 +45,7 @@ export async function createFreeNote(): Promise<Note> {
   const note: Note = {
     id: createNoteId(),
     videoId,
-    content: '',
+    content,
     source: 'user',
     sentenceIds: [],
     createdAt: Date.now(),

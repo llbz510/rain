@@ -83,7 +83,7 @@
 | SU-04 | Partial | three-mode media reuse | study-layout — Partial | 阻断：Strong + Desktop Evidence | 禁用 jsdom/假截图替代 |
 | SU-05 | Partial（本 diff 将字幕生产接线由 Shadow 提升） | StudyInterface exact sentence → VideoZone；`subtitleOn` | study-playback、M07 — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁止 nearest fallback、译文开关或假截图 |
 | SU-06 | Partial | StudyInterface navigation/DiagramZone | navigation/M05 — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |
-| SU-07 | Partial | shortcut/focus adjacent controls | M14/playback/navigation — Partial | 阻断：Strong；无 Desktop 要求 | 建立完整生产焦点矩阵 |
+| SU-07 | Strong | StudyInterface → shortcut/focus controller → Study media/Navigation/Notes | `study-shortcuts`、notes/playback/navigation/layout — Strong | 第四轮 Spec + Standards PASS（P0/P1/P2=0）；无 Desktop 要求 | 公开矩阵、邻接及 locked 只读回归已 GREEN；不外推 UX-06 或树/导图编辑，也不签发 Desktop/Visual/GPU/Release Evidence |
 | UX-01 | Partial | index.css tokens + components | M13 CSS — Partial | 阻断：Strong + Visual Evidence | 禁用 token existence 自证 |
 | UX-02 | Partial | token/component state surfaces | M13/component adjacent — Partial | 阻断：Strong + Visual Evidence | 禁用 jsdom/假截图替代 |
 | UX-03 | Partial | typography tokens | M13 CSS — Partial | 阻断：Strong + Visual/Accessibility Evidence | 禁用 token existence 自证 |
