@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDb, resetDb } from '@/models/db-singleton'
@@ -10,7 +10,10 @@ import {
   insertVideo,
 } from '@/models/database'
 import { asMemoryDatabase } from '@/models/database-adapter'
+import type { StreamCallbacks } from '@/llm/types'
 import type { Node, Note, Sentence, Video } from '@/models/types'
+import { recordCapabilityCheck } from '@/settings/model-capabilities'
+import { runtimeModelFromPoolEntry, type ModelPoolEntry } from '@/settings/model-pool'
 import { StudyInterface } from '@/pages/StudyInterface'
 import { useRainStore } from '@/store/rain-store'
 import { NotesPanel } from '@/ui/components/notes'
@@ -91,11 +94,36 @@ const existingNote: Note = {
   sortOrder: 0,
 }
 
+const streamAssistantModel: ModelPoolEntry = {
+  id: 'notes-stream-assistant',
+  alias: 'Notes Stream Assistant',
+  type: 'llm',
+  provider: 'custom',
+  baseUrl: 'https://models.example.test/v1',
+  apiKey: 'sk-test-secret',
+  modelName: 'assistant-a',
+  supportsVision: false,
+}
+
 async function seedStudyVideo(): Promise<void> {
   const db = await getDb()
   await insertVideo(db, video)
   await insertNodes(db, nodes)
   await insertSentences(db, sentences)
+}
+
+function configureStreamAssistant(): void {
+  useRainStore.setState({
+    modelPool: [streamAssistantModel],
+    roleAssignment: { asr: null, structuring: null, assistant: streamAssistantModel.id },
+    capabilityRecords: [recordCapabilityCheck({
+      model: runtimeModelFromPoolEntry(streamAssistantModel),
+      role: 'assistant',
+      ok: true,
+      message: 'Text assistant probe passed',
+      checkedAt: 100,
+    })],
+  })
 }
 
 beforeEach(() => {
@@ -306,6 +334,68 @@ describe('AC-SU-03 unsent AI draft across right-panel Tabs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'AI' }))
     expect(screen.getByRole('textbox', { name: 'AI 输入' })).toHaveValue('Keep this unsent AI draft.')
     expect(streamAiChat).not.toHaveBeenCalled()
+  })
+})
+
+describe('AC-SU-03 active assistant stream across right-panel Tabs', () => {
+  it('keeps each visible request alive through Tabs, preserves its tokens and completion, and still ignores late tokens after stop', async () => {
+    await seedStudyVideo()
+    expect(await useRainStore.getState().loadVideo(video.id)).toEqual({ ok: true })
+    configureStreamAssistant()
+
+    const streams: StreamCallbacks[] = []
+    const cleanups: Array<() => void> = []
+    streamAiChat.mockImplementation((_messages, _settings, callbacks: StreamCallbacks) => {
+      streams.push(callbacks)
+      const cleanup = vi.fn()
+      cleanups.push(cleanup)
+      return cleanup
+    })
+    render(<StudyInterface />)
+
+    const input = screen.getByRole('textbox', { name: 'AI 输入' })
+    fireEvent.change(input, { target: { value: 'First question' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(streamAiChat).toHaveBeenCalledTimes(1)
+    expect(streams).toHaveLength(1)
+
+    act(() => streams[0].onToken('First '))
+    fireEvent.click(screen.getByRole('button', { name: '随记' }))
+    expect(cleanups[0]).not.toHaveBeenCalled()
+    expect(streamAiChat).toHaveBeenCalledTimes(1)
+    act(() => {
+      streams[0].onToken('answer.')
+      streams[0].onDone('First answer.')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI' }))
+    expect(screen.getByTestId('message-assistant')).toHaveTextContent('First answer.')
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument()
+
+    const returnedInput = screen.getByRole('textbox', { name: 'AI 输入' })
+    fireEvent.change(returnedInput, { target: { value: 'Second question' } })
+    fireEvent.keyDown(returnedInput, { key: 'Enter' })
+    expect(streamAiChat).toHaveBeenCalledTimes(2)
+    expect(streams).toHaveLength(2)
+    expect(cleanups).toHaveLength(2)
+    expect(cleanups[0]).not.toHaveBeenCalled()
+    act(() => {
+      streams[0].onToken(' stale first token')
+      streams[0].onDone('First answer.')
+    })
+    expect(screen.getAllByTestId('message-assistant')[0]).toHaveTextContent(/^First answer\.$/)
+    expect(screen.getAllByTestId('message-assistant')[1]).toHaveTextContent(/^$/)
+    expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument()
+    act(() => streams[1].onToken('Stop-ready answer.'))
+
+    fireEvent.click(screen.getByRole('button', { name: '随记' }))
+    fireEvent.click(screen.getByRole('button', { name: 'AI' }))
+    expect(screen.getAllByTestId('message-assistant').at(-1)).toHaveTextContent('Stop-ready answer.')
+    fireEvent.click(screen.getByRole('button', { name: '停止' }))
+    expect(cleanups[0]).not.toHaveBeenCalled()
+    expect(cleanups[1]).toHaveBeenCalledTimes(1)
+    act(() => streams[1].onToken(' late token'))
+    expect(screen.getAllByTestId('message-assistant').at(-1)).toHaveTextContent('Stop-ready answer.')
   })
 })
 
