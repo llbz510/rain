@@ -45,11 +45,11 @@ git log -5 --oneline
 npm run harness:control
 ```
 
-然后按 `AGENTS.md` 阅读控制地图、领域语言、完整 `PROJECT_STATE.md`，以及本 Slice 对应的 AC、覆盖行、模块地图、spec、代码、测试和最近证据。仓库事实与旧交接不一致时，以当前命令和 Active 事实源为准。
+然后按 `AGENTS.md` 阅读控制地图、领域语言、当前 `PROJECT_STATE.md` 快照，以及本 Slice 对应的 AC、覆盖行、模块地图、spec、代码、测试和最近证据。仓库事实与旧交接不一致时，以当前命令和 Active 事实源为准。
 
 ### 3.2 Slice Contract
 
-改代码前必须写清以下字段；可以先写在当轮工作说明中，完成后写入 `PROJECT_STATE.md`：
+改代码前必须写清以下字段；可以先写在当轮工作说明中，完成后替换写入 `PROJECT_STATE.md` 的当前交接：
 
 | 字段 | 必填内容 |
 | --- | --- |
@@ -107,7 +107,7 @@ npm run harness:control
 
 ### 3.6 Handoff
 
-完成后同步覆盖矩阵和 `PROJECT_STATE.md`，至少记录：
+完成后同步覆盖矩阵并替换 `PROJECT_STATE.md` 的当前交接，至少记录：
 
 - 分支/提交和改动文件；
 - 对应 AC、Owner、Judge；

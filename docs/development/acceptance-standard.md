@@ -430,13 +430,13 @@ Rain 只接受受支持的 Whisper model size，并由版本化 manifest 把 siz
 
 状态：`Confirmed`
 
-仓库必须提供一个快速、确定性的公开命令，检查所有 Confirmed AC 是否具有唯一 coverage 行、非空实现归属和裁判，并检查 coverage 引用的具体裁判文件是否存在。验收标准内部的重复/冲突状态，以及 `PROJECT_STATE.md` 当前事实区把 Confirmed AC 降回 Proposed 的陈述，必须使命令失败并指出具体 AC；历史时间线可以保留当时状态。
+仓库必须提供一个快速、确定性的公开命令，检查所有 Confirmed AC 是否具有唯一 coverage 行、非空实现归属和裁判，并检查 coverage 引用的具体裁判文件是否存在。验收标准内部的重复/冲突状态，以及 `PROJECT_STATE.md` 当前快照把 Confirmed AC 降回 Proposed 的明确状态陈述，必须使命令失败并指出具体 AC；该快照只能按固定顺序各保留一次六个当前 H2 段落（CommonMark 允许的 0–3 前置空格仍按标题处理），不得含 H3–H6 标题；Maintenance 交接段不得追加以日期或 session/handoff/what-changed/会话/交接标记起始的日期式历史时间线，但可以引用带日期的控制文档路径。
 
 该检查只证明控制文档自洽，不得代替产品行为测试、真实 SQLite/Tauri 运行或 Evidence。完整交付入口必须在控制面通过后继续运行前端测试、E2E/普通互补前端构建和 Rust 测试；昂贵 live-key 与真实 E2E 是否必跑仍由对应产品 AC 决定。
 
 实现归属：`scripts/control-plane-validator.mjs` 负责纯规则和真实仓库入口；`package.json` 提供快速 `harness:control` 与完整 `harness:check` 命令。
 
-裁判：`control-plane-validator.test.ts` 使用独立小文档覆盖正常、缺 coverage、缺 Owner/Judge、裁判文件缺失、当前事实冲突和验收状态冲突；`npm run harness:control` 对真实 Rain 文档执行同一实现。
+裁判：`control-plane-validator.test.ts` 使用独立小文档覆盖正常、缺 coverage、缺 Owner/Judge、裁判文件缺失、当前事实冲突、验收状态冲突和已退役的会话时间线；`npm run harness:control` 对真实 Rain 文档执行同一实现。
 
 ### AC-HE-02 普通生产构建不得包含 E2E 自动化实现
 

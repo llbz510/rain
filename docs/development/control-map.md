@@ -12,7 +12,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | --- | --- | --- |
 | 进入项目后必须遵守什么 | `AGENTS.md` | 环境、命令、Harness 限制和会话规则 |
 | 项目中的核心词语是什么意思 | `CONTEXT.md` | 统一领域语言；不能单独证明实现已完成 |
-| 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 当前状态、最近验证和已知风险 |
+| 当前项目已经验证到哪里 | `docs/PROJECT_STATE.md` | 简洁当前快照、最近可复核基线和活跃风险；历史细节回到 Git/PR |
 | 跨会话开发切片按什么流程和优先级执行 | `docs/development/agent-first-development-plan.md` | Active 会话/交付协议与候选队列；不新增产品语义，Proposed 切片仍需用户确认 |
 | 当前 Confirmed AC 的生产路径、局部入口与阻断项 | `docs/development/launch-feature-audit.md` | Active Launch 审计；只记录 Present/Partial/Shadow/Absent，不定义 AC、Judge、tier 或完成状态 |
 | 从当前状态到正式发布按什么里程碑推进 | `docs/development/rain-project-delivery-plan.md` | Active 项目交付路线、Release 完成定义、全部 Proposed 决策路由和 RC/上线门禁；不自动授权新行为 |
@@ -51,7 +51,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 - `docs/superpowers/plans/` 全部是 `Historical`。
 - `HANDOFF.md` 是 `Historical`，其中的决策必须回到当前 PRD/spec 核对。
 - 根目录 `PRD.md` 和 `M*.md` 是产品意图来源，但实现状态必须由 AC、测试和证据判断。
-- `docs/PROJECT_STATE.md` 是状态日志，不负责定义产品验收标准。
+- `docs/PROJECT_STATE.md` 是可替换的当前状态快照，不负责定义产品验收标准或保存会话日志。
 
 ## 3. 冲突处理
 
@@ -100,7 +100,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 4. 做最小实现或重构。
 5. 运行该 AC 对应的测试。
 6. 根据影响范围运行完整前端、Rust 或真实 E2E 验证。
-7. 更新覆盖矩阵和 `PROJECT_STATE.md`。
+7. 更新覆盖矩阵和可替换的 `PROJECT_STATE.md` 当前快照。
 
 修改锁定的 `harness/` 或 `src-tauri/tests/` 前，必须得到用户明确批准。批准 Harness Migration 后，必须先明确对应 AC 和替代裁判，再退役旧断言及其测试专用影子模块；迁移记录保存在 `docs/development/`。没有批准时仍按锁定处理。
 
