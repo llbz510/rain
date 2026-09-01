@@ -43,12 +43,41 @@ const decisionCoverage = `
 ${decisionRows()}
 `
 
+const conciseProjectState = `# State
+
+Primary checkout: current Git worktree.
+
+## Current control facts
+
+Control details.
+
+## Current verified baseline
+
+Baseline details.
+
+## Current delivery direction
+
+Direction details.
+
+## Effective evidence and boundaries
+
+Evidence details.
+
+## Active risks and boundaries
+
+Risk details.
+
+## Maintenance and current handoff
+
+Handoff details.
+`
+
 function validate(overrides = {}) {
   return validateControlPlaneDocuments({
     acceptance,
     coverage,
     decisionCoverage,
-    projectState: '# State\n\nPrimary checkout: current Git worktree.\n\n## Known defects\n\nNone.\n\n## What changed\n',
+    projectState: conciseProjectState,
     deliveryPlan: '# Delivery plan\n\nM3-S2 is Superseded and not a release blocker.\n',
     availableFiles: ['good.test.ts', 'M01-positioning.md'],
     ...overrides,
@@ -84,10 +113,112 @@ describe('control-plane validator', () => {
   })
 
   it('rejects a current-state claim that demotes a Confirmed AC to Proposed', () => {
-    const projectState = '# State\n\nPrimary checkout: current Git worktree.\n\n## Known defects\n\nAC-TEST-01 remains Proposed.\n\n## What changed\n'
+    const projectState = conciseProjectState.replace(
+      'Baseline details.',
+      'AC-TEST-01 remains Proposed.',
+    )
 
     expect(validate({ projectState }))
       .toContain('PROJECT_STATE current facts call Confirmed AC-TEST-01 Proposed.')
+  })
+
+  it('rejects the retired append-only session timeline markers from PROJECT_STATE', () => {
+    const projectState = conciseProjectState
+      .replace('## Current verified baseline', '## WHAT CHANGED')
+      .replace('Handoff details.', '2026-08-31 session: Old session details.')
+
+    expect(validate({ projectState })).toEqual(expect.arrayContaining([
+      'PROJECT_STATE must contain only the six current snapshot H2 sections, each once and in fixed order.',
+      'PROJECT_STATE must not contain dated session, handoff, or what-changed records.',
+    ]))
+  })
+
+  it('rejects extra H2 session handoff headings instead of allowing a new timeline shape', () => {
+    const projectState = conciseProjectState.replace(
+      '## Maintenance and current handoff',
+      '## Session handoff 2026-09-01',
+    )
+
+    expect(validate({ projectState }))
+      .toContain('PROJECT_STATE must contain only the six current snapshot H2 sections, each once and in fixed order.')
+  })
+
+  it('rejects every H3-H6 timeline shape nested inside an allowed snapshot section', () => {
+    for (const heading of [
+      '### WHAT CHANGED',
+      '### 2026-09-02 会话交接',
+      '### Session handoff 2026-09-02',
+    ]) {
+      const projectState = conciseProjectState.replace(
+        'Evidence details.',
+        `${heading}\n\nEvidence details.`,
+      )
+
+      expect(validate({ projectState }))
+        .toContain('PROJECT_STATE must not contain H3-H6 headings.')
+    }
+  })
+
+  it('treats CommonMark-indented H2 and H3 headings as snapshot-structure violations', () => {
+    const indentedH2 = conciseProjectState.replace(
+      '## Current verified baseline',
+      '   ## WHAT CHANGED',
+    )
+    const indentedH3 = conciseProjectState.replace(
+      'Evidence details.',
+      '   ### WHAT CHANGED\n\nEvidence details.',
+    )
+
+    expect(validate({ projectState: indentedH2 }))
+      .toContain('PROJECT_STATE must contain only the six current snapshot H2 sections, each once and in fixed order.')
+    expect(validate({ projectState: indentedH3 }))
+      .toContain('PROJECT_STATE must not contain H3-H6 headings.')
+  })
+
+  it('rejects dated timeline records in the Maintenance and current handoff section', () => {
+    for (const record of [
+      '2026-09-02 会话交接：旧记录。',
+      'Session handoff 2026-09-02: Old details.',
+      '- 2026-09-02 session: Old details.',
+    ]) {
+      const projectState = conciseProjectState.replace('Handoff details.', record)
+
+      expect(validate({ projectState }))
+        .toContain('PROJECT_STATE Maintenance and current handoff must not contain dated timeline records.')
+    }
+  })
+
+  it('allows a dated control-document path in the Maintenance and current handoff section', () => {
+    const projectState = conciseProjectState.replace(
+      'Handoff details.',
+      'Changed file: `docs/development/harness-migration-2026-08-03-gpu-required-release.md`.',
+    )
+
+    expect(validate({ projectState })).toEqual([])
+  })
+
+  it('allows evidence dates and a separate Proposed follow-up without demoting a Confirmed AC', () => {
+    const projectState = conciseProjectState
+      .replace('Evidence details.', 'Evidence verified on 2026-09-01.')
+      .replace('Baseline details.', 'AC-TEST-01 remains Confirmed; a separate follow-up is Proposed.')
+
+    expect(validate({ projectState })).toEqual([])
+  })
+
+  it('rejects explicit Proposed demotions with Markdown code formatting', () => {
+    const english = conciseProjectState.replace(
+      'Baseline details.',
+      '`AC-TEST-01` remains `Proposed`.',
+    )
+    const chinese = conciseProjectState.replace(
+      'Baseline details.',
+      '`AC-TEST-01` 状态：`Proposed`。',
+    )
+
+    for (const projectState of [english, chinese]) {
+      expect(validate({ projectState }))
+        .toContain('PROJECT_STATE current facts call Confirmed AC-TEST-01 Proposed.')
+    }
   })
 
   it('rejects conflicting statuses inside the acceptance standard', () => {
@@ -188,14 +319,14 @@ describe('control-plane validator', () => {
   })
 
   it('rejects the legacy checkout path in active current facts', () => {
-    const projectState = '# State\n\nPrimary checkout: `D:\\gongju\\shengcan\\rain`\n\n## What changed\n'
+    const projectState = '# State\n\nPrimary checkout: `D:\\gongju\\shengcan\\rain`\n'
 
     expect(validate({ projectState }))
       .toContain('PROJECT_STATE active canonical checkout still uses legacy path: D:\\gongju\\shengcan\\rain.')
   })
 
   it('normalizes case and slash variants before rejecting a legacy checkout path', () => {
-    const projectState = '# State\n\nPrimary checkout: `d:/GONGJU/shengcan/RAIN/`\n\n## What changed\n'
+    const projectState = '# State\n\nPrimary checkout: `d:/GONGJU/shengcan/RAIN/`\n'
 
     expect(validate({ projectState }))
       .toContain('PROJECT_STATE active canonical checkout still uses legacy path: D:\\gongju\\shengcan\\rain.')

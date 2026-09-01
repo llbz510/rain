@@ -1423,49 +1423,51 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     expect(wrongHash.output.error).toContain('Controlled-build record artifact-manifest SHA-256 does not match the expected artifact-manifest SHA-256')
   }, 15_000)
 
-  it('rejects provenance whose CUDA worker or runtime declarations leave the canonical whisper-backends payload set', async () => {
-    const cases: Array<{ name: string; mutate: (manifest: any) => void; error: RegExp }> = [
-      {
-        name: 'CUDA worker path',
-        mutate: (manifest) => { manifest.resources.cudaWorker.path = 'resources/whisper-backends/rain-whisper-cuda.exe' },
-        error: /CUDA worker path must be whisper-backends\/rain-whisper-cuda\.exe/i,
+  const canonicalPayloadMutationCases: Array<{ name: string; mutate: (manifest: any) => void; error: RegExp }> = [
+    {
+      name: 'CUDA worker path',
+      mutate: (manifest) => { manifest.resources.cudaWorker.path = 'resources/whisper-backends/rain-whisper-cuda.exe' },
+      error: /CUDA worker path must be whisper-backends\/rain-whisper-cuda\.exe/i,
+    },
+    ...['cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll'].map((name) => ({
+      name: `CUDA runtime ${name} path`,
+      mutate: (manifest: any) => {
+        manifest.resources.cudaRuntime.files.find((file: { name: string }) => file.name === name).path = `resources/whisper-backends/${name}`
       },
-      ...['cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll'].map((name) => ({
-        name: `CUDA runtime ${name} path`,
-        mutate: (manifest: any) => {
-          manifest.resources.cudaRuntime.files.find((file: { name: string }) => file.name === name).path = `resources/whisper-backends/${name}`
-        },
-        error: new RegExp(`CUDA runtime file '${name.replace('.', '\\.')}' path must be whisper-backends/${name.replace('.', '\\.')}`, 'i'),
-      })),
-      {
-        name: 'unknown CUDA runtime file',
-        mutate: (manifest) => {
-          manifest.resources.cudaRuntime.files[0].name = 'unexpected.dll'
-          manifest.resources.cudaRuntime.files[0].path = 'whisper-backends/unexpected.dll'
-        },
-        error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+      error: new RegExp(`CUDA runtime file '${name.replace('.', '\\.')}' path must be whisper-backends/${name.replace('.', '\\.')}`, 'i'),
+    })),
+    {
+      name: 'unknown CUDA runtime file',
+      mutate: (manifest) => {
+        manifest.resources.cudaRuntime.files[0].name = 'unexpected.dll'
+        manifest.resources.cudaRuntime.files[0].path = 'whisper-backends/unexpected.dll'
       },
-      {
-        name: 'duplicate CUDA runtime file',
-        mutate: (manifest) => {
-          manifest.resources.cudaRuntime.files[1].name = 'cublas64_12.dll'
-          manifest.resources.cudaRuntime.files[1].path = 'whisper-backends/cublas64_12.dll'
-        },
-        error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+      error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+    },
+    {
+      name: 'duplicate CUDA runtime file',
+      mutate: (manifest) => {
+        manifest.resources.cudaRuntime.files[1].name = 'cublas64_12.dll'
+        manifest.resources.cudaRuntime.files[1].path = 'whisper-backends/cublas64_12.dll'
       },
-      {
-        name: 'missing CUDA runtime file',
-        mutate: (manifest) => { manifest.resources.cudaRuntime.files.pop() },
-        error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
-      },
-    ]
+      error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+    },
+    {
+      name: 'missing CUDA runtime file',
+      mutate: (manifest) => { manifest.resources.cudaRuntime.files.pop() },
+      error: /CUDA runtime files must be exactly the canonical whisper-backends runtime set/i,
+    },
+  ]
 
-    const results = await Promise.all(cases.map(async (testCase) => {
+  it.each(canonicalPayloadMutationCases)(
+    'rejects provenance whose $name declaration leaves the canonical whisper-backends payload set',
+    async ({ mutate, error }) => {
       const candidate = createArtifactFixture(newTemporaryRoot())
       const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
-      testCase.mutate(manifest)
+      mutate(manifest)
       writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
       syncArtifactFixtureRecordManifestIdentity(candidate)
+
       const result = await invokeContract({
         operation: 'provenance',
         installerPath: candidate.installerPath,
@@ -1475,14 +1477,11 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
         expectedArtifactManifestSha256: sha256(candidate.artifactManifestPath),
         controlledBuildRecordPath: candidate.controlledBuildRecordPath,
       })
-      return { ...testCase, result }
-    }))
 
-    expect(results.map(({ result }) => result.status)).toEqual(cases.map(() => 1))
-    for (const { name, error, result } of results) {
-      expect(result.output.error, name).toMatch(error)
-    }
-  }, 15_000)
+      expect(result.status).toBe(1)
+      expect(result.output.error).toMatch(error)
+    },
+  )
 
   it('rejects the legacy NSIS HTML download page even when both provenance records retain the pinned SHA-256', async () => {
     const candidate = createArtifactFixture(newTemporaryRoot())

@@ -10,6 +10,15 @@ const GENERATED_DIRECTORIES = new Set([
   'target',
 ])
 
+const PROJECT_STATE_SECTION_HEADINGS = [
+  'Current control facts',
+  'Current verified baseline',
+  'Current delivery direction',
+  'Effective evidence and boundaries',
+  'Active risks and boundaries',
+  'Maintenance and current handoff',
+]
+
 function parseAcceptanceCriteria(source) {
   const headings = [...source.matchAll(/^###\s+(AC-[A-Z]+-\d+)\b.*$/gm)]
   return headings.map((match, index) => {
@@ -64,6 +73,28 @@ function normalizeWindowsPath(value) {
     .replace(/\\+/g, '\\')
     .replace(/\\+$/, '')
     .toLowerCase()
+}
+
+function projectStateSections(projectState) {
+  return [...projectState.matchAll(/^[ ]{0,3}##[ \t]+(.+?)[ \t]*$/gm)]
+    .map((match) => ({
+      heading: match[1],
+      start: match.index,
+      end: match.index + match[0].length,
+    }))
+}
+
+function hasRequiredProjectStateSections(projectState) {
+  const headings = projectStateSections(projectState).map((section) => section.heading)
+  return headings.length === PROJECT_STATE_SECTION_HEADINGS.length
+    && headings.every((heading, index) => heading === PROJECT_STATE_SECTION_HEADINGS[index])
+}
+
+function projectStateSectionBody(projectState, heading) {
+  const sections = projectStateSections(projectState)
+  const index = sections.findIndex((section) => section.heading === heading)
+  if (index === -1) return ''
+  return projectState.slice(sections[index].end, sections[index + 1]?.start)
 }
 
 function hasActiveNoNvidiaExitSemantics(deliveryPlan) {
@@ -198,17 +229,39 @@ export function validateControlPlaneDocuments({
     errors.push(`Product decision disposition counts are ${dispositionSummary}; expected ${expectedDispositionSummary}.`)
   }
 
-  const currentFacts = projectState.split(/^## What changed\b/m)[0]
-  const primaryCheckout = currentFacts.match(/^Primary checkout:[ \t]*(.+)$/m)?.[1]?.trim() ?? ''
+  const primaryCheckout = projectState.match(/^Primary checkout:[ \t]*(.+)$/m)?.[1]?.trim() ?? ''
   if (!primaryCheckout) {
     errors.push('PROJECT_STATE active current facts define no canonical checkout.')
   } else if (normalizeWindowsPath(primaryCheckout).includes(normalizeWindowsPath('D:\\gongju\\shengcan\\rain'))) {
     errors.push('PROJECT_STATE active canonical checkout still uses legacy path: D:\\gongju\\shengcan\\rain.')
   }
+  if (!hasRequiredProjectStateSections(projectState)) {
+    errors.push('PROJECT_STATE must contain only the six current snapshot H2 sections, each once and in fixed order.')
+  }
+  if (/^[ ]{0,3}#{3,6}\s+/m.test(projectState)) {
+    errors.push('PROJECT_STATE must not contain H3-H6 headings.')
+  }
+  const maintenanceBody = projectStateSectionBody(projectState, 'Maintenance and current handoff')
+  const timelineMarker = '(?:session|handoff|what[- ]?changed|会话|交接)'
+  const maintenanceTimelineRecord = new RegExp(
+    `^[ \\t]*(?:[-*+][ \\t]+)?(?:\\d{4}-\\d{2}-\\d{2}\\b.*${timelineMarker}|${timelineMarker}.*\\b\\d{4}-\\d{2}-\\d{2}\\b)`,
+    'im',
+  )
+  if (maintenanceTimelineRecord.test(maintenanceBody)) {
+    errors.push('PROJECT_STATE Maintenance and current handoff must not contain dated timeline records.')
+  }
+  if (/^\s*(?:#{1,6}\s+)?\d{4}-\d{2}-\d{2}\b.*\b(?:session|handoff|what[- ]?changed)\b/im.test(projectState)) {
+    errors.push('PROJECT_STATE must not contain dated session, handoff, or what-changed records.')
+  }
   for (const criterion of confirmed) {
-    const contradictoryLine = currentFacts.split(/\r?\n/).find((line) => (
-      line.includes(criterion.id) && /\bProposed\b/i.test(line)
-    ))
+    const criterionPattern = criterion.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const markdownTick = '`?'
+    const markdownProposed = `${markdownTick}Proposed\\b${markdownTick}`
+    const contradictoryStatus = new RegExp(
+      `${markdownTick}\\b${criterionPattern}\\b${markdownTick}\\s+(?:(?:is|remains)\\s+${markdownProposed}|(?:status|状态)\\s*[:：]\\s*${markdownProposed})`,
+      'i',
+    )
+    const contradictoryLine = projectState.split(/\r?\n/).find((line) => contradictoryStatus.test(line))
     if (contradictoryLine) {
       errors.push(`PROJECT_STATE current facts call Confirmed ${criterion.id} Proposed.`)
     }
