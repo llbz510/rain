@@ -562,7 +562,16 @@ export function VideoListPage() {
             aria-live={isTitleSearch ? 'polite' : undefined}
             style={emptyStyle}
           >
-            {isTitleSearch ? '没有找到匹配的视频' : getEmptyStateMessage()}
+            {isTitleSearch ? '没有找到匹配的视频' : (
+              <button
+                type="button"
+                onClick={handleImportClick}
+                style={{ ...importButtonStyle, opacity: importController ? 1 : 0.55 }}
+                disabled={!importController}
+              >
+                {getEmptyStateMessage()}
+              </button>
+            )}
           </div>
         ) : (
           <div style={gridStyle}>

@@ -139,7 +139,7 @@
 | AC-VL-01 | `video-import-task-dialog.test.tsx`、`video-list-page-recovery.test.tsx`、M17 | Partial | 多持久状态、错误和动作已有生产 DOM 行为；规定信息层级与完整视觉 Evidence 未裁判 |
 | AC-VL-02 | `video-list-sorting.test.tsx`、`database-videos.test.ts` | Strong（公开双 adapter + 生产页面） | 同一 fixture 经真实 Memory 与故意无序的 SQLite adapter public seam，锁定最近学习、导入时间、名称三档的完整稳定 ID 顺序；每档均含主排序键相同而 ID 不同的并列项。生产 `VideoListPage` Judge 锁定默认最近学习、具名三选项和每次切换后的卡片顺序；不签发 Desktop、Visual 或 Evidence，也不外推 AC-VL-03/04 |
 | AC-VL-03 | `video-title-query.test.ts`、`video-list-title-search.test.tsx` | Strong（公开双 adapter + 生产页面） | 同一标题 fixture 经真实 Memory 与故意无序的 SQLite public adapter，再经生产 `VideoListPage`，锁定 trim、ASCII 大小写不敏感、仅持久化 title 匹配、非空无匹配词返回空列表，以及名称排序下清空搜索仍保留选定排序。页面还独立裁判无结果 live status、空库、初始化/查询失败和刷新竞态；数据库 Judge 继续覆盖 `%`/`_` 字面查询、SQLite SQL 合同与共享最终排序器。AC 不要求 Desktop、Visual 或 Evidence，也不外推 AC-VL-04 |
-| AC-VL-04 | `video-list-local-import.test.tsx`、`video-import-task-dialog.test.tsx` | Partial | 导入与非 ready 详情入口存在；排序/搜索/空库/无结果/失败的完整页面组合和桌面 DOM 未闭合 |
+| AC-VL-04 | `video-list-local-import.test.tsx`、`video-import-task-dialog.test.tsx`、`video-list-empty-import-cta.test.tsx` | Partial | 新增生产 `VideoListPage` DOM/点击 Judge：具名原生“导入你的第一个视频”按钮复用既有页面内 handler 打开同一导入菜单，点击前无菜单、点击后显示“本地文件”“在线视频”；排序/搜索/空库/无结果/失败的完整页面组合 Strong Judge 和桌面 DOM 仍未闭合 |
 | AC-VL-05 | `video-list-deletion.test.tsx`、Rust `video_deletion` tests | Partial | 数据库级联与源视频保留已有 Judge；提交后 app-owned 缩略图删除、非法路径和可重试文件失败未实现 |
 | AC-VL-06 | 尚无缩略图 GC Judge | Gap | 缺真实 keep-set、路径逃逸、并发新建、幂等与部分失败覆盖 |
 | AC-VL-07 | M17、`video-thumbnail-ownership.test.tsx` | Partial | 卡片内容与真实缩略图桥接有局部覆盖；240px/16:9/窄宽主操作和多 viewport 独立视觉 Evidence 未签发 |
