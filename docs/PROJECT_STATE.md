@@ -13,11 +13,10 @@ Primary checkout: current Git worktree. Active control documents and runnable sc
 
 ## Current verified baseline
 
-截至 2026-08-31，受保护 `origin/master` 是 `f200a0ecc48d0f4468326e9bf17331f138ba32cf`（PR #60 merge commit）。
+截至 2026-09-01，受保护 `origin/master` 是 `73bec1bc99639f9b1bf81271313663deac3cf27b`（PR #62 merge commit）。
 
-- PR #59 已合并为 `02f138d4a5067554d464b5b92cb5daf75d06c6c1`；其 `Clean Windows Harness` run [`33346306370`](https://github.com/llbz510/rain/actions/runs/33346306370) 为 `success`。
-- PR #60 的 `Clean Windows Harness` run [`33361689676`](https://github.com/llbz510/rain/actions/runs/33361689676) 为 `success`；该 run 的 PR head 是 `4c869930bd180ea575e3c5ca01d7e37dcefc62e6`，不是 merge commit。
-- 上述 merge 的自动 `master` push Harness run [`33362355757`](https://github.com/llbz510/rain/actions/runs/33362355757) 为 `success`，head SHA 精确为 `f200a0ecc48d0f4468326e9bf17331f138ba32cf`。
+- PR #61 已合并为 `484b01f543f7cdd8cce85511b0b1df85cdd67ca3`；其 `Clean Windows Harness` run [`33477943584`](https://github.com/llbz510/rain/actions/runs/33477943584) 为 `success`，自动 `master` push Harness run [`33478787745`](https://github.com/llbz510/rain/actions/runs/33478787745) 为 `success`。
+- PR #62 的功能 head 是 `b8922618d5474b6aefbb23de80470ef980a4a1b9`，已合并为上述 `73bec1bc99639f9b1bf81271313663deac3cf27b`；其 `Clean Windows Harness` run [`33480856529`](https://github.com/llbz510/rain/actions/runs/33480856529) 为 `success`，自动 `master` push Harness run [`33481806866`](https://github.com/llbz510/rain/actions/runs/33481806866) 为 `success`。
 
 这些成功只证明各自目标提交在干净 Hosted Windows 上通过默认 Harness；不替代真实桌面、GPU、模型、安装器或 Release Evidence。
 
@@ -46,4 +45,4 @@ M3/GPU/Release Evidence、受控 GPU artifact build、安装器、签名、许�
 
 修改项目文件的会话必须同步本快照，但只能替换已过期的当前事实和本节交接，不得新增按日期的会话段落或 `## What changed` 时间线。每次交接保留一个可验证的当前 Slice：AC、Owner、公开 Judge、RED/GREEN、独立审查结果、未运行 Evidence、下一唯一动作；历史细节由 commit/PR 记录承载。
 
-当前 Slice 是已获用户明确授权的 `AC-UX-06` `VideoCard` 键盘主操作局部修复：生产 `VideoCard` 的缩略图/标题主点击区合并为一个具名原生 `type="button"`，ready 名称为“打开视频：标题”并经公开 `onOpen` 打开，non-ready 名称为“查看导入任务：标题”并经公开 `onOpenImport` 打开；deleting 时该主操作真实 disabled，既有删除合同不变。新的非锁定 `video-list-accessibility.test.tsx` 已先后 RED（缺具名主按钮；non-ready 动作名称错误）再 GREEN，真实生产卡锁定 ready/non-ready 的 Tab+Enter 与公开 callback，以及 deleting disabled。定向视频列表回归（含只读 locked M17）28/28、`npm.cmd exec -- tsc --noEmit`、`npm.cmd run build` 均已 GREEN；完整 `npm test`、`harness:check`、Cargo/Rust、真实 Desktop、axe、AA 对比度、GPU/Release/Evidence 均未运行。`AC-UX-06` 仍为 Partial：其他 Launch 主操作、可见焦点、非纯颜色状态、全页面 axe/AA 与 Desktop/Accessibility Evidence 未闭合。独立 Spec 与 Standards review 最终均 PASS，P0/P1/P2=0；下一唯一动作是提交、推送并创建或更新本 Slice PR，等待正常自动 `Clean Windows Harness`；成功前不合并、不手动 rerun、不 no-op；成功后才合并并确认 master-push Harness。
+当前 Slice 是已获用户明确授权的 `AC-VL-04` 空库导入 CTA：生产 `VideoListPage` 在无视频且无标题搜索时把既有“导入你的第一个视频”提示渲染为具名原生 `type="button"`；它复用既有页面内 handler，因此打开与顶栏同一份既有导入菜单，并显示“本地文件”“在线视频”，不复制导入状态或流程。新的非锁定 `video-list-empty-import-cta.test.tsx` 已 RED（空库提示不是按钮）再 GREEN，直接经生产 `VideoListPage` DOM/点击交互裁判该 CTA 在点击前没有菜单、点击后出现两个既有菜单动作。定向视频列表回归 16/16、`npm.cmd exec -- tsc --noEmit`、`npm.cmd run build` 和 `npm.cmd run harness:control` 均已 GREEN，`git diff --check` 无错误。完整 `npm test`、`harness:check`、Cargo/Rust、真实 Desktop、实际文件/URL 导入、axe、AA 对比度、GPU/Release/Evidence 均未运行。`AC-VL-04` 仍为 Partial：排序、搜索、空库、无搜索结果、失败和非 ready 详情的完整组合 Strong Judge，以及 Desktop Evidence 未闭合；本 Slice 不外推 `AC-UX-06`。首轮两位 reviewer 的 P2（测试敏感性与公开 seam 文档措辞）均已修复；最终 Spec/Standards 复审双 PASS，P0/P1/P2=0。下一唯一动作是提交、推送并创建本 Slice PR，等待正常自动 `Clean Windows Harness`；成功前不合并、不手动 rerun、不 no-op，成功后才合并并确认 master-push Harness。
