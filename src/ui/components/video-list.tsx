@@ -29,11 +29,14 @@ export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInf
   const display = buildCardDisplay(video)
   const importStatus = getImportStatus(video, importProgressPercent)
   const thumbnailSrc = localMediaUrl(video.thumbnail)
+  const cardAction = getCardAction(video)
+  const primaryActionName = cardAction === 'openVideo'
+    ? `打开视频：${video.title}`
+    : `查看导入任务：${video.title}`
 
   const handleClick = () => {
     if (deleting) return
-    const action = getCardAction(video)
-    if (action === 'openVideo') onOpen?.(video.id)
+    if (cardAction === 'openVideo') onOpen?.(video.id)
     else onOpenImport?.(video.id)
   }
 
@@ -70,10 +73,12 @@ export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInf
 
   return (
     <div data-testid={`card-${video.id}`} style={{ cursor: 'pointer' }}>
-      {thumbnailSrc
-        ? <img src={thumbnailSrc} alt={video.title} aria-disabled={deleting} onClick={handleClick} />
-        : <div aria-disabled={deleting} onClick={handleClick}>暂无缩略图</div>}
-      <span aria-disabled={deleting} onClick={handleClick}>{video.title}</span>
+      <button type="button" aria-label={primaryActionName} disabled={deleting} onClick={handleClick}>
+        {thumbnailSrc
+          ? <img src={thumbnailSrc} alt={video.title} />
+          : <span>暂无缩略图</span>}
+        <span>{video.title}</span>
+      </button>
       <div>{display.durationText}</div>
       <div>{display.progressPercent}%</div>
       {display.isComplete && <span>✓</span>}
