@@ -89,7 +89,7 @@
 | UX-03 | Partial | typography tokens | M13 CSS — Partial | 阻断：Strong + Visual/Accessibility Evidence | 禁用 token existence 自证 |
 | UX-04 | Partial | geometry tokens | M13 CSS — Partial | 阻断：Strong + Visual Evidence | 禁用 token existence 自证 |
 | UX-05 | Partial | motion tokens | M13/component adjacent — Partial | 阻断：Strong + Desktop/Accessibility Evidence | 禁用 jsdom/假截图替代 |
-| UX-06 | Absent | 无完整 accessibility Judge | 无 — Gap | 阻断：Desktop/Accessibility keyboard/focus/name/axe/AA | 实现该 Confirmed Slice/建立生产 Judge |
+| UX-06 | Partial | `VideoCard` 主打开动作 → 原生具名 button → `onOpen`/`onOpenImport` | `video-list-accessibility`（生产卡 Tab+Enter/公开 callback）— Partial | 阻断：其他 Launch 主操作、可见焦点、非纯颜色状态、axe、AA 与 Desktop/Accessibility Evidence | 此 Slice 仅关闭 ready/non-ready 视频卡键盘/名称局部缺口；不得外推为完整 accessibility Judge |
 | PF-01 | Absent | 无 cold-start runner | 无 — Gap | frozen host 10x p95 | 先建 performance runner |
 | PF-02 | Absent | 无 500-video runner | 无 — Gap | SQLite fixture/restart p95 | 先建 performance runner |
 | PF-03 | Absent | 无 Study runner | 无 — Gap | ready fixture/media p95 | 先建 performance runner |
@@ -105,7 +105,7 @@
 
 - `LV/ST`：带 Historical Evidence/current-target Gap 的行仍被精确目标 Evidence 阻断：`LV-03/05/07/08/09/11/12`、`ST-01/07`；此外 `LV-21` 的目标 NVIDIA Release Evidence Gap 也是 blocker（当前 user-paused）。`LV-01/04/10` 已 Strong，桌面/SQLite/真实事件仅为非阻断补强；不能用 jsdom、旧包或假截图替代真正 Required Evidence。
 - `VL`：阻断 Desktop/Visual 的只有 `VL-01`（Visual）、`VL-04`（Desktop）与 `VL-07`（Desktop/Visual）。`VL-02` 已由 Strong 的双 adapter 与生产 UI Judge 覆盖，无 Desktop 要求；`VL-03` 仍只需 Strong 的双 adapter 与生产 UI Judge，不需 Desktop；`VL-05` 需隔离真实文件系统与真实 SQLite，`VL-06` 需实现其 Confirmed Slice/生产 Judge。
-- `SU/UX`：Desktop/Visual blocker 仅为 `SU-01`（Desktop）、`SU-02`（Desktop/Visual）、`SU-03`（Desktop）、`SU-04`（Desktop）、`SU-05`（Desktop/Visual）、`SU-06`（Desktop/Visual）、`UX-01/02/04`（Visual）、`UX-03`（Visual/Accessibility）、`UX-05/06`（Desktop/Accessibility）。`SU-07` 只需 Strong，不要求 Desktop；截图只能作附件，不能单独裁判。
+- `SU/UX`：Desktop/Visual blocker 仅为 `SU-01`（Desktop）、`SU-02`（Desktop/Visual）、`SU-03`（Desktop）、`SU-04`（Desktop）、`SU-05`（Desktop/Visual）、`SU-06`（Desktop/Visual）、`UX-01/02/04`（Visual）、`UX-03`（Visual/Accessibility）、`UX-05/06`（Desktop/Accessibility）。`UX-06` 已有 VideoCard 局部生产键盘/名称 Judge，但其余 Launch 主操作、可见焦点、非纯颜色状态、axe、AA 与 Desktop Evidence 仍阻断。`SU-07` 只需 Strong，不要求 Desktop；截图只能作附件，不能单独裁判。
 - `HE`：`HE-05` 只能由改变该桌面边界后的目标提交 workflow_dispatch 重放；本 Slice 不 dispatch。
 - `PF`：每条都缺冻结主机、fixture、样本/p95 或 soak Evidence，不能由开发机感觉代替。
 - `AR`：`AR-02..06` 仍需真实角色请求、Tauri capability/桌面、真实 remount 或统一领域 Judge；静态扫描/局部组件不等于完成。

@@ -155,7 +155,7 @@
 | AC-UX-03 | `m13-visual.test.ts` | Partial | 字体/字号 token 有局部裁判；全应用实际用途、行距、长文本多 viewport 与 accessibility review 缺失 |
 | AC-UX-04 | `m13-visual.test.ts` | Partial | 部分几何 token 已锁定；生产页面一次性尺寸扫描、DOM measurement 和例外白名单未建立 |
 | AC-UX-05 | `m13-visual.test.ts`、生产组件相邻测试 | Partial | 三时长 token 有局部事实；跨目录/面板/卡片的 reduced-motion 行为和桌面 accessibility Evidence 未闭合 |
-| AC-UX-06 | 尚无完整 accessibility Judge | Gap | 缺全部 Launch 主操作的键盘遍历、可见焦点、名称、非纯颜色状态、axe 与 AA 对比度复核 |
+| AC-UX-06 | `video-list-accessibility.test.tsx`（生产 `VideoCard`） | Partial | 真实生产卡的 ready/non-ready 主操作现在各由具名原生 button、Tab+Enter 和公开 `onOpen`/`onOpenImport` callback Judge 覆盖；deleting 时主操作必须真实 disabled，既有删除合同不变。此局部 DOM Judge 不证明其他 Launch 主操作、可见焦点、非纯颜色状态、axe、AA 对比度或 Desktop/Accessibility Evidence，故仍为 Partial |
 | AC-PF-01 | 尚无冻结机器 performance runner | Gap | 缺正式候选包 10 次有效冷启动 p95 Evidence |
 | AC-PF-02 | 尚无冻结 500 视频 performance runner | Gap | 缺固定 SQLite fixture、10 次重启和列表可操作 p95 Evidence |
 | AC-PF-03 | 尚无学习页 performance runner | Gap | 缺固定 ready fixture/媒体、10 次重置打开和事实可见 p95 Evidence |
