@@ -70,7 +70,7 @@
 | RL-18 | Absent | 无下载页/installer disclosure Judge | artifact contract — Gap | target disclosure/manifest/GPU reconciliation | 用户暂停 RL |
 | RL-19 | Absent | 无 rollback exercise | 无 — Gap | signed rollback/data Evidence | 用户暂停 RL |
 | RL-20 | Partial | Active control documents | scope/AC/coverage docs — Partial | target notes/artifact/Evidence/rollback reconciliation | 用户暂停 RL |
-| VL-01 | Partial | VideoListPage task states/actions | dialog/page/M17 — Partial | 阻断：Strong + Visual Evidence | 禁用 jsdom/假截图替代 |
+| VL-01 | Partial | VideoListPage → VideoCard task states/actions | dialog/page-recovery/M17 — Partial | 阻断：Strong + Visual Evidence；既有 recovery Judge 已锁定持久 pending/failed 粗状态文字、无 live progress 的“正在处理”与阶段细节，以及现有 progress listener callback 后的“正在处理 47%”与阶段细节 | 仅补局部 DOM Judge；AC 仍 Partial，Visual Evidence 未闭合，禁用 jsdom/假截图替代 |
 | VL-02 | Present | queryVideos → VideoListPage sort | video-list-sorting/database-videos — Strong | 无新增必需 | 同一 fixture 的 Memory 与故意无序 SQLite adapter、以及生产 VideoListPage 已锁定默认最近学习、最近学习/导入时间/名称三档和每档稳定 ID tie-breaker；不外推 Desktop、Visual、Evidence 或其他列表 AC |
 | VL-03 | Present | queryVideos → VideoListPage title search | title-query/list DOM — Strong（公开双 adapter + 生产 UI） | 无新增必需；无 Desktop 要求 | 同一 fixture 的 Memory、故意无序 SQLite public adapter 与生产页面已锁定 title-only、trim、ASCII case-insensitive、非空无匹配为空列表及清空搜索保留选定排序；不外推 AC-VL-04 或 Evidence |
 | VL-04 | Present（proof Partial） | VideoListPage 顶栏与空库 CTA 均经既有导入菜单入口；非 ready 卡进入任务详情 | local-import/dialog/empty-import-cta — Partial | 阻断：Strong + Desktop Evidence；生产空库 CTA 的具名原生按钮已锁定点击后显示既有“本地文件”“在线视频”菜单，仍不外推完整页面组合或 Desktop | 禁用 jsdom/假截图替代 |

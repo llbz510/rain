@@ -20,23 +20,33 @@ import { getVideoById, insertVideo, transitionVideoImportState } from '@/models/
 import { recordCapabilityCheck } from '@/settings/model-capabilities'
 import { runtimeModelFromPoolEntry, type ModelPoolEntry } from '@/settings/model-pool'
 import { useRainStore } from '@/store/rain-store'
+import type { Video } from '@/models/types'
 
-function failedVideo(id: string) {
+function video(id: string, overrides: Partial<Video> = {}): Video {
   return {
     id,
-    title: 'Signal',
-    source: 'local' as const,
-    filePath: 'D:\\signal.mp4',
+    title: id,
+    source: 'local',
+    filePath: `D:\\${id}.mp4`,
     thumbnail: '',
     duration: 120,
     language: '',
-    status: 'failed' as const,
-    stage: 'asr' as const,
-    errorMessage: '上次导入失败',
+    status: 'pending',
     createdAt: 1,
     position: 0,
     lastStudiedAt: 1,
+    ...overrides,
   }
+}
+
+function failedVideo(id: string) {
+  return video(id, {
+    title: 'Signal',
+    filePath: 'D:\\signal.mp4',
+    status: 'failed',
+    stage: 'asr',
+    errorMessage: '上次导入失败',
+  })
 }
 
 beforeEach(() => {
@@ -103,6 +113,58 @@ async function openTaskDialog(videoId: string) {
 }
 
 describe('VideoListPage import recovery UI', () => {
+  it('renders persisted task badges and applies the live processing percentage from the existing progress listener', async () => {
+    const db = await getDb()
+    await insertVideo(db, video('pending-card', { title: '待处理课程' }))
+    await insertVideo(db, video('failed-card', {
+      title: '失败课程',
+      status: 'failed',
+      stage: 'asr',
+      errorMessage: '上次导入失败',
+    }))
+    await insertVideo(db, video('persisted-processing-card', {
+      title: '处理中断后课程',
+      status: 'processing',
+      stage: 'asr',
+    }))
+    await insertVideo(db, video('progress-card', {
+      title: '实时进度课程',
+      status: 'failed',
+      stage: 'asr',
+      errorMessage: '可重试的旧错误',
+    }))
+    configureRunnableSettings()
+    runPipeline.mockImplementation(() => new Promise<void>(() => undefined))
+
+    render(<VideoListPage />)
+
+    expect(await screen.findByTestId('badge-pending-card')).toHaveTextContent('排队中')
+    expect(screen.getByTestId('badge-failed-card')).toHaveTextContent('失败')
+    expect(screen.getByTestId('import-status-failed-card')).toHaveTextContent('上次导入失败')
+    expect(screen.getByTestId('badge-persisted-processing-card')).toHaveTextContent('正在处理')
+    expect(screen.getByTestId('import-status-persisted-processing-card')).toHaveTextContent('Whisper 转写 · 10%')
+
+    const progressCard = screen.getByTestId('card-progress-card')
+    fireEvent.click(within(progressCard).getByRole('button', { name: '查看导入任务：实时进度课程' }))
+    const dialog = await screen.findByRole('dialog', { name: '实时进度课程导入任务' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
+    await waitFor(() => expect(runPipeline).toHaveBeenCalledOnce())
+
+    act(() => progressCallback?.({
+      videoId: 'progress-card',
+      stage: 'asr_transcription',
+      blockCurrent: 0,
+      blockTotal: 0,
+      percent: 47,
+      retrying: false,
+    }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('badge-progress-card')).toHaveTextContent('正在处理 47%')
+      expect(screen.getByTestId('import-status-progress-card')).toHaveTextContent('Whisper 转写 · 47%')
+    })
+  })
+
   it('updates the card and dialog percentage from a desktop progress event after explicit retry', async () => {
     const db = await getDb()
     await insertVideo(db, failedVideo('progress-video'))
