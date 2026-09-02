@@ -79,7 +79,7 @@ export function buildCardDisplay(video: Video): CardDisplay {
 
   let statusBadge: StatusBadge | undefined
   if (video.status === 'processing') {
-    statusBadge = { type: 'processing', label: '处理中' }
+    statusBadge = { type: 'processing', label: '正在处理' }
   } else if (video.status === 'failed') {
     statusBadge = { type: 'failed', label: '失败' }
   } else if (video.status === 'pending') {

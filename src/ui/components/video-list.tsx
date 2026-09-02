@@ -33,6 +33,9 @@ export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInf
   const primaryActionName = cardAction === 'openVideo'
     ? `打开视频：${video.title}`
     : `查看导入任务：${video.title}`
+  const statusBadgeText = display.statusBadge?.type === 'processing' && importProgressPercent !== undefined
+    ? `${display.statusBadge.label} ${importProgressPercent}%`
+    : display.statusBadge?.label
 
   const handleClick = () => {
     if (deleting) return
@@ -82,7 +85,7 @@ export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInf
       <div>{display.durationText}</div>
       <div>{display.progressPercent}%</div>
       {display.isComplete && <span>✓</span>}
-      {display.statusBadge && <span data-testid={`badge-${video.id}`} data-status={display.statusBadge.type} />}
+      {display.statusBadge && <span data-testid={`badge-${video.id}`} data-status={display.statusBadge.type}>{statusBadgeText}</span>}
       {importStatus && (
         <div data-testid={`import-status-${video.id}`}>
           <div>{importStatus.stageLabel} · {importStatus.percent}%</div>
