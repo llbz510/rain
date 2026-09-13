@@ -13,9 +13,10 @@ Primary checkout: current Git worktree. Active control documents and runnable sc
 
 ## Current verified baseline
 
-受保护 `origin/master` 是 `fbd93147bf646ee30766f7830552523ee8baa378`（PR #63 merge commit）。
+受保护 `origin/master` 是 `4ed97fb10692c965cb85074470c7342ea76902f4`（PR #64 merge commit）。
 
-- PR #63 的 `Clean Windows Harness` run [`33531938489`](https://github.com/llbz510/rain/actions/runs/33531938489) 为 `success`，自动 `master` push Harness run [`33533105726`](https://github.com/llbz510/rain/actions/runs/33533105726) 为 `success`。
+- PR #64 较早的自动 `Clean Windows Harness` run [`33611218222`](https://github.com/llbz510/rain/actions/runs/33611218222) 曾因 user-paused Release 范围的 NVIDIA evidence fixture 默认 5000ms timeout 而未形成完整 GREEN；它不证明 Harness 稳定性或本 Slice。最终 PR `Clean Windows Harness` run [`33612012707`](https://github.com/llbz510/rain/actions/runs/33612012707)（job `100189125588`，2026-09-02 09:03–09:14 UTC）为 `success`。
+- 目标 `master` push 的 `Clean Windows Harness` run [`33613088916`](https://github.com/llbz510/rain/actions/runs/33613088916) 已 `success`：首次尝试在环境安装 FFmpeg 的 Chocolatey 504 失败，用户只授权一次 manual rerun，第二次成功。
 
 这些成功只证明各自目标提交在干净 Hosted Windows 上通过默认 Harness；不替代真实桌面、GPU、模型、安装器或 Release Evidence。
 
@@ -35,7 +36,7 @@ M3/GPU/Release Evidence、受控 GPU artifact build、安装器、签名、许�
 
 - 所有未关闭的 Required Evidence 仍是 blocker，除非对应 audit 行明确标为无新要求、supplement-only 或条件未来重放；测试存在不等于功能或 Evidence 已完成。
 - `AC-RL-08` 仍是 `Partial`：现有 adapter/静态合同不构成目标安装器、受支持 NVIDIA 主机、模型和真实运行的 Release Evidence。该工作已 user-paused。
-- `AC-VL-05/06` 的 app-owned 缩略图删除与孤儿 GC 仍缺真实文件/SQLite Judge；`AC-AR-05/06` 的 app-scope import owner 与判别式 progress contract 仍是独立架构缺口。具体生产路径、现状和优先级以 Launch audit 为准。
+- `AC-VL-05` 的 app-owned 缩略图删除已在当前未合并目标分支得到本地 Strong Judge；`AC-VL-06` 孤儿 GC、`AC-AR-05/06` 的 app-scope import owner 与判别式 progress contract 仍是独立缺口。具体生产路径、现状和优先级以 Launch audit 为准。
 - whole-repo `cargo fmt` 不能作为干净门禁：既有/locked Rust 差异会污染结果；新 Rust 文件仍必须使用 file-scoped `rustfmt`。
 - `core.autocrlf` 可能造成 `Cargo.toml` ghost diff；是否真实变更必须以 `git diff` 判断。
 - 本地可信 WebView 的前端 SQL plugin 需要 `sql:allow-execute`；若将来加载远程不可信内容，必须先重新收紧该 capability。
@@ -44,4 +45,4 @@ M3/GPU/Release Evidence、受控 GPU artifact build、安装器、签名、许�
 
 修改项目文件的会话必须同步本快照，但只能替换已过期的当前事实和本节交接，不得新增按日期的会话段落或 `## What changed` 时间线。每次交接保留一个可验证的当前 Slice：AC、Owner、公开 Judge、RED/GREEN、独立审查结果、未运行 Evidence、下一唯一动作；历史细节由 commit/PR 记录承载。
 
-当前 Slice 是已获用户明确授权的 `AC-VL-01` 单一局部缺口：生产 `VideoListPage → VideoCard` 必须让非 ready 卡片的粗状态徽章显示可读文字。持久 `pending` 显示“排队中”；持久 `failed` 显示“失败”并保留既有错误；无 live progress 的持久 `processing` 显示“正在处理”，有现有 progress listener 的真实 callback 后显示“正在处理 47%”，两者均保留既有阶段细节。Owner 是 `src/ui/components/video-list.tsx`；`src/ui/video-list.ts` 是 processing 基础文案的唯一事实，组件只从该 label 追加 live percent。公开 Judge 已合并入既有非锁定 `src/__tests__/video-list-page-recovery.test.tsx`，复用生产页面、公共内存数据库、progress listener、Pipeline mock 与设置 setup；删除独立的 status-badges 文件，减少一个 jsdom 测试文件/worker，但不宣称它必然修复 Hosted 抖动。PR #64 的第三次自动 `Clean Windows Harness` run `33611218222` 针对 head `f0537bc`：控制面与绝大多数前端通过，104 个 test files 中 102 passed / 1 skipped / 1 failed，769 tests 中 767 passed / 1 skipped / 1 failed；本 Slice recovery Judge、locked M17 component 及相关 video-list tests 均通过。唯一失败是用户暂停 Release 范围的 `scripts/nvidia-release-evidence.test.ts:1597`，用例 `binds runner control tooling to a clean canonical Git checkout, including untracked files` 触发默认 5000ms timeout。fixture 合并已将本轮负担降至 104 个文件，但未消除 Hosted I/O timeout，也不宣称修复。没有完整 GREEN、未 merge、未手动 rerun。该 Slice 不新增卡内 retry/cancel，不改 `ImportTaskDialog`、Pipeline 或进度协议，也不外推完整 `AC-VL-01`、`AC-UX-06` 或 Visual Evidence。合并后的 recovery Judge、locked M17 Harness 与相关视频列表回归、`npm.cmd exec -- tsc --noEmit`、`npm.cmd run build`、`npm.cmd run harness:control` 和 `git diff --check` 均已 GREEN。fixture/Judge 合并后的最终独立 Spec 与 Standards 双审均为 FINAL PASS，P0/P1/P2=0。完整 `npm test` 与 `harness:check` 仅本地未运行，Cargo/Rust、真实 Desktop、Visual Evidence、安装器、GPU、模型与 LLM 均未运行。`AC-VL-01` 仍为 Partial，Visual Evidence 未闭合；下一唯一动作是本次必要当前事实文档经双审后，将 amend head force-with-lease 推送到现有 PR #64，并仅等待正常自动 `Clean Windows Harness`。若同类无关 timeout 再失败则停止，不通过 no-op 或文档 churn 继续触发；需用户授权 manual rerun 或 Release/Harness 稳定化 Slice。成功前不合并、不手动 rerun/no-op，成功后合并并确认 master-push Harness。
+当前 Slice 是已获用户明确授权的 `AC-VL-05`：已知 Video 的数据库删除提交后，只删除由合法 ID 推导的 `app-data/thumbnails/<videoId>.jpg`，绝不接收任意缩略图路径或删除用户源媒体。Owner 是 Rust `thumbnail_lifecycle` deep module，它复用 `video_deletion` SQLite transaction；`delete_video_atomically` 仅解析 app-data 并调用该生产 seam。公开 Judge 是相邻非锁定 Rust `thumbnail_lifecycle_tests`，以真实内存 SQLite 和隔离真实文件系统覆盖级联成功、非法/path-like ID 在 commit 前拒绝、缺失目标幂等、真实目录删除失败后 Video 已缺失时受控重试、源/任意文件保持，以及 Windows 真实 junction 逃逸拒绝。Windows 路径在 blocking task 中打开目标句柄、核验其最终解析路径精确属于 resolved app-data，再通过同一句柄删除；reparse/directory 拒绝且 `FILE_DISPOSITION_INFO` 的一字节 ABI 由编译期断言锁定。RED 依次为缺少 lifecycle seam、真实 junction escape 会沿外部路径返回成功、以及 disposition ABI 从 4 字节而非 1 字节；最终 `thumbnail_lifecycle_tests` 5/5、`video_deletion::tests` 3/3、`npm.cmd run harness:control`、file-scoped `rustfmt` 与 `git diff --check` 均 GREEN。独立 Spec 与 Standards 双审均为 FINAL PASS，P0/P1/P2=0。本地结论为 AC-VL-05 Strong，不外推 Desktop、Visual、GPU、安装器、模型、LLM 或 Release Evidence；当前 worktree 未安装 `node_modules`，故 TypeScript/前端筛选未运行，现有真实媒体 thumbnail storage test 受本机 FFmpeg 缺失阻断，完整 Harness 也未本地运行。此未合并 target 的下一动作是创建受保护 PR 并等待自动 `Clean Windows Harness`；成功后合并，再以 `AC-VL-06` orphan GC 作为下一独立最小 Slice。

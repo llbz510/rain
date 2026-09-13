@@ -12,8 +12,8 @@ use crate::note_persistence::{self, PersistedNote};
 use crate::scheduler::ImportScheduler;
 use crate::settings_persistence::{self, SettingMutation};
 use crate::structure_persistence::{self, PersistedNode, SentenceAssignment};
+use crate::thumbnail_lifecycle;
 use crate::thumbnail_storage;
-use crate::video_deletion;
 use crate::whisper::WhisperModelSize;
 use crate::whisper_model_download::{self, ModelDownloadManager};
 use crate::ytdlp;
@@ -220,12 +220,20 @@ pub async fn insert_note_atomically(app: AppHandle, note: PersistedNote) -> Resu
 pub async fn delete_video_atomically(app: AppHandle, video_id: String) -> Result<(), String> {
     use sqlx::{Connection, SqliteConnection};
     let database_path = rain_database_path(&app)?;
+    let app_data_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve app data dir: {error}"))?;
     let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
         .await
         .map_err(|error| format!("Open Rain database: {error}"))?;
-    video_deletion::delete_video_atomically_on_connection(&mut connection, &video_id)
-        .await
-        .map_err(|error| format!("Delete video atomically: {error}"))
+    thumbnail_lifecycle::delete_video_and_thumbnail_on_connection(
+        &mut connection,
+        &app_data_root,
+        &video_id,
+    )
+    .await
+    .map_err(|error| format!("Delete video atomically: {error}"))
 }
 
 #[tauri::command]

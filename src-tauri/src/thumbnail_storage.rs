@@ -30,11 +30,9 @@ pub(crate) fn cleanup_after_generation_failure(
     }
 }
 
-pub fn generate_thumbnail(
+pub(crate) fn thumbnail_path_for_video_id(
     app_data_root: &Path,
     video_id: &str,
-    source_path: &Path,
-    timestamp: f64,
 ) -> Result<PathBuf, ThumbnailStorageError> {
     if video_id.is_empty()
         || video_id.len() > 128
@@ -46,10 +44,24 @@ pub fn generate_thumbnail(
             "video ID must contain only ASCII letters, digits, '-' or '_'".to_string(),
         ));
     }
-    let thumbnail_directory = app_data_root.join("thumbnails");
+
+    Ok(app_data_root
+        .join("thumbnails")
+        .join(format!("{video_id}.jpg")))
+}
+
+pub fn generate_thumbnail(
+    app_data_root: &Path,
+    video_id: &str,
+    source_path: &Path,
+    timestamp: f64,
+) -> Result<PathBuf, ThumbnailStorageError> {
+    let output_path = thumbnail_path_for_video_id(app_data_root, video_id)?;
+    let thumbnail_directory = output_path
+        .parent()
+        .expect("validated thumbnail path has a parent");
     std::fs::create_dir_all(&thumbnail_directory)
         .map_err(|error| ThumbnailStorageError(format!("create thumbnail directory: {error}")))?;
-    let output_path = thumbnail_directory.join(format!("{video_id}.jpg"));
     let partial_path =
         thumbnail_directory.join(format!(".{video_id}.{}.partial.jpg", uuid::Uuid::new_v4()));
     let generation = ffmpeg::extract_frame(

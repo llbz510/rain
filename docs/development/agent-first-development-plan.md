@@ -156,16 +156,16 @@ npm run harness:control
 
 ### P2 — 为应用所有缩略图建立删除与孤儿 GC 产品合同
 
-状态：`Confirmed AC / implementation Gap`；对应 `DEC-PRD-060` 与 `AC-VL-05/06`，不得把既有数据库级联删除冒充派生文件生命周期完成。
+状态：`AC-VL-05 implemented / locally Strong on current target；AC-VL-06 implementation Gap`；对应 `DEC-PRD-060` 与 `AC-VL-05/06`。当前 target 的 production lifecycle、真实 SQLite/文件 Judge 与独立审查已收口 AC-VL-05，但尚未进入受保护 PR 或合并，不得把此本地结论外推为 `AC-VL-06`、Desktop、Visual、安装器或 Release Evidence。
 
-第一个原子 Slice 只实现 `AC-VL-05` 的已知 Video 缩略图删除合同；已确认边界包括：
+第一个原子 Slice 已在当前 target 实现 `AC-VL-05` 的已知 Video 缩略图删除合同；已确认边界包括：
 
 - 数据库提交后才删除已知 app-owned 缩略图；文件失败不得伪装成功，必须可见并允许受控重试；
 - 只允许删除 app-data `thumbnails/` 中由合法 Video ID 推导的路径，拒绝任意路径和用户源媒体；
 - 删除与 GC 共享一个 Rust thumbnail lifecycle 深模块，前端不拼接文件路径或补偿步骤；
 - orphan keep-set、并发新建、幂等、部分失败和有界运行留给独立 `AC-VL-06` Slice。
 
-随后以独立 `AC-VL-06` Slice 处理孤儿扫描与 GC。两个 Slice 都需要真实隔离文件系统 Judge；内存数据库或组件文案不能证明文件生命周期。
+下一独立 `AC-VL-06` Slice 处理孤儿扫描与 GC；它仍需要真实隔离文件系统 Judge，内存数据库或组件文案不能证明文件生命周期。
 
 ### P3 — 在扩展导入导航前关闭 risk 22 的两个架构债
 

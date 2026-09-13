@@ -74,7 +74,7 @@
 | VL-02 | Present | queryVideos → VideoListPage sort | video-list-sorting/database-videos — Strong | 无新增必需 | 同一 fixture 的 Memory 与故意无序 SQLite adapter、以及生产 VideoListPage 已锁定默认最近学习、最近学习/导入时间/名称三档和每档稳定 ID tie-breaker；不外推 Desktop、Visual、Evidence 或其他列表 AC |
 | VL-03 | Present | queryVideos → VideoListPage title search | title-query/list DOM — Strong（公开双 adapter + 生产 UI） | 无新增必需；无 Desktop 要求 | 同一 fixture 的 Memory、故意无序 SQLite public adapter 与生产页面已锁定 title-only、trim、ASCII case-insensitive、非空无匹配为空列表及清空搜索保留选定排序；不外推 AC-VL-04 或 Evidence |
 | VL-04 | Present（proof Partial） | VideoListPage 顶栏与空库 CTA 均经既有导入菜单入口；非 ready 卡进入任务详情 | local-import/dialog/empty-import-cta — Partial | 阻断：Strong + Desktop Evidence；生产空库 CTA 的具名原生按钮已锁定点击后显示既有“本地文件”“在线视频”菜单，仍不外推完整页面组合或 Desktop | 禁用 jsdom/假截图替代 |
-| VL-05 | Partial | database delete/Rust delete | deletion/Rust — Partial | 阻断：隔离真实文件系统 + 真实 SQLite | 建立生产文件生命周期 Judge |
+| VL-05 | Present | `thumbnail_lifecycle` → existing video deletion transaction → controlled thumbnail handle delete | Rust lifecycle/SQLite/real filesystem — Strong | 无新增必需；桌面仅可作补强 | 只删合法 ID 推导的 app-owned target；提交后文件失败可见并可重试，Windows junction/reparse fail-closed |
 | VL-06 | Absent | 无 app-owned thumbnail GC | 无 — Gap | 阻断：keep-set/path/concurrency/file Evidence | 实现该 Confirmed Slice/建立生产 Judge |
 | VL-07 | Partial | VideoCard thumbnail rendering | M17/thumbnail UI — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |
 | SU-01 | Partial | StudyInterface → CatalogBar 两行目录；播放时 CatalogBar follow；按真实滚动几何的边缘渐隐 | M05/navigation/playback — Partial | 阻断：Strong + Desktop Evidence；生产 DOM Judge 已覆盖章节/小节顶行、段落底行的横向不换行与公开点击到 Store `playPosition`，真实 media 播放/恢复时以 `inline: 'center'` 将两行当前项定位，子小节在相同时间边界确定性优先于父章节；暂停时先由 media 到 10、再经公开目录 seek 到 0，两个位置变化都不强制滚动，缺失浏览器 scroll API 不抛。受控长目录 DOM 几何 Judge 还覆盖两个真 scroll owner 的非交互/`aria-hidden`、`--color-bg` 方向渐变：中段双侧显示，0.5px epsilon 端点归一化，以及初始、节点变更、scroll、resize、端点/无溢出更新；播放位置每帧变化不重测或重绑。它不是长目录真实桌面可见性或视觉 Evidence，二者仍缺 | 禁用 jsdom/假截图替代 |
@@ -104,7 +104,7 @@
 ## Proof closure / blocker ledger
 
 - `LV/ST`：带 Historical Evidence/current-target Gap 的行仍被精确目标 Evidence 阻断：`LV-03/05/07/08/09/11/12`、`ST-01/07`；此外 `LV-21` 的目标 NVIDIA Release Evidence Gap 也是 blocker（当前 user-paused）。`LV-01/04/10` 已 Strong，桌面/SQLite/真实事件仅为非阻断补强；不能用 jsdom、旧包或假截图替代真正 Required Evidence。
-- `VL`：阻断 Desktop/Visual 的只有 `VL-01`（Visual）、`VL-04`（Desktop）与 `VL-07`（Desktop/Visual）。`VL-02` 已由 Strong 的双 adapter 与生产 UI Judge 覆盖，无 Desktop 要求；`VL-03` 仍只需 Strong 的双 adapter 与生产 UI Judge，不需 Desktop；`VL-05` 需隔离真实文件系统与真实 SQLite，`VL-06` 需实现其 Confirmed Slice/生产 Judge。
+- `VL`：阻断 Desktop/Visual 的只有 `VL-01`（Visual）、`VL-04`（Desktop）与 `VL-07`（Desktop/Visual）。`VL-02` 已由 Strong 的双 adapter 与生产 UI Judge 覆盖，无 Desktop 要求；`VL-03` 仍只需 Strong 的双 adapter 与生产 UI Judge，不需 Desktop；`VL-05` 已由生产 lifecycle 的隔离真实文件系统与真实 SQLite Judge 覆盖，`VL-06` 仍需实现其 Confirmed Slice/生产 Judge。
 - `SU/UX`：Desktop/Visual blocker 仅为 `SU-01`（Desktop）、`SU-02`（Desktop/Visual）、`SU-03`（Desktop）、`SU-04`（Desktop）、`SU-05`（Desktop/Visual）、`SU-06`（Desktop/Visual）、`UX-01/02/04`（Visual）、`UX-03`（Visual/Accessibility）、`UX-05/06`（Desktop/Accessibility）。`UX-06` 已有 VideoCard 局部生产键盘/名称 Judge，但其余 Launch 主操作、可见焦点、非纯颜色状态、axe、AA 与 Desktop Evidence 仍阻断。`SU-07` 只需 Strong，不要求 Desktop；截图只能作附件，不能单独裁判。
 - `HE`：`HE-05` 只能由改变该桌面边界后的目标提交 workflow_dispatch 重放；本 Slice 不 dispatch。
 - `PF`：每条都缺冻结主机、fixture、样本/p95 或 soak Evidence，不能由开发机感觉代替。

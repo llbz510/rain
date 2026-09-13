@@ -212,7 +212,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 - 在线 URL 的受控本地媒体交接已进入 `AC-LV-17`：Controller 拥有可追踪记录、失败/取消/重试和 Pipeline 交接，Rust `ytdlp` module 拥有可取消探测/下载、进度、临时目录和最终提交，页面只保留输入适配。真实站点差异与完整外网 Evidence 仍是独立 Gap。
 - 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。`ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash`（结构化、文本助手）已有 schema v2 Evidence；下一个模型配置仍须独立探针和完整 E2E，不得继承这个 `Verified` 结论。
-- 本地缩略图创建、持久化和卡片渲染由 `AC-LV-18` 控制；应用所有缩略图随 Video 删除及孤儿 GC 已由 `AC-VL-05/06` 冻结语义，但对应 Rust lifecycle module、生产接线和真实文件/SQLite Judge 仍为 Gap。
+- 本地缩略图创建、持久化和卡片渲染由 `AC-LV-18` 控制；`AC-VL-05` 已由 Rust `thumbnail_lifecycle` 生产 owner 接到既有 Video 删除 transaction，使用合法 ID 派生唯一 app-owned path、提交后受控文件副作用和真实文件/SQLite Judge；`AC-VL-06` orphan GC 仍是独立 Gap。
 
 ## 8. Harness Migration 结果
 
@@ -248,7 +248,8 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | --- | --- | --- |
 | `AC-RL-01..20` | Tauri release config、GPU overlay/bundle、installer lifecycle、数据库 migration deep command、artifact/Evidence validator、人类 release/legal/security owner | 主程序保持 CPU-safe；CUDA 只在隔离 worker；安装/升级/卸载/签名/发布/回滚各自独立裁判，页面或 AI 不拥有私钥和法律批准 |
 | `AC-VL-01..04/07` | `VideoListPage` composition、`VideoCard`、公共 Database video query interface | 页面组合查询与动作，不复制排序/搜索/持久化规则；视觉与业务行为分层裁判 |
-| `AC-VL-05/06` | 新的 Rust thumbnail lifecycle deep module + 现有数据库删除 workflow | 只处理 app-owned `thumbnails/`；数据库 commit、keep-set 和真实文件副作用由深 module 协调，永不接受任意用户路径 |
+| `AC-VL-05` | Rust `thumbnail_lifecycle` deep module + 现有数据库删除 workflow | 只处理合法 ID 推导的 app-owned `thumbnails/` target；先 commit、后由 blocking handle-based filesystem owner 删除，Windows 必须核验 opened target 的 resolved path，永不接受任意用户路径 |
+| `AC-VL-06` | 同一 Rust thumbnail lifecycle deep module + keep-set/GC workflow | orphan keep-set、并发与受控 GC 仍未实现；复用 path validation，不得把扫描放回页面或 command adapter |
 | `AC-SU-01..07` | `StudyInterface` composition、`src/study/` navigation/session、catalog、VideoZone、shortcut/focus policy、layout persistence | 页面保持组合入口；播放/选择/预览/面板焦点使用共享事实，不在组件间复制快捷键或持久状态 |
 | `AC-UX-01..06` | `src/index.css` token system、生产组件、visual/accessibility policy | CSS token 是唯一视觉事实源；完整页面 visual/keyboard/axe/contrast Judge 不由 token 存在自证 |
 | `AC-PF-01..05` | 独立 performance/soak runners + 对应 startup/List/Study/progress/App lifecycle Owner | runner 只测量，不成为生产 Owner；冻结机器、fixture、样本数、p95、资源斜率和退出残留必须写入 Evidence |
