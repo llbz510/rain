@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 const repoRoot = join(__dirname, '..')
 const modulePath = join(repoRoot, 'scripts', 'controlled-candidate-source.psm1')
@@ -43,6 +43,30 @@ function candidateFixture(root: string) {
   return candidate
 }
 
+// 显式时限：该用例要驱动真实 git + 真实 PowerShell 契约（实测本机 1.2s / 托管 8.1s 触顶超时），
+// 5000ms 默认值对「多进程真实重活」只有约 1×余量；这里按托管实测给出 20s（约 2.5×余量）。
+// 它只用于这一个用例，不是全文件放宽，也没有改动任何断言。
+const MULTI_PROCESS_INVOCATION_TIMEOUT_MS = 20_000
+
+// 基准夹具：每个用例原本各自 git init/add/commit 造一遍候选仓库（每例 5 次 git 进程启动），
+// 这是本文件最贵且完全重复的准备。这里只建一次，用例内用文件系统复制得到各自独立的仓库，
+// 用例断言与隔离性不变（每个用例仍然操作自己的副本，互不影响）。
+let baseCandidateRoot: string
+let baseCandidateFixturePath: string
+
+beforeAll(() => {
+  baseCandidateRoot = mkdtempSync(join(tmpdir(), 'rain-controlled-candidate-source-base-'))
+  baseCandidateFixturePath = candidateFixture(baseCandidateRoot)
+})
+
+afterAll(() => { rmSync(baseCandidateRoot, { recursive: true, force: true }) })
+
+function newCandidateFixture(root: string) {
+  const candidate = join(root, 'canonical-candidate')
+  cpSync(baseCandidateFixturePath, candidate, { recursive: true })
+  return candidate
+}
+
 afterEach(() => { for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('controlled candidate source module', () => {
@@ -73,7 +97,7 @@ describe('controlled candidate source module', () => {
 
   it('exports only exact tracked files into a pure child and leaves the canonical repository byte-for-byte untouched', () => {
     const root = newRoot()
-    const candidate = candidateFixture(root)
+    const candidate = newCandidateFixture(root)
     const ownedParent = join(root, 'runner-temp')
     mkdirSync(ownedParent)
     const commit = runGit(candidate, ['rev-parse', 'HEAD'])
@@ -97,11 +121,11 @@ describe('controlled candidate source module', () => {
     expect(readFileSync(join(candidate, 'node_modules', 'untracked.js'), 'utf8')).toBe('untracked dependency')
     expect(readFileSync(join(candidate, 'src-tauri', 'target', 'untracked.bin'), 'utf8')).toBe('untracked build output')
     expect(readFileSync(join(candidate, 'untracked.txt'), 'utf8')).toBe('untracked source residue')
-  })
+  }, MULTI_PROCESS_INVOCATION_TIMEOUT_MS)
 
   it('fails closed when a later consumer presents the wrong token, owner, or source child', () => {
     const root = newRoot()
-    const candidate = candidateFixture(root)
+    const candidate = newCandidateFixture(root)
     const ownedParent = join(root, 'runner-temp')
     mkdirSync(ownedParent)
     const commit = runGit(candidate, ['rev-parse', 'HEAD'])
@@ -122,7 +146,7 @@ describe('controlled candidate source module', () => {
 
   it('removes the owned root and reservation after a git failure without changing the canonical repository', () => {
     const root = newRoot()
-    const candidate = candidateFixture(root)
+    const candidate = newCandidateFixture(root)
     const ownedParent = join(root, 'runner-temp')
     mkdirSync(ownedParent)
     const commit = runGit(candidate, ['rev-parse', 'HEAD'])
@@ -145,7 +169,7 @@ describe('controlled candidate source module', () => {
 
   it('reaches tar after a real git archive and removes the owned root and reservation on tar failure', () => {
     const root = newRoot()
-    const candidate = candidateFixture(root)
+    const candidate = newCandidateFixture(root)
     const ownedParent = join(root, 'runner-temp')
     mkdirSync(ownedParent)
     const commit = runGit(candidate, ['rev-parse', 'HEAD'])
@@ -166,7 +190,7 @@ describe('controlled candidate source module', () => {
 
   it('aggregates a primary failure with a denied owned cleanup and leaves the reservation for afterEach recovery', () => {
     const root = newRoot()
-    const candidate = candidateFixture(root)
+    const candidate = newCandidateFixture(root)
     const ownedParent = join(root, 'runner-temp')
     mkdirSync(ownedParent)
     const commit = runGit(candidate, ['rev-parse', 'HEAD'])

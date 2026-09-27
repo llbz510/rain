@@ -1033,7 +1033,10 @@ describe('controlled release artifact generator', () => {
       installRoot,
       outputRoot: join(root, 'candidate-output'),
     })).rejects.toThrow(/source-derived NSIS installer file name/i)
-  })
+    // 显式时限来自托管实测：本用例在 run 36305315752 以 “Test timed out in 5000ms” 失败（该 run 中本文件 108554ms），
+    // 原因是它必须驱动一次真实的生产生成器（PowerShell 启动 + 生产模块导入 + 真实 PE 校验），属不可避免的重活；
+    // 断言语义未变，只把上限标定为 20s（约 3×余量）。
+  }, 20_000)
 
   it('accepts an I386 NSIS bootstrapper when the installed Rain executable is AMD64', async () => {
     const root = newTemporaryRoot()
