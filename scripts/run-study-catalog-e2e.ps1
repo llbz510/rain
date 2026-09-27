@@ -222,7 +222,8 @@ function Save-WebDriverScreenshot([string]$SessionId) {
     [System.IO.File]::WriteAllBytes($screenshotPath, [Convert]::FromBase64String($payload))
     $notice = @(
       '仅附件，不构成 Visual Evidence。',
-      'AC-SU-01 的裁判是真实 WebDriver 读到的桌面 DOM 与真实操作/滚动；本目录只允许 1 张来自隔离 fixture 的截图。',
+      'AC-SU-01 的裁判是真实 WebDriver 读到的桌面 DOM 与真实操作/滚动；截图最多 1 张，且只来自隔离 fixture。',
+      '本目录还包含 success-facts.json（成功路径的判据事实；不是截图，同样不构成 Visual Evidence）。',
       'command: npm run e2e:study-catalog',
       "mediaDeclarationSeconds: $mediaDeclarationSeconds",
       "headSha: $($env:GITHUB_SHA)",
@@ -235,6 +236,67 @@ function Save-WebDriverScreenshot([string]$SessionId) {
   } catch {
     Write-Warning "Study Catalog E2E screenshot attachment unavailable: $($_.Exception.Message)"
   }
+}
+
+function Get-JudgeFactSnapshot() {
+  # SR-t52-4：成功 run 也必须可审——按固定顺序取出判据事实（没有的值就是 null，绝不造值）。
+  # 目的：使「② 的 2px 容差是否有托管实测依据」与握手等待在 GREEN run 上同样可观测。
+  return [ordered]@{
+    status = 'passed'
+    phase = 'judge-complete'
+    command = 'npm run e2e:study-catalog'
+    createdAt = [DateTimeOffset]::Now.ToString('o')
+    headSha = $env:GITHUB_SHA
+    runId = $env:GITHUB_RUN_ID
+    webView2Runtime = $env:RAIN_E2E_WEBVIEW2_VERSION
+    mediaDeclarationSeconds = $mediaDeclarationSeconds
+    mediaPath = 'isolated-run-root (not uploaded)'
+    elementRectEndpoint = $script:facts['elementRectEndpoint']
+    actionsEndpoint = $script:facts['actionsEndpoint']
+    fixtureInterfaceStatus = $script:facts['fixtureInterfaceStatus']
+    fixtureInterfaceWaitSamples = $script:facts['fixtureInterfaceWaitSamples']
+    fixtureInterfaceWaitElapsedMs = $script:facts['fixtureInterfaceWaitElapsedMs']
+    fixtureInterfaceWaitCriterion = $script:facts['fixtureInterfaceWaitCriterion']
+    fixtureStatusAfterRestart = $script:facts['fixtureStatusAfterRestart']
+    cardButtonCount = $script:facts['cardButtonCount']
+    restartWaitSamples = $script:facts['restartWaitSamples']
+    restartWaitElapsedMs = $script:facts['restartWaitElapsedMs']
+    restartWaitLastState = $script:facts['restartWaitLastState']
+    restartWaitCriterion = $script:facts['restartWaitCriterion']
+    catalogFixtureDeclaration = $script:facts['catalogFixtureDeclaration']
+    catalogExpectedItemCounts = $script:facts['catalogExpectedItemCounts']
+    structureRowExtent = $script:facts['structureRowExtent']
+    structureRowOwnerWidth = $script:facts['structureRowOwnerWidth']
+    paragraphRowExtent = $script:facts['paragraphRowExtent']
+    paragraphRowOwnerWidth = $script:facts['paragraphRowOwnerWidth']
+    wavPlayback = $script:facts['wavPlayback']
+    currentItemTargetText = $script:facts['currentItemTargetText']
+    currentItemText = $script:facts['currentItemText']
+    currentItemCenterDeltaPx = $script:facts['currentItemCenterDeltaPx']
+    currentItemCenterTolerancePx = $script:facts['currentItemCenterTolerancePx']
+    currentItemCenterSamples = $script:facts['currentItemCenterSamples']
+    pauseFollowBaselineScrollLeft = $script:facts['pauseFollowBaselineScrollLeft']
+    pauseFollowPlayAdvance = $script:facts['pauseFollowPlayAdvance']
+    pauseFollowPlayCenteredDeltaPx = $script:facts['pauseFollowPlayCenteredDeltaPx']
+    pauseFollowAfterPlayRoundTrip = $script:facts['pauseFollowAfterPlayRoundTrip']
+    note = '成功路径的判据事实（附件；不是截图，不构成 Visual Evidence）。'
+  }
+}
+
+function Save-SuccessFacts() {
+  # SR-t52-4：把成功路径的判据事实写到**成功时会上传的附件目录**（workflow 的 success 上传路径就是它）
+  # 并打进运行日志，使 GREEN run 的 ② 容差、握手等待与夹具事实都可被独立复审读取，而不是只存在于失败 summary.json。
+  $snapshot = Get-JudgeFactSnapshot
+  [System.IO.File]::WriteAllText(
+    (Join-Path $attachmentRoot 'success-facts.json'),
+    (ConvertTo-Json -InputObject $snapshot -Depth 6),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  Write-Output 'Study Catalog E2E success facts (also written to the attachment directory as success-facts.json):'
+  Write-Output ("  judge2 currentItemText={0} currentItemCenterDeltaPx={1} currentItemCenterTolerancePx={2} samples={3}" -f $snapshot['currentItemText'], $snapshot['currentItemCenterDeltaPx'], $snapshot['currentItemCenterTolerancePx'], $snapshot['currentItemCenterSamples'])
+  Write-Output ("  handshake fixtureInterfaceStatus={0} fixtureWaitSamples={1} fixtureWaitElapsedMs={2} fixtureStatusAfterRestart={3} cardButtonCount={4} restartWaitSamples={5} restartWaitElapsedMs={6} restartWaitLastState='{7}'" -f $snapshot['fixtureInterfaceStatus'], $snapshot['fixtureInterfaceWaitSamples'], $snapshot['fixtureInterfaceWaitElapsedMs'], $snapshot['fixtureStatusAfterRestart'], $snapshot['cardButtonCount'], $snapshot['restartWaitSamples'], $snapshot['restartWaitElapsedMs'], $snapshot['restartWaitLastState'])
+  Write-Output ("  rows structure={0}/{1} paragraph={2}/{3} wavPlayback={4}" -f $snapshot['structureRowExtent'], $snapshot['structureRowOwnerWidth'], $snapshot['paragraphRowExtent'], $snapshot['paragraphRowOwnerWidth'], $snapshot['wavPlayback'])
+  return $snapshot
 }
 
 # 能力探针：本段（t34）必须回答宿主是否支持 /element/{id}/rect 与 W3C /actions；
@@ -269,6 +331,7 @@ function Wait-CatalogFixtureInterface([string]$SessionId, [int]$DeadlineSeconds)
   # 读到 seeded + 2 张卡，9271305 的 run 36313834100 读到 absent + 0 张卡，同一段逻辑）。
   # 这里只做有界轮询、不做状态假设；超时后由调用方按 absent / idle / failed 三态分别报出。
   $deadline = (Get-Date).AddSeconds($DeadlineSeconds)
+  $started = Get-Date
   $samples = 0
   $status = 'absent'
   do {
@@ -281,7 +344,8 @@ return String(fixture.status || 'unknown');
     if ($status -ne 'absent') { break }
     Start-Sleep -Milliseconds 500
   } while ((Get-Date) -lt $deadline)
-  return @{ status = $status; samples = $samples }
+  # 等待耗时也是判据事实（t55/SR-t52-4）：成功与失败两侧都写入 observed。
+  return @{ status = $status; samples = $samples; elapsedMs = [int]((Get-Date) - $started).TotalMilliseconds }
 }
 
 function Assert-CatalogFixtureAvailability([string]$SessionId) {
@@ -291,6 +355,7 @@ function Assert-CatalogFixtureAvailability([string]$SessionId) {
   $status = [string]$probe.status
   $script:facts['fixtureInterfaceStatus'] = $status
   $script:facts['fixtureInterfaceWaitSamples'] = $probe.samples
+  $script:facts['fixtureInterfaceWaitElapsedMs'] = $probe.elapsedMs
   $script:facts['fixtureInterfaceWaitCriterion'] = "fixture interface published within $waitSeconds s (500ms poll)"
   # 该 fact 记录的是「生产视频列表页是否出现」，名字必须与语义一致（t34 自曝缺陷的修正）。
   $script:facts['videoListPagePresent'] = [bool](Find-WebDriverElement $SessionId $listPageSelector -AllowMissing)
@@ -801,6 +866,7 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   # 真正的失败（idle / failed / 无卡）仍必然失败。
   $restartWaitSeconds = [Math]::Min(30, $MaxSeconds)
   $restartDeadline = (Get-Date).AddSeconds($restartWaitSeconds)
+  $restartStarted = Get-Date
   $fixtureStateAfterRestart = 'absent'
   $cardButtonCountAfterRestart = 0
   $restartWaitSamples = 0
@@ -820,6 +886,9 @@ return String(fixture.status || 'unknown');
   $script:facts['fixtureStatusAfterRestart'] = $fixtureStateAfterRestart
   $script:facts['cardButtonCount'] = $cardButtonCountAfterRestart
   $script:facts['restartWaitSamples'] = $restartWaitSamples
+  $script:facts['restartWaitElapsedMs'] = [int]((Get-Date) - $restartStarted).TotalMilliseconds
+  # 超时前的最后状态（最后一条采样）也进 observed：三态诊断必须能把「未武装」与「库无夹具行」分开。
+  $script:facts['restartWaitLastState'] = "status=$fixtureStateAfterRestart cardButtonCount=$cardButtonCountAfterRestart sampleIndex=$restartWaitSamples"
   $script:facts['restartWaitCriterion'] = "fixture status known && [data-testid^='card-'] button count >= 1 within $restartWaitSeconds s (500ms poll)"
   # 诊断要求②：实际读到的卡片数与卡主操作 aria-label 原文（driver 读属性，不是 JS 替身判定）。
   $cardLabels = @()
@@ -890,6 +959,12 @@ return JSON.stringify({
   Write-Output 'Study Catalog E2E phase: judge 4 paused position changes do not force scrolling'
   Assert-PauseStopsForcedFollow $sessionId
 
+  # SR-t52-4 + 文档 §5 对齐：成功路径同样要留下证据——
+  # (a) 仅附件截图 + ATTACHMENT-NOTICE.txt（Save-WebDriverScreenshot 此前从未被调用，文档承诺的附件其实不存在）；
+  # (b) success-facts.json（判据事实：② 的实测居中差值与实际容差、握手等待的判据/采样/耗时/最后状态、
+  #     夹具 status 与卡片数、两行几何、WAV 观测），并同时打进运行日志。
+  Save-WebDriverScreenshot $sessionId
+  Save-SuccessFacts | Out-Null
   $runSucceeded = $true
   Write-Output 'Study Catalog desktop E2E passed: fixture -> restart -> study page -> WAV playback -> two-row structure -> centered follow -> fade owners -> paused no-forced-follow.'
 } catch {
