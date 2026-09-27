@@ -275,10 +275,13 @@ function Get-JudgeFactSnapshot() {
     currentItemCenterDeltaPx = $script:facts['currentItemCenterDeltaPx']
     currentItemCenterTolerancePx = $script:facts['currentItemCenterTolerancePx']
     currentItemCenterSamples = $script:facts['currentItemCenterSamples']
-    pauseFollowBaselineScrollLeft = $script:facts['pauseFollowBaselineScrollLeft']
+    pauseFollowRowBaselineAtStart = $script:facts['pauseFollowRowBaselineAtStart']
     pauseFollowPlayAdvance = $script:facts['pauseFollowPlayAdvance']
     pauseFollowPlayCenteredDeltaPx = $script:facts['pauseFollowPlayCenteredDeltaPx']
     pauseFollowAfterPlayRoundTrip = $script:facts['pauseFollowAfterPlayRoundTrip']
+    pauseFollowWitness = ($script:facts['pauseFollowWitness'] -join ' || ')
+    structureRowScrollMetrics = $script:facts['structureRowScrollMetrics']
+    paragraphRowScrollMetrics = $script:facts['paragraphRowScrollMetrics']
     note = '成功路径的判据事实（附件；不是截图，不构成 Visual Evidence）。'
   }
 }
@@ -520,6 +523,105 @@ return row ? String(row.scrollLeft) : 'absent';
 "@).ToString().Trim()
 }
 
+function Invoke-WebDriverPointerClick([string]$SessionId, [string]$ElementId) {
+  # 真实指针点击（W3C /actions pointer source）：`origin` = 目标元素、偏移 (0,0) = 该元素的 **in-view centre**。
+  # 与 element-click 端点（POST /element/{id}/click）不同，pointerMove 不做「点击前先滚入视野」，
+  # 因此不会污染滚动基线——这正是 t56 诊断出的第④项 RED 根因（run 36314741172：baseline=2072 → after=0，
+  # 目标行项 index 0 在可视框外，element-click 的预滚把它滚进视野）。
+  # 前置：目标的 in-view centre 必须已在视口内（调用方先用真实滚轮把它滚入视野），否则端点报 out of bounds。
+  Invoke-WebDriver 'Post' "/session/$SessionId/actions" @{
+    actions = @(@{
+      type = 'pointer'
+      id = 'pointer-1'
+      parameters = @{ pointerType = 'mouse' }
+      actions = @(
+        @{ type = 'pointerMove'; duration = 0; origin = @{ $elementKey = $ElementId }; x = 0; y = 0 },
+        @{ type = 'pointerDown'; button = 0 },
+        @{ type = 'pointerUp'; button = 0 }
+      )
+    })
+  } | Out-Null
+  Invoke-WebDriver 'Delete' "/session/$SessionId/actions" | Out-Null
+  Start-Sleep -Milliseconds 250
+}
+
+function Get-CatalogRowScrollMetrics([string]$SessionId, [string]$Level) {
+  # 行 owner 的滚动度量（read-only DOM 事实，不参与判决，只作痕迹与可见性解释）。
+  return [string](Invoke-WebDriverScript $SessionId @"
+const row = document.querySelector('[data-catalog-scroll-row="$Level"]');
+if (!row) return '{"present":false}';
+return JSON.stringify({ present: true, scrollLeft: row.scrollLeft, scrollWidth: row.scrollWidth, clientWidth: row.clientWidth, maximumScrollLeft: Math.max(0, row.scrollWidth - row.clientWidth) });
+"@)
+}
+
+function Get-CatalogRowItemVisibility([string]$SessionId, [string]$Level, [string]$ItemId) {
+  # 目标行项相对行 owner 可见框的可见性（全部用驱动 rect 端点读真实几何，不用 JS 几何代理）。
+  $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$Level""]"
+  $ownerRect = Get-WebDriverElementRect $SessionId $owner
+  $itemRect = Get-WebDriverElementRect $SessionId $ItemId
+  $itemLeft = [double]$itemRect.x
+  $itemRight = $itemLeft + [double]$itemRect.width
+  $ownerLeft = [double]$ownerRect.x
+  $ownerRight = $ownerLeft + [double]$ownerRect.width
+  return [ordered]@{
+    itemLeft = $itemLeft
+    itemWidth = [double]$itemRect.width
+    ownerLeft = $ownerLeft
+    ownerWidth = [double]$ownerRect.width
+    fullyInside = (($itemLeft -ge $ownerLeft) -and ($itemRight -le $ownerRight))
+  }
+}
+
+function Move-CatalogRowItemIntoView([string]$SessionId, [string]$Level, [string]$TargetText, [int]$MaxSteps) {
+  # 用**真实滚轮**（/actions wheel，origin = 行 owner）把目标行项滚入 owner 可视框：不用任何 JS 滚动，
+  # 也不用 element-click（其预滚语义会污染基线）。每步把行项中心与 owner 中心对齐（单步限 ±800px），
+  # 收敛后目标行项完整落在可见框内，才可以对它发 in-view centre 的真实指针点击。
+  $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$Level""]"
+  $steps = 0
+  $item = Find-CatalogRowItemByText $SessionId $Level $TargetText
+  if ($null -eq $item) { return @{ itemId = $null; steps = $steps; visibility = $null } }
+  $visibility = Get-CatalogRowItemVisibility $SessionId $Level $item
+  while (-not $visibility.fullyInside -and $steps -lt $MaxSteps) {
+    $ownerRect = Get-WebDriverElementRect $SessionId $owner
+    $itemRect = Get-WebDriverElementRect $SessionId $item
+    $ownerCenter = [double]$ownerRect.x + ([double]$ownerRect.width / 2)
+    $itemCenter = [double]$itemRect.x + ([double]$itemRect.width / 2)
+    $delta = [int][Math]::Round($ownerCenter - $itemCenter)
+    if ($delta -eq 0) { break }
+    if ($delta -gt 800) { $delta = 800 }
+    if ($delta -lt -800) { $delta = -800 }
+    Invoke-WebDriverWheelScroll $SessionId $owner $delta
+    $steps += 1
+    $item = Find-CatalogRowItemByText $SessionId $Level $TargetText
+    if ($null -eq $item) { return @{ itemId = $null; steps = $steps; visibility = $null } }
+    $visibility = Get-CatalogRowItemVisibility $SessionId $Level $item
+  }
+  return @{ itemId = $item; steps = $steps; visibility = $visibility }
+}
+
+function Get-StructureItemTimeWindow([string]$Text, $Declaration) {
+  # 目标行项的时间窗由夹具声明（durationSeconds / chapterCount / sectionCount）推导，不使用魔数。
+  if ($null -eq $Declaration) { return $null }
+  $duration = [double]$Declaration.durationSeconds
+  $chapters = [int]$Declaration.chapterCount
+  $sections = [int]$Declaration.sectionCount
+  if ($duration -le 0 -or $chapters -le 0 -or $sections -le 0) { return $null }
+  $chapterSpan = $duration / $chapters
+  $sectionsPerChapter = $sections / $chapters
+  if ($Text -match '^E2E 章节 (\d+)$') {
+    $index = [int]$Matches[1]
+    return @{ start = ($index - 1) * $chapterSpan; end = $index * $chapterSpan }
+  }
+  if ($Text -match '^E2E 小节 (\d+)\.(\d+)$') {
+    $chapter = [int]$Matches[1]
+    $section = [int]$Matches[2]
+    $sectionSpan = $chapterSpan / $sectionsPerChapter
+    $start = ($chapter - 1) * $chapterSpan + ($section - 1) * $sectionSpan
+    return @{ start = $start; end = $start + $sectionSpan }
+  }
+  return $null
+}
+
 function Get-CatalogRowItems([string]$SessionId, [string]$Level) {
   # 真实行项 = 两行滚动 owner 下的 <span> 子项（生产 CatalogBar.renderNode 的产物）。
   return @(Find-WebDriverElements $SessionId "[data-catalog-scroll-row=""$Level""] > span")
@@ -701,42 +803,88 @@ return JSON.stringify(fades.map((fade) => { const style = getComputedStyle(fade)
   }
 }
 
+function Invoke-PausedCatalogSeek([string]$SessionId, [string]$TargetText, [string]$FactPrefix) {
+  # 暂停态下的一次「公开目录 seek」：真实滚轮把目标行项滚入视野 → **重录两行基线** → /actions 真实指针
+  # 点击该行项 in-view centre → 断言（①）媒体 currentTime 落入该行项时间窗（排除「其实没点到/没生效」的
+  # 假通过）、（②）structure 与 paragraph **两行**的 scrollLeft 相对各自基线都不变。
+  # 为什么不用 element-click：它有 UA「点击前先滚入视野」语义（t56 诊断：run 36314741172 的
+  # baseline=2072 → after=0），会把基线污染成驱动行为而非产品行为。
+  # 双行见证的理由：生产两个 follow effect 同门控（catalog.tsx:306-328），若真的强制跟随，两行会同时被居中。
+  $declared = $null
+  try { $declared = ConvertFrom-Json ([string]$script:facts['catalogFixtureDeclaration']) } catch { $declared = $null }
+  $window = Get-StructureItemTimeWindow $TargetText $declared
+  if ($null -eq $window) {
+    Fail-Condition "第④项无法判定：行项「$TargetText」的夹具时间窗推导失败" "declaration=$($script:facts['catalogFixtureDeclaration'])"
+  }
+  $moved = Move-CatalogRowItemIntoView $SessionId 'structure' $TargetText 8
+  if ($null -eq $moved.itemId) {
+    $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+    Fail-Condition "第④项不成立：结构行找不到真实行项「$TargetText」" "rowItems=$((Get-CatalogRowItems $SessionId 'structure').Count)"
+  }
+  $script:facts["${FactPrefix}IntoView-$TargetText"] = "wheelSteps=$($moved.steps) fullyInside=$($moved.visibility.fullyInside) itemLeft=$($moved.visibility.itemLeft) itemWidth=$($moved.visibility.itemWidth) ownerLeft=$($moved.visibility.ownerLeft) ownerWidth=$($moved.visibility.ownerWidth)"
+  if (-not $moved.visibility.fullyInside) {
+    Fail-Condition "第④项前置不成立：真实滚轮未能在有界步数内把行项「$TargetText」滚入 owner 可视框（无法对其 in-view centre 发真实指针点击）" "wheelSteps=$($moved.steps) visibility=$($script:facts["${FactPrefix}IntoView-$TargetText"])"
+  }
+  # 基线在**入视野之后**重录：这才是不受任何「点击前先滚入视野」语义污染的基线。
+  $structureBaseline = Get-WebDriverRowScrollLeft $SessionId 'structure'
+  $paragraphBaseline = Get-WebDriverRowScrollLeft $SessionId 'paragraph'
+  $beforeTime = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
+  try {
+    Invoke-WebDriverPointerClick $SessionId $moved.itemId
+  } catch {
+    $script:facts['pauseFollowPointerClickError'] = Protect-DiagnosticText ([string]$_.Exception.Message)
+    Fail-Condition "第④项不成立：/actions 真实指针点击（in-view centre）未能送达行项「$TargetText」" "error=$($script:facts['pauseFollowPointerClickError'])"
+  }
+  Start-Sleep -Milliseconds 800
+  $afterTime = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
+  $structureAfter = Get-WebDriverRowScrollLeft $SessionId 'structure'
+  $paragraphAfter = Get-WebDriverRowScrollLeft $SessionId 'paragraph'
+  $itemAfter = Find-CatalogRowItemByText $SessionId 'structure' $TargetText
+  if ($null -ne $itemAfter) {
+    $visibilityAfter = Get-CatalogRowItemVisibility $SessionId 'structure' $itemAfter
+    $visibilityAfterText = "fullyInside=$($visibilityAfter.fullyInside) itemLeft=$($visibilityAfter.itemLeft)"
+  } else {
+    $visibilityAfterText = 'item-not-found-after-click'
+  }
+  $summary = "item=$TargetText currentTimeBefore=$beforeTime currentTimeAfter=$afterTime window=[$($window.start),$($window.end)) structureBaseline=$structureBaseline structureAfter=$structureAfter paragraphBaseline=$paragraphBaseline paragraphAfter=$paragraphAfter visibilityAfter={$visibilityAfterText}"
+  $script:facts["${FactPrefix}Seek-$TargetText"] = $summary
+  $script:facts['pauseFollowWitness'] = @($script:facts['pauseFollowWitness']) + @($summary)
+  # ① 时间窗：证明这次点击确实触发了公开 seek（否则「两行没动」可能只是没点到）。
+  if ($afterTime -lt ([double]$window.start - 0.1) -or $afterTime -ge ([double]$window.end + 0.1)) {
+    Fail-Condition "第④项不成立：真实指针点击后媒体 currentTime 未落入行项「$TargetText」的时间窗（seek 未生效）" "currentTime=$afterTime window=[$($window.start),$($window.end))"
+  }
+  # ② 双行见证：暂停态下两行 scrollLeft 相对各自基线都不得变化。
+  if ([double]$structureAfter -ne [double]$structureBaseline) {
+    Fail-Condition '第④项不成立：暂停后公开目录 seek 改变了结构行的 scrollLeft' "item=$TargetText baseline=$structureBaseline after=$structureAfter"
+  }
+  if ([double]$paragraphAfter -ne [double]$paragraphBaseline) {
+    Fail-Condition '第④项不成立：暂停后公开目录 seek 改变了段落行的 scrollLeft' "item=$TargetText baseline=$paragraphBaseline after=$paragraphAfter"
+  }
+  return $summary
+}
+
 function Assert-PauseStopsForcedFollow([string]$SessionId) {
-  # ④ 暂停后停止强制跟随：媒体暂停后，真实点击真实行项（生产 onClick=onSeek(startTime)）必须改变媒体位置，
-  # 但**不得**改变结构行 owner 的 scrollLeft。
-  # 判据来源：AC-SU-01「暂停后停止强制跟随」；生产的跟随只在 isPlaying 为真时生效（catalog.tsx:306-316），
+  # ④ 暂停后停止强制跟随：媒体暂停后，经**公开目录 seek**（真实指针点击行项 → 生产 onClick=onSeek(startTime)）
+  # 改变媒体位置，但两行滚动 owner 的 scrollLeft 都不得变化。
+  # 判据来源：AC-SU-01「暂停后停止强制跟随」；生产的跟随只在 isPlaying 为真时生效（catalog.tsx:306-328），
   # 因此旧实现里「播放 2s 而 scrollLeft 必须不变」与第②项（播放态跟随并居中）互相矛盾、永不可能同时成立，
-  # 这里改成暂停态的 seek 不变性断言，并追加一次播放态正向对照（媒体真实推进 + 当前项仍被居中），
+  # 这里保留暂停态 seek 不变性断言，并追加一次播放态正向对照（媒体真实推进 + 当前项仍被居中），
   # 只增强判据，不放宽任何断言。
+  # t56 诊断结论（本函数本轮的改动理由）：旧实现在暂停态 seek 这一步用 element-click 端点，而它有
+  # UA「点击前先滚入视野」语义（run 36314741172：baseline=2072 → after=0，目标行项 index 0 在可视框外），
+  # 会把基线污染成「驱动把被点元素滚进视野」而不是「产品跟随」。故改为：真实滚轮入视野 → 重录两行基线 →
+  # /actions 真实指针点击 in-view centre → 双行 + 时间窗断言。
   $pausedState = [string](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return String(video ? video.paused : "absent");')
   $script:facts['pauseFollowPreState'] = "paused=$pausedState"
   if ($pausedState -ne 'True') {
     Fail-Condition '第④项前置不成立：媒体不处于暂停态（裁判②结束时必须恢复暂停）' "observed=$pausedState"
   }
-  $baseline = Get-WebDriverRowScrollLeft $SessionId 'structure'
-  $script:facts['pauseFollowBaselineScrollLeft'] = $baseline
-  $pausedSeeks = @(
-    @{ Text = 'E2E 章节 1'; LowSeconds = 0.0; HighSeconds = 1.0 },
-    @{ Text = 'E2E 章节 5'; LowSeconds = 6.5; HighSeconds = 7.5 }
-  )
-  foreach ($seek in $pausedSeeks) {
-    $beforeTime = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
-    $item = Find-CatalogRowItemByText $SessionId 'structure' $seek.Text
-    if ($null -eq $item) {
-      $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
-      Fail-Condition "第④项不成立：结构行找不到真实行项「$($seek.Text)」" "rowItems=$((Get-CatalogRowItems $SessionId 'structure').Count)"
-    }
-    Invoke-WebDriverElementClick $SessionId $item
-    Start-Sleep -Milliseconds 800
-    $afterTime = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
-    $after = Get-WebDriverRowScrollLeft $SessionId 'structure'
-    $script:facts["pauseFollowSeek-$($seek.Text)"] = "currentTimeBefore=$beforeTime currentTimeAfter=$afterTime scrollLeftBefore=$baseline scrollLeftAfter=$after"
-    if ($afterTime -lt [double]$seek.LowSeconds -or $afterTime -gt [double]$seek.HighSeconds) {
-      Fail-Condition "第④项不成立：暂停态真实点击行项「$($seek.Text)」未使媒体 seek 到该节点（位置变化证据不成立）" "currentTime=$afterTime expected=[$($seek.LowSeconds),$($seek.HighSeconds)]"
-    }
-    if ([double]$after -ne [double]$baseline) {
-      Fail-Condition '第④项不成立：暂停后公开目录 seek 仍强制滚动' "item=$($seek.Text) baseline=$baseline after=$after"
-    }
+  $script:facts['structureRowScrollMetrics'] = Get-CatalogRowScrollMetrics $SessionId 'structure'
+  $script:facts['paragraphRowScrollMetrics'] = Get-CatalogRowScrollMetrics $SessionId 'paragraph'
+  $script:facts['pauseFollowRowBaselineAtStart'] = "structure=$(Get-WebDriverRowScrollLeft $SessionId 'structure') paragraph=$(Get-WebDriverRowScrollLeft $SessionId 'paragraph')"
+  $script:facts['pauseFollowWitness'] = @()
+  foreach ($targetText in @('E2E 章节 1', 'E2E 章节 5')) {
+    Invoke-PausedCatalogSeek $SessionId $targetText 'pauseFollow' | Out-Null
   }
   # 正向对照：播放态下媒体真实推进，且当前项仍被居中（与第②项同一机制，不新增语义）。
   Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="control-bar"] button')
@@ -761,20 +909,10 @@ function Assert-PauseStopsForcedFollow([string]$SessionId) {
     $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
     Fail-Condition '第④项对照不成立：播放态下当前项未被居中（与第②项同一机制失效）' "centerDeltaPx=$($centered.delta)"
   }
-  # 播放-暂停往返后再验证一次暂停态 seek 不滚动（防止「恰好在滚动极限」造成的假通过）。
-  $baselineAfterRoundTrip = Get-WebDriverRowScrollLeft $SessionId 'structure'
-  $itemAfterRoundTrip = Find-CatalogRowItemByText $SessionId 'structure' 'E2E 章节 2'
-  if ($null -eq $itemAfterRoundTrip) {
-    $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
-    Fail-Condition '第④项不成立：结构行找不到真实行项「E2E 章节 2」' "rowItems=$((Get-CatalogRowItems $SessionId 'structure').Count)"
-  }
-  Invoke-WebDriverElementClick $SessionId $itemAfterRoundTrip
-  Start-Sleep -Milliseconds 800
-  $afterRoundTrip = Get-WebDriverRowScrollLeft $SessionId 'structure'
-  $script:facts['pauseFollowAfterPlayRoundTrip'] = "baseline=$baselineAfterRoundTrip after=$afterRoundTrip"
-  if ([double]$afterRoundTrip -ne [double]$baselineAfterRoundTrip) {
-    Fail-Condition '第④项不成立：播放-暂停往返后，暂停态公开目录 seek 仍强制滚动' "baseline=$baselineAfterRoundTrip after=$afterRoundTrip"
-  }
+  # 播放-暂停往返后再验证一次暂停态 seek 不滚动（防止「恰好在滚动极限」造成的假通过）：
+  # 同样走「真实滚轮入视野 → 重录两行基线 → /actions 指针点击 in-view centre → 双行 + 时间窗断言」。
+  $roundTripSummary = Invoke-PausedCatalogSeek $SessionId 'E2E 章节 2' 'pauseFollowRoundTrip'
+  $script:facts['pauseFollowAfterPlayRoundTrip'] = $roundTripSummary
 }
 
 $tauriDriver = $null
