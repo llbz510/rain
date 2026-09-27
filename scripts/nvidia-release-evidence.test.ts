@@ -1789,9 +1789,12 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       },
     ]
 
+    // 该表逐个用例改写同一份制品夹具的 manifest：夹具只创建一次，每个用例都从原始 manifest
+    // 内容重新派生（用例隔离与断言不变），去掉原先每例重复的昂贵夹具准备。
+    const candidate = createArtifactFixture(newTemporaryRoot())
+    const pristineManifestText = readFileSync(candidate.artifactManifestPath, 'utf8')
     for (const testCase of cases) {
-      const candidate = createArtifactFixture(newTemporaryRoot())
-      const manifest = JSON.parse(readFileSync(candidate.artifactManifestPath, 'utf8'))
+      const manifest = JSON.parse(pristineManifestText)
       testCase.mutate(manifest)
       writeFileSync(candidate.artifactManifestPath, JSON.stringify(manifest))
       syncArtifactFixtureRecordManifestIdentity(candidate)
@@ -1807,7 +1810,9 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
       expect(result.status, testCase.name).toBe(1)
       expect(result.output.error, testCase.name).toContain(testCase.error)
     }
-  }, 15_000)
+    // 该表对 6 个字段缺失各做一次独立真实契约调用（6 次 PowerShell 生产调用，属不可避免的重活）：
+    // 本机实测 3015ms，托管 run 36305315752 已在此用例以 15000ms 超时失败，故按实测标定为 30s。
+  }, 30_000)
 
   it('refuses a release artifact manifest unless every forbidden-findings category is present and empty', async () => {
     const candidate = createArtifactFixture(newTemporaryRoot())
@@ -2211,7 +2216,9 @@ describe('M3-S3 NVIDIA Release Evidence runner contracts', () => {
     const quoted = await invokeContract({ operation: 'quote-process-arguments', arguments: ['--native-driver', 'C:\\Program Files\\Rain Tools\\msedgedriver.exe'] })
     assertContractSucceeded(quoted)
     expect(quoted.output.value).toBe('--native-driver "C:\\Program Files\\Rain Tools\\msedgedriver.exe"')
-  }, 15_000)
+    // 本用例在一个 test 内做 16 次独立真实契约调用（含 10 个 forbidden import 分支），是不可避免的重活：
+    // 本机实测 4646ms（≈290ms/次），托管同族实测约 2.2–2.4×，原 15000ms 上限只剩约 1.4×余量 ⇒ 按实测标定为 30s。
+  }, 30_000)
 
   it('rejects a non-empty custom install directory and owns only an empty custom directory', async () => {
     const nonEmpty = newTemporaryRoot()
