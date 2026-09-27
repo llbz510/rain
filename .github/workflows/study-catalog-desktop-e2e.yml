@@ -2,9 +2,12 @@ name: Study Catalog Desktop E2E
 
 on:
   # 该 workflow 自持 AC-SU-01 的托管桌面证据职责；功能分支上无法 workflow_dispatch，
-  # 因此必须在 pull_request 上、在被审 head 上真实运行。paths 只含代码与 Judge 文件
-  # （不含 docs/），因此仅文档改动不会重触发本 Judge——对应规则见
-  # docs/development/study-catalog-desktop-e2e.md「Hosted 触发与边界」。
+  # 因此必须在 pull_request 上、在被审 head 上真实运行。
+  # 实测更正（STD-69-14）：`pull_request` 的 paths 过滤按 PR 相对基线的**累计 diff** 判定，而不是按本次
+  # push 的 diff——所以只改 docs/** 的提交同样会触发本 workflow，并因 concurrency 取消同 ref 的上一轮
+  # （实测：51cc9f1、1a80de5 两次 docs-only 推送都触发了三条 workflow 并各自取消上一轮）。
+  # 因此引用本 workflow 的证据前，必须先用 `git diff <旧 head> <新 head> -- <代码路径>` 证明代码树未变；
+  # 规则与实测见 docs/development/study-catalog-desktop-e2e.md「Hosted 触发与边界」。
   pull_request:
     paths:
       - '.github/workflows/study-catalog-desktop-e2e.yml'

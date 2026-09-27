@@ -262,17 +262,40 @@ function Assert-HostCapabilities([string]$SessionId) {
   $script:facts['actionsEndpoint'] = if ($actionsSupported) { 'supported' } else { 'unsupported' }
 }
 
-function Assert-CatalogFixtureAvailability([string]$SessionId) {
-  $status = [string](Invoke-WebDriverScript $SessionId @"
+function Wait-CatalogFixtureInterface([string]$SessionId, [int]$DeadlineSeconds) {
+  # STD-69-11：夹具接口由 runner 异步武装——它先 `await getDb()` + `await getVideoById()`（查询解析完成后）
+  # 才 `publishCatalogFixture(...)`（src/e2e/real-e2e-runner.tsx:809-815）。因此「生产列表页已存在」
+  # ≠「接口已武装」：立即读取会拿到 absent，并被误归因为「隔离库没有夹具行」（1a80de5 的 run 36312689535
+  # 读到 seeded + 2 张卡，9271305 的 run 36313834100 读到 absent + 0 张卡，同一段逻辑）。
+  # 这里只做有界轮询、不做状态假设；超时后由调用方按 absent / idle / failed 三态分别报出。
+  $deadline = (Get-Date).AddSeconds($DeadlineSeconds)
+  $samples = 0
+  $status = 'absent'
+  do {
+    $samples += 1
+    $status = [string](Invoke-WebDriverScript $SessionId @"
 const fixture = $fixtureInterface;
 if (!fixture || typeof fixture !== 'object') return 'absent';
 return String(fixture.status || 'unknown');
 "@)
+    if ($status -ne 'absent') { break }
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $deadline)
+  return @{ status = $status; samples = $samples }
+}
+
+function Assert-CatalogFixtureAvailability([string]$SessionId) {
+  # 首次启动的**正确**状态就是 idle（真实空库），故这里只等「接口已武装」，不要求任何特定状态。
+  $waitSeconds = [Math]::Min(30, $MaxSeconds)
+  $probe = Wait-CatalogFixtureInterface $SessionId $waitSeconds
+  $status = [string]$probe.status
   $script:facts['fixtureInterfaceStatus'] = $status
+  $script:facts['fixtureInterfaceWaitSamples'] = $probe.samples
+  $script:facts['fixtureInterfaceWaitCriterion'] = "fixture interface published within $waitSeconds s (500ms poll)"
   # 该 fact 记录的是「生产视频列表页是否出现」，名字必须与语义一致（t34 自曝缺陷的修正）。
   $script:facts['videoListPagePresent'] = [bool](Find-WebDriverElement $SessionId $listPageSelector -AllowMissing)
   if ($status -eq 'absent') {
-    Fail-Condition 'AC-SU-01 的桌面条件无法判定：学习页长目录受控夹具公开接口未建立' "interface=$fixtureInterface status=absent"
+    Fail-Condition 'AC-SU-01 的桌面条件无法判定：学习页长目录受控夹具公开接口在等待窗口内始终未武装（app 仍在启动或 runner 未进入 study-catalog 短模式）' "interface=$fixtureInterface status=absent samples=$($probe.samples)"
   }
   if ($status -eq 'failed') {
     Fail-Condition '学习页长目录受控夹具公开接口报告建立失败' "status=failed"
@@ -359,6 +382,13 @@ function Assert-CatalogTwoRowStructure([string]$SessionId) {
     $script:facts["${level}RowExtent"] = $extent
     $script:facts["${level}RowChildren"] = $items.Count
     $expectedItems = if ($level -eq 'structure') { $expectedStructureItems } else { $expectedParagraphItems }
+    # STD-69-13b：绝对下限守卫。等值断言只保证「与夹具声明一致」，声明本身若缩水就失去规模守卫；
+    # 因此另设与声明无关的绝对下限（两行都 ≥24 项）。真正的规模守卫仍是几何代理——真实横向溢出
+    # （extent > ownerWidth，托管实测为 owner 视口的 5.1×/4.9×）；行项少到一定程度该代理就不成立。
+    if ($items.Count -lt 24) {
+      $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+      Fail-Condition "长目录 $level 行规模低于绝对下限：无法构成「长目录、横向可滚动、需要边缘渐隐」" "count=$($items.Count) floor=24"
+    }
     if ($items.Count -ne $expectedItems) {
       $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
       Fail-Condition "长目录 $level 行项数与夹具声明不一致" "count=$($items.Count) expected=$expectedItems declaration=$declaration"
@@ -554,7 +584,14 @@ function Assert-FadeOwners([string]$SessionId) {
       $edgeSteps += 1
       $edgeScrollLeft = Get-WebDriverRowScrollLeft $SessionId $level
     }
-    $script:facts["${level}FadeLeftEdge"] = "wheelSteps=$edgeSteps scrollLeft=$(Get-WebDriverRowScrollLeft $SessionId $level)"
+    $edgeScrollLeftFinal = [double](Get-WebDriverRowScrollLeft $SessionId $level)
+    $script:facts["${level}FadeLeftEdge"] = "wheelSteps=$edgeSteps scrollLeft=$edgeScrollLeftFinal epsilon=0.5"
+    # STD-69-13a：显式断言「已滚回左端」。生产的「左端」定义就是 `EDGE_FADE_EPSILON = 0.5`
+    # （src/ui/components/catalog.tsx:76，:131/:132 用 `scrollLeft > EDGE_FADE_EPSILON` 决定左渐隐），
+    # 因此该断言正是左端「只右」的边界条件，不留 ≤0.5px 的假通过窗口。
+    if ($edgeScrollLeftFinal -gt 0.5) {
+      Fail-Condition "第③项前置不成立：真实滚轮未把 $level 行滚回左端（scrollLeft 超过生产 EDGE_FADE_EPSILON 0.5）" "scrollLeft=$edgeScrollLeftFinal wheelSteps=$edgeSteps"
+    }
     $leftSelector = "[data-testid=""catalog-fade-left-$level""]"
     $rightSelector = "[data-testid=""catalog-fade-right-$level""]"
     $initialLeft = Find-WebDriverElement $SessionId $leftSelector -AllowMissing
@@ -757,20 +794,48 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   $phase = 'restart-and-open-study'
   $sessionId = New-WebDriverSession $appBinary
   Wait-WebDriverCondition $sessionId 'the video list page after the desktop restart' "return Boolean(document.querySelector('$listPageSelector'));"
-  # 重启后的夹具状态（诊断要求①）：idle 表示隔离库看不到夹具行。
-  $script:facts['fixtureStatusAfterRestart'] = [string](Invoke-WebDriverScript $sessionId @"
+  # STD-69-11：runner 先 `await getDb()` + `await getVideoById()` 才发布夹具状态（runner:809-815），
+  # 列表卡也要等同一次查询渲染完，因此「重启后列表页存在」≠「夹具已武装 / 卡片已渲染」。
+  # 读取前做**有界等待**（接口状态已知 且 卡片 ≥1），超时后按 absent / idle / failed 三态分别报出，
+  # 避免把「app 还在启动（接口未武装）」误报成「隔离库没有夹具行」。不延长 $MaxSeconds、不放宽任何断言：
+  # 真正的失败（idle / failed / 无卡）仍必然失败。
+  $restartWaitSeconds = [Math]::Min(30, $MaxSeconds)
+  $restartDeadline = (Get-Date).AddSeconds($restartWaitSeconds)
+  $fixtureStateAfterRestart = 'absent'
+  $cardButtonCountAfterRestart = 0
+  $restartWaitSamples = 0
+  $cardButtons = @()
+  do {
+    $restartWaitSamples += 1
+    $fixtureStateAfterRestart = [string](Invoke-WebDriverScript $sessionId @"
 const fixture = $fixtureInterface;
-return fixture && typeof fixture === 'object' ? String(fixture.status || 'unknown') : 'absent';
+if (!fixture || typeof fixture !== 'object') return 'absent';
+return String(fixture.status || 'unknown');
 "@)
-  # 诊断要求②：实际读到的卡片数与卡主操作 aria-label 原文。
-  $cardButtons = @(Find-WebDriverElements $sessionId '[data-testid^="card-"] button')
+    $cardButtons = @(Find-WebDriverElements $sessionId '[data-testid^="card-"] button')
+    $cardButtonCountAfterRestart = $cardButtons.Count
+    if ($fixtureStateAfterRestart -in @('seeded', 'failed') -and $cardButtonCountAfterRestart -ge 1) { break }
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $restartDeadline)
+  $script:facts['fixtureStatusAfterRestart'] = $fixtureStateAfterRestart
+  $script:facts['cardButtonCount'] = $cardButtonCountAfterRestart
+  $script:facts['restartWaitSamples'] = $restartWaitSamples
+  $script:facts['restartWaitCriterion'] = "fixture status known && [data-testid^='card-'] button count >= 1 within $restartWaitSeconds s (500ms poll)"
+  # 诊断要求②：实际读到的卡片数与卡主操作 aria-label 原文（driver 读属性，不是 JS 替身判定）。
   $cardLabels = @()
   foreach ($candidate in $cardButtons) { $cardLabels += (Get-WebDriverElementAttribute $sessionId $candidate 'aria-label') }
-  $script:facts['cardButtonCount'] = $cardButtons.Count
   $script:facts['cardPrimaryActionLabels'] = $cardLabels
   Write-Output 'Study Catalog E2E phase: open the study page through the production card action'
-  if ($cardButtons.Count -lt 1) {
-    Fail-Condition '重启后生产列表页没有可点击的卡片：隔离库中的夹具视频行未呈现' "cardButtonCount=0 fixtureStatusAfterRestart=$($script:facts['fixtureStatusAfterRestart'])"
+  $restartDetail = "fixtureStatusAfterRestart=$fixtureStateAfterRestart cardButtonCount=$cardButtonCountAfterRestart waitSamples=$restartWaitSamples declaration=$($script:facts['catalogFixtureDeclaration'])"
+  switch ($fixtureStateAfterRestart) {
+    'seeded' {
+      if ($cardButtonCountAfterRestart -lt 1) {
+        Fail-Condition '重启后夹具已 seeded 但生产列表页在等待窗口内没有渲染出可点击的卡片（列表查询/渲染未在窗口内完成）' $restartDetail
+      }
+    }
+    'idle' { Fail-Condition '重启后夹具接口为 idle 且等待窗口内无可点击卡片：隔离库看不到夹具行（seed 未落库或库路径不一致）' $restartDetail }
+    'failed' { Fail-Condition '重启后夹具接口报告 failed：夹具建立失败（见 declaration 的 error）' $restartDetail }
+    default { Fail-Condition '重启后夹具接口在等待窗口内始终 absent 且无可点击卡片（app 仍在启动或 runner 未进入 study-catalog 短模式）' $restartDetail }
   }
   $cardAction = $cardButtons[0]
   $cardLabel = $cardLabels[0]
