@@ -328,34 +328,74 @@ return JSON.stringify({ present: true, currentTime: video.currentTime, readyStat
 }
 
 function Assert-CatalogTwoRowStructure([string]$SessionId) {
-  # ① 长目录两行结构 + 真实横向溢出：全部用驱动元素端点读真实几何。
+  # ① 长目录两行结构 + 真实横向溢出：几何全部用驱动元素端点读真实 DOM。
+  # 行项判据 = [data-catalog-scroll-row="<level>"] > span（生产 CatalogBar 的真实行项：只带
+  # data-catalog-current + 文本 + onClick=onSeek(startTime)，见 src/ui/components/catalog.tsx:336-346）。
+  # 旧判据 progress-indicator-*（属 SideTree，catalog.tsx:246）与 paragraph-*（属文本区）不在两行滚动区内，
+  # 命中 0 属选择器错误（t49/t50 定位），这里改为真实行项并用夹具声明交叉校验条数。
+  $declaration = [string]$script:facts['catalogFixtureDeclaration']
+  $declared = $null
+  try { $declared = ConvertFrom-Json $declaration } catch { $declared = $null }
+  if ($null -eq $declared -or $null -eq $declared.chapterCount -or $null -eq $declared.sectionCount -or $null -eq $declared.paragraphCount) {
+    $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+    Fail-Condition '两行条数无法判定：夹具声明的 chapterCount/sectionCount/paragraphCount 不完整' "declaration=$declaration"
+  }
+  $expectedStructureItems = [int]$declared.chapterCount + [int]$declared.sectionCount
+  $expectedParagraphItems = [int]$declared.paragraphCount
+  $script:facts['catalogExpectedItemCounts'] = "structure=$expectedStructureItems (chapters=$($declared.chapterCount)+sections=$($declared.sectionCount)) paragraph=$expectedParagraphItems"
   foreach ($level in @('structure', 'paragraph')) {
     Find-WebDriverElement $SessionId "[data-catalog-row=""$level""]" | Out-Null
     $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$level""]"
-    $children = @(Find-WebDriverElements $SessionId "[data-catalog-scroll-row=""$level""] > *")
-    if ($children.Count -lt 2) {
-      Fail-Condition "长目录 $level 行缺少可裁判的子项" "count=$($children.Count)"
+    $items = Get-CatalogRowItems $SessionId $level
+    if ($items.Count -lt 2) {
+      $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+      Fail-Condition "长目录 $level 行缺少可裁判的真实行项" "count=$($items.Count) selector=[data-catalog-scroll-row='$level'] > span"
     }
     $ownerRect = Get-WebDriverElementRect $SessionId $owner
-    $firstRect = Get-WebDriverElementRect $SessionId $children[0]
-    $lastRect = Get-WebDriverElementRect $SessionId $children[$children.Count - 1]
+    $firstRect = Get-WebDriverElementRect $SessionId $items[0]
+    $lastRect = Get-WebDriverElementRect $SessionId $items[$items.Count - 1]
     $extent = ([double]$lastRect.x + [double]$lastRect.width) - [double]$firstRect.x
     $script:facts["${level}RowOwnerWidth"] = $ownerRect.width
     $script:facts["${level}RowExtent"] = $extent
-    $script:facts["${level}RowChildren"] = $children.Count
+    $script:facts["${level}RowChildren"] = $items.Count
+    $expectedItems = if ($level -eq 'structure') { $expectedStructureItems } else { $expectedParagraphItems }
+    if ($items.Count -ne $expectedItems) {
+      $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+      Fail-Condition "长目录 $level 行项数与夹具声明不一致" "count=$($items.Count) expected=$expectedItems declaration=$declaration"
+    }
     if ($extent -le [double]$ownerRect.width) {
-      Fail-Condition "长目录 $level 行没有真实横向溢出（横向不换行条件不成立）" "extent=$extent ownerWidth=$($ownerRect.width) children=$($children.Count)"
+      Fail-Condition "长目录 $level 行没有真实横向溢出（横向不换行条件不成立）" "extent=$extent ownerWidth=$($ownerRect.width) items=$($items.Count)"
     }
   }
-  $structureItems = @(Find-WebDriverElements $SessionId '[data-catalog-scroll-row="structure"] [data-testid^="progress-indicator-"]')
-  $paragraphItems = @(Find-WebDriverElements $SessionId '[data-catalog-scroll-row="paragraph"] [data-testid^="paragraph-"]')
+  $structureItems = Get-CatalogRowItems $SessionId 'structure'
+  $paragraphItems = Get-CatalogRowItems $SessionId 'paragraph'
   $script:facts['structureItemCount'] = $structureItems.Count
   $script:facts['paragraphItemCount'] = $paragraphItems.Count
-  if ($structureItems.Count -lt 24) {
-    Fail-Condition '结构行（章节/小节）项目数不足' "count=$($structureItems.Count) expected>=24"
-  }
-  if ($paragraphItems.Count -lt 40) {
-    Fail-Condition '段落行项目数不足' "count=$($paragraphItems.Count) expected>=40"
+  # 行项语义 + 定标事实（来源标注）：tagName / 文本 / data-catalog-current 计数一次读齐。
+  $script:facts['catalogRowItemSemantics'] = [string](Invoke-WebDriverScript $SessionId @"
+const levels = ['structure', 'paragraph'];
+const rows = {};
+for (const level of levels) {
+  const owner = document.querySelector('[data-catalog-scroll-row="' + level + '"]');
+  const children = owner ? Array.from(owner.children) : [];
+  rows[level] = {
+    childCount: children.length,
+    spanCount: children.filter((child) => child.tagName === 'SPAN').length,
+    emptyTextCount: children.filter((child) => (child.textContent || '').trim() === '').length,
+    currentCount: children.filter((child) => child.getAttribute('data-catalog-current') === 'true').length,
+    firstText: children.length ? (children[0].textContent || '').trim().slice(0, 20) : null,
+    lastText: children.length ? (children[children.length - 1].textContent || '').trim().slice(0, 20) : null,
+  };
+}
+return JSON.stringify(rows);
+"@)
+  foreach ($level in @('structure', 'paragraph')) {
+    $semantics = $null
+    try { $semantics = (ConvertFrom-Json $script:facts['catalogRowItemSemantics']).$level } catch { $semantics = $null }
+    if ($null -eq $semantics -or [int]$semantics.childCount -ne [int]$semantics.spanCount) {
+      $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+      Fail-Condition "长目录 $level 行项不是稳定的真实行项（存在非 <span> 子节点）" "semantics=$($script:facts['catalogRowItemSemantics'])"
+    }
   }
   # 补充证据（来源标注）：computed style 只作补充，不单独判决。
   $script:facts['catalogRowComputedStyle'] = [string](Invoke-WebDriverScript $SessionId @"
@@ -385,30 +425,117 @@ return row ? String(row.scrollLeft) : 'absent';
 "@).ToString().Trim()
 }
 
-function Assert-CurrentItemCentered([string]$SessionId) {
-  # ② 当前项居中跟随：真实点击中段目录节点（公开 seek）后，用驱动几何判据断言该节点被居中。
-  $targetSelector = '[data-catalog-scroll-row="structure"] [data-testid="progress-indicator-e2e-catalog-chapter-5"]'
-  $target = Find-WebDriverElement $SessionId $targetSelector
-  Invoke-WebDriverElementClick $SessionId $target
-  # 容差依据：生产的 scrollIntoView({block:'nearest', inline:'center'}) 只做子像素对齐，
-  # 目录行无额外内边距；中段节点两侧都有滚动余量，因此中心差应接近 0。这里以 ≤2px 起判，
-  # 若托管实测更大，必须记录实测值并写明依据后再定标（禁止无依据放大）。
-  $tolerancePx = 2.0
-  $owner = Find-WebDriverElement $SessionId '[data-catalog-scroll-row="structure"]'
-  $deadline = (Get-Date).AddSeconds(5)
+function Get-CatalogRowItems([string]$SessionId, [string]$Level) {
+  # 真实行项 = 两行滚动 owner 下的 <span> 子项（生产 CatalogBar.renderNode 的产物）。
+  return @(Find-WebDriverElements $SessionId "[data-catalog-scroll-row=""$Level""] > span")
+}
+
+function Find-CatalogRowItemByText([string]$SessionId, [string]$Level, [string]$Text) {
+  foreach ($item in Get-CatalogRowItems $SessionId $Level) {
+    if ((Get-WebDriverElementText $SessionId $item).Trim() -eq $Text) { return $item }
+  }
+  return $null
+}
+
+function Get-CatalogCurrentItem([string]$SessionId, [string]$Level) {
+  $current = @(Find-WebDriverElements $SessionId "[data-catalog-scroll-row=""$Level""] > span[data-catalog-current=""true""]")
+  $script:facts["${Level}CurrentItemCount"] = $current.Count
+  if ($current.Count -ne 1) { return $null }
+  return $current[0]
+}
+
+function Get-CatalogRowItemCalibration([string]$SessionId) {
+  # 选择器/计数不成立时的定标事实（SU1-6）：一次 run 就能定标 ①②③ 的全部选择器，而不是每轮只发现一处。
+  return [string](Invoke-WebDriverScript $SessionId @"
+const levels = ['structure', 'paragraph'];
+const describe = (element) => ({
+  tagName: element.tagName,
+  testId: element.getAttribute('data-testid'),
+  current: element.getAttribute('data-catalog-current'),
+  text: (element.textContent || '').trim().slice(0, 20),
+});
+const rows = {};
+for (const level of levels) {
+  const owner = document.querySelector('[data-catalog-scroll-row="' + level + '"]');
+  rows[level] = {
+    rowPresent: Boolean(document.querySelector('[data-catalog-row="' + level + '"]')),
+    ownerPresent: Boolean(owner),
+    childCount: owner ? owner.children.length : 0,
+    items: owner ? Array.from(owner.children).slice(0, 40).map(describe) : [],
+  };
+}
+const fades = Array.from(document.querySelectorAll('[data-testid^="catalog-fade-"]')).map((fade) => ({
+  testId: fade.getAttribute('data-testid'),
+  ariaHidden: fade.getAttribute('aria-hidden'),
+}));
+return JSON.stringify({
+  rows,
+  catalogBarPresent: Boolean(document.querySelector('[data-testid="catalog-bar"]')),
+  sideTreePresent: Boolean(document.querySelector('[data-testid="side-tree"]')),
+  fadeElements: fades,
+});
+"@)
+}
+
+function Wait-CatalogCurrentItemCentered([string]$SessionId, [string]$Level, [double]$TolerancePx, [int]$DeadlineSeconds) {
+  # 当前项 = 生产自己标记的 [data-catalog-current="true"]（必须唯一）；判据是它的几何中心与行 owner 中心的差 ≤ 容差。
+  $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$Level""]"
+  $deadline = (Get-Date).AddSeconds($DeadlineSeconds)
   $delta = $null
+  $currentText = $null
+  $samples = 0
   do {
+    $samples += 1
+    $current = Get-CatalogCurrentItem $SessionId $Level
+    if ($null -ne $current) {
+      $itemRect = Get-WebDriverElementRect $SessionId $current
+      $ownerRect = Get-WebDriverElementRect $SessionId $owner
+      $itemCenter = [double]$itemRect.x + ([double]$itemRect.width / 2)
+      $ownerCenter = [double]$ownerRect.x + ([double]$ownerRect.width / 2)
+      $delta = [Math]::Abs($itemCenter - $ownerCenter)
+      $currentText = (Get-WebDriverElementText $SessionId $current).Trim()
+    }
+    if ($null -ne $delta -and [double]$delta -le $TolerancePx) { break }
     Start-Sleep -Milliseconds 250
-    $itemRect = Get-WebDriverElementRect $SessionId (Find-WebDriverElement $SessionId $targetSelector)
-    $ownerRect = Get-WebDriverElementRect $SessionId $owner
-    $itemCenter = [double]$itemRect.x + ([double]$itemRect.width / 2)
-    $ownerCenter = [double]$ownerRect.x + ([double]$ownerRect.width / 2)
-    $delta = [Math]::Abs($itemCenter - $ownerCenter)
-  } while ($delta -gt $tolerancePx -and (Get-Date) -lt $deadline)
-  $script:facts['currentItemCenterDeltaPx'] = $delta
+  } while ((Get-Date) -lt $deadline)
+  return @{ delta = $delta; currentText = $currentText; samples = $samples }
+}
+
+function Assert-CurrentItemCentered([string]$SessionId) {
+  # ② 当前项居中跟随：真实点击中段行项「E2E 章节 5」（生产 onClick=onSeek(startTime)；第 5 章起点 = 4×1.75s），
+  # 再断言生产自己的当前项标记 [data-catalog-current="true"] 被居中（跟随只在 isPlaying 为真时生效，
+  # 见 src/ui/components/catalog.tsx:306-316，因此先经真实播放按钮进入播放态）。
+  # 容差依据：生产的 scrollIntoView({block:'nearest', inline:'center'}) 只做子像素对齐，目录行无额外内边距；
+  # 2px 属待托管实测标定值：若实测更大，必须先记录实测值与依据再定标（禁止无依据放大）。
+  $tolerancePx = 2.0
+  $level = 'structure'
+  $targetText = 'E2E 章节 5'
+  $pausedBefore = [string](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return String(video ? video.paused : "absent");')
+  if ($pausedBefore -eq 'True') {
+    Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="control-bar"] button')
+    Start-Sleep -Milliseconds 500
+  }
+  $script:facts['currentItemFollowMediaState'] = 'pausedBefore=' + $pausedBefore + ' currentTime=' + [string](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return String(video ? video.currentTime : -1);')
+  $target = Find-CatalogRowItemByText $SessionId $level $targetText
+  if ($null -eq $target) {
+    $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+    Fail-Condition "第②项不成立：结构行找不到真实行项「$targetText」" "rowItems=$((Get-CatalogRowItems $SessionId $level).Count)"
+  }
+  $script:facts['currentItemTargetText'] = $targetText
+  Invoke-WebDriverElementClick $SessionId $target
+  $result = Wait-CatalogCurrentItemCentered $SessionId $level $tolerancePx 5
+  $script:facts['currentItemCenterDeltaPx'] = $result.delta
   $script:facts['currentItemCenterTolerancePx'] = $tolerancePx
-  if ($delta -gt $tolerancePx) {
-    Fail-Condition '第②项不成立：真实点击中段目录节点后当前项未被居中跟随' "centerDeltaPx=$delta tolerance=$tolerancePx"
+  $script:facts['currentItemText'] = $result.currentText
+  $script:facts['currentItemCenterSamples'] = $result.samples
+  $failed = ($null -eq $result.delta -or [double]$result.delta -gt $tolerancePx)
+  if ($failed) { $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId }
+  # 无论成败都恢复暂停态：裁判③（真实滚轮）与裁判④（暂停后不跟随）都以暂停为前提。
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="control-bar"] button')
+  Start-Sleep -Milliseconds 300
+  $script:facts['currentItemFollowPausedAfter'] = [string](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return String(video ? video.paused : "absent");')
+  if ($failed) {
+    Fail-Condition '第②项不成立：真实点击中段行项后生产当前项未被居中跟随' "centerDeltaPx=$($result.delta) tolerance=$tolerancePx currentItem='$($result.currentText)' samples=$($result.samples)"
   }
 }
 
@@ -417,6 +544,17 @@ function Assert-FadeOwners([string]$SessionId) {
   # 每处核对 aria-hidden / pointer-events / 方向渐变（computed style 仅作标注补充证据）。
   foreach ($level in @('structure', 'paragraph')) {
     $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$level""]"
+    # 前置：裁判②已把两行滚到中段（它判的就是居中跟随），因此这里先用**真实滚轮**（负 deltaX）
+    # 把 owner 滚回左端，再断言左端「只右」。这只重置前置状态，不改渐隐判据（位置 → 方向），
+    # 且回滚本身也是真实输入，不是用 JS 改写 scrollLeft。
+    $edgeScrollLeft = Get-WebDriverRowScrollLeft $SessionId $level
+    $edgeSteps = 0
+    while ([double]$edgeScrollLeft -gt 0 -and $edgeSteps -lt 12) {
+      Invoke-WebDriverWheelScroll $SessionId $owner -2000
+      $edgeSteps += 1
+      $edgeScrollLeft = Get-WebDriverRowScrollLeft $SessionId $level
+    }
+    $script:facts["${level}FadeLeftEdge"] = "wheelSteps=$edgeSteps scrollLeft=$(Get-WebDriverRowScrollLeft $SessionId $level)"
     $leftSelector = "[data-testid=""catalog-fade-left-$level""]"
     $rightSelector = "[data-testid=""catalog-fade-right-$level""]"
     $initialLeft = Find-WebDriverElement $SessionId $leftSelector -AllowMissing
@@ -462,42 +600,78 @@ return JSON.stringify(fades.map((fade) => { const style = getComputedStyle(fade)
 }
 
 function Assert-PauseStopsForcedFollow([string]$SessionId) {
-  # ④ 暂停后不再强制跟随：真实播放推进 → 真实暂停 → 真实点击另一目录节点（含起点节点 seek 到 0），
-  # 两次位置变化前后滚动 owner 的 scrollLeft 相对基线不变。
-  $mediaState = [string](Invoke-WebDriverScript $SessionId @"
-const video = document.querySelector('video');
-return video ? JSON.stringify({ currentTime: video.currentTime, paused: video.paused }) : '{"present":false}';
-"@)
-  $script:facts['pauseFollowPreState'] = $mediaState
-  if ($mediaState -notmatch '"paused":true') {
-    Fail-Condition '第④项前置不成立：媒体不处于暂停态（t42 探针应在达标后暂停）' "observed=$mediaState"
+  # ④ 暂停后停止强制跟随：媒体暂停后，真实点击真实行项（生产 onClick=onSeek(startTime)）必须改变媒体位置，
+  # 但**不得**改变结构行 owner 的 scrollLeft。
+  # 判据来源：AC-SU-01「暂停后停止强制跟随」；生产的跟随只在 isPlaying 为真时生效（catalog.tsx:306-316），
+  # 因此旧实现里「播放 2s 而 scrollLeft 必须不变」与第②项（播放态跟随并居中）互相矛盾、永不可能同时成立，
+  # 这里改成暂停态的 seek 不变性断言，并追加一次播放态正向对照（媒体真实推进 + 当前项仍被居中），
+  # 只增强判据，不放宽任何断言。
+  $pausedState = [string](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return String(video ? video.paused : "absent");')
+  $script:facts['pauseFollowPreState'] = "paused=$pausedState"
+  if ($pausedState -ne 'True') {
+    Fail-Condition '第④项前置不成立：媒体不处于暂停态（裁判②结束时必须恢复暂停）' "observed=$pausedState"
   }
   $baseline = Get-WebDriverRowScrollLeft $SessionId 'structure'
   $script:facts['pauseFollowBaselineScrollLeft'] = $baseline
-  $playButton = Find-WebDriverElement $SessionId '[data-testid="control-bar"] button'
-  Invoke-WebDriverElementClick $SessionId $playButton
-  Start-Sleep -Seconds 2
-  $afterAdvance = Get-WebDriverRowScrollLeft $SessionId 'structure'
-  $script:facts['pauseFollowAfterMediaAdvance'] = $afterAdvance
-  if ([double]$afterAdvance -ne [double]$baseline) {
-    Fail-Condition '第④项不成立：媒体时间推进改变了滚动 owner 的 scrollLeft' "baseline=$baseline after=$afterAdvance"
+  $pausedSeeks = @(
+    @{ Text = 'E2E 章节 1'; LowSeconds = 0.0; HighSeconds = 1.0 },
+    @{ Text = 'E2E 章节 5'; LowSeconds = 6.5; HighSeconds = 7.5 }
+  )
+  foreach ($seek in $pausedSeeks) {
+    $beforeTime = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
+    $item = Find-CatalogRowItemByText $SessionId 'structure' $seek.Text
+    if ($null -eq $item) {
+      $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+      Fail-Condition "第④项不成立：结构行找不到真实行项「$($seek.Text)」" "rowItems=$((Get-CatalogRowItems $SessionId 'structure').Count)"
+    }
+    Invoke-WebDriverElementClick $SessionId $item
+    Start-Sleep -Milliseconds 800
+    $afterTime = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
+    $after = Get-WebDriverRowScrollLeft $SessionId 'structure'
+    $script:facts["pauseFollowSeek-$($seek.Text)"] = "currentTimeBefore=$beforeTime currentTimeAfter=$afterTime scrollLeftBefore=$baseline scrollLeftAfter=$after"
+    if ($afterTime -lt [double]$seek.LowSeconds -or $afterTime -gt [double]$seek.HighSeconds) {
+      Fail-Condition "第④项不成立：暂停态真实点击行项「$($seek.Text)」未使媒体 seek 到该节点（位置变化证据不成立）" "currentTime=$afterTime expected=[$($seek.LowSeconds),$($seek.HighSeconds)]"
+    }
+    if ([double]$after -ne [double]$baseline) {
+      Fail-Condition '第④项不成立：暂停后公开目录 seek 仍强制滚动' "item=$($seek.Text) baseline=$baseline after=$after"
+    }
   }
+  # 正向对照：播放态下媒体真实推进，且当前项仍被居中（与第②项同一机制，不新增语义）。
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="control-bar"] button')
+  $playStart = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
+  Start-Sleep -Seconds 2
+  $playEnd = [double](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return video ? video.currentTime : -1;')
+  $script:facts['pauseFollowPlayAdvance'] = "currentTimeBefore=$playStart currentTimeAfter=$playEnd"
+  $centered = Wait-CatalogCurrentItemCentered $SessionId 'structure' 2.0 3
+  $script:facts['pauseFollowPlayCenteredDeltaPx'] = $centered.delta
+  $script:facts['pauseFollowPlayCenteredItemText'] = $centered.currentText
   Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="control-bar"] button')
   Start-Sleep -Milliseconds 500
-  $pausedState = [string](Invoke-WebDriverScript $SessionId "const video = document.querySelector('video'); return video ? String(video.paused) : 'absent';")
-  $script:facts['pauseFollowPausedAgain'] = $pausedState
-  if ($pausedState -ne 'True') {
-    Fail-Condition '第④项前置不成立：第二次真实点击未使媒体暂停' "observed=$pausedState"
+  $pausedAgain = [string](Invoke-WebDriverScript $SessionId 'const video = document.querySelector("video"); return String(video ? video.paused : "absent");')
+  $script:facts['pauseFollowPausedAgain'] = $pausedAgain
+  if ($pausedAgain -ne 'True') {
+    Fail-Condition '第④项前置不成立：第二次真实点击未使媒体暂停' "observed=$pausedAgain"
   }
-  foreach ($nodeId in @('e2e-catalog-chapter-1', 'e2e-catalog-chapter-2')) {
-    $node = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""structure""] [data-testid=""progress-indicator-$nodeId""]"
-    Invoke-WebDriverElementClick $SessionId $node
-    Start-Sleep -Milliseconds 800
-    $after = Get-WebDriverRowScrollLeft $SessionId 'structure'
-    $script:facts["pauseFollowAfterSeek-$nodeId"] = $after
-    if ([double]$after -ne [double]$baseline) {
-      Fail-Condition '第④项不成立：暂停后公开目录 seek 仍强制滚动' "node=$nodeId baseline=$baseline after=$after"
-    }
+  if (($playEnd - $playStart) -lt 1.0) {
+    Fail-Condition '第④项对照不成立：播放态媒体未真实推进（无法证明暂停语义有对照）' "before=$playStart after=$playEnd"
+  }
+  if ($null -eq $centered.delta -or [double]$centered.delta -gt 2.0) {
+    $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+    Fail-Condition '第④项对照不成立：播放态下当前项未被居中（与第②项同一机制失效）' "centerDeltaPx=$($centered.delta)"
+  }
+  # 播放-暂停往返后再验证一次暂停态 seek 不滚动（防止「恰好在滚动极限」造成的假通过）。
+  $baselineAfterRoundTrip = Get-WebDriverRowScrollLeft $SessionId 'structure'
+  $itemAfterRoundTrip = Find-CatalogRowItemByText $SessionId 'structure' 'E2E 章节 2'
+  if ($null -eq $itemAfterRoundTrip) {
+    $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
+    Fail-Condition '第④项不成立：结构行找不到真实行项「E2E 章节 2」' "rowItems=$((Get-CatalogRowItems $SessionId 'structure').Count)"
+  }
+  Invoke-WebDriverElementClick $SessionId $itemAfterRoundTrip
+  Start-Sleep -Milliseconds 800
+  $afterRoundTrip = Get-WebDriverRowScrollLeft $SessionId 'structure'
+  $script:facts['pauseFollowAfterPlayRoundTrip'] = "baseline=$baselineAfterRoundTrip after=$afterRoundTrip"
+  if ([double]$afterRoundTrip -ne [double]$baselineAfterRoundTrip) {
+    Fail-Condition '第④项不成立：播放-暂停往返后，暂停态公开目录 seek 仍强制滚动' "baseline=$baselineAfterRoundTrip after=$afterRoundTrip"
   }
 }
 

@@ -697,7 +697,7 @@ export function RealE2eRunner() {
               title: fixtureTitle,
               chapterCount: 8,
               sectionCount: 24,
-              paragraphCount: 40,
+              paragraphCount: 32, // 与 seed 的生成规则一致（t49/t50 定位：旧值 40 与实际产出不符，已统一为 32）
               seed: () => {
                 if (catalogSeeding) return
                 catalogSeeding = true
@@ -725,7 +725,7 @@ export function RealE2eRunner() {
                   lastStudiedAt: 0,
                 })
               }
-              // 长目录：8 章 × 3 节 + 恰好 40 段落，时间轴全部落在媒体声明的 [0,14] 内。
+              // 长目录：8 章 × 3 节 + 恰好 32 段落（前 8 节各 2 段、其余 16 节各 1 段），时间轴全部落在媒体声明的 [0,14] 内。
               const nodes: Parameters<typeof insertNodes>[1] = []
               let sortOrder = 0
               let paragraphIndex = 0
