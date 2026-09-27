@@ -212,7 +212,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 - 在线 URL 的受控本地媒体交接已进入 `AC-LV-17`：Controller 拥有可追踪记录、失败/取消/重试和 Pipeline 交接，Rust `ytdlp` module 拥有可取消探测/下载、进度、临时目录和最终提交，页面只保留输入适配。真实站点差异与完整外网 Evidence 仍是独立 Gap。
 - 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。`ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash`（结构化、文本助手）已有 schema v2 Evidence；下一个模型配置仍须独立探针和完整 E2E，不得继承这个 `Verified` 结论。
-- 本地缩略图创建、持久化和卡片渲染由 `AC-LV-18` 控制；`AC-VL-05` 已由 Rust `thumbnail_lifecycle` 生产 owner 接到既有 Video 删除 transaction，使用合法 ID 派生唯一 app-owned path、提交后受控文件副作用和真实文件/SQLite Judge；`AC-VL-06` 的 keep-set 与孤儿 GC 已在同一深 module 落地（提交后有界一轮、保护窗口、fail-closed、进程内互斥），实现与真实文件/SQLite Judge 就位，等级仍以 Hosted 结论与独立复审为准。
+- 本地缩略图创建、持久化和卡片渲染由 `AC-LV-18` 控制；`AC-VL-05` 已由 Rust `thumbnail_lifecycle` 生产 owner 接到既有 Video 删除 transaction，使用合法 ID 派生唯一 app-owned path、提交后受控文件副作用和真实文件/SQLite Judge；`AC-VL-06` 的 keep-set 与孤儿 GC 已在同一深 module 落地（提交后有界一轮、保护窗口、fail-closed、进程内互斥），真实文件/SQLite Judge 就位且 Hosted 为 `122 passed; 0 failed`，等级仍以复审确认与合并为准。
 
 ## 8. Harness Migration 结果
 

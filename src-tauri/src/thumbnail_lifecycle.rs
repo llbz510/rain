@@ -251,9 +251,9 @@ mod windows_delete {
                 )))
             }
         };
-        let expected_thumbnail = resolved_root
-            .join("thumbnails")
-            .join(format!("{video_id}.jpg"));
+        let expected_thumbnail =
+            thumbnail_storage::thumbnail_directory_for_app_data_root(&resolved_root)
+                .join(format!("{video_id}.jpg"));
         let handle = match OpenHandle::open_for_delete(&thumbnail_path) {
             Ok(handle) => handle,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -323,10 +323,9 @@ mod windows_delete {
 // AC-VL-06: app-owned orphan thumbnail collection
 // ---------------------------------------------------------------------------
 
-/// The single controlled directory that owns derived thumbnails. Both the
-/// AC-VL-05 deletion path and this collection path derive it from
-/// `thumbnail_storage`, so no second naming rule exists.
-const CONTROLLED_THUMBNAIL_DIRECTORY: &str = "thumbnails";
+// The controlled `thumbnails/` directory is never spelled out here: it is
+// resolved through `thumbnail_storage::thumbnail_directory_for_app_data_root`,
+// the single production definition of that directory name in this crate.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OrphanCollectionPolicy {
@@ -541,7 +540,8 @@ fn collect_orphans_in_controlled_directory(
     keep_set: &BTreeSet<String>,
     policy: &OrphanCollectionPolicy,
 ) -> OrphanCollectionResult {
-    let controlled_directory = app_data_root.join(CONTROLLED_THUMBNAIL_DIRECTORY);
+    let controlled_directory =
+        thumbnail_storage::thumbnail_directory_for_app_data_root(app_data_root);
     let metadata = match std::fs::symlink_metadata(&controlled_directory) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
