@@ -24,8 +24,8 @@ $fixtureInterface = 'window.__RAIN_VIDEO_LIST_FIXTURE__'
 # 脚本自持的独立期望合同（受控 fixture，不含用户数据、真实路径或密钥）。
 $pendingVideoId = 'rain-e2e-video-list-pending'
 $failedVideoId = 'rain-e2e-video-list-failed'
-$pendingTitle = '待导入样本'
-$failedTitle = '失败样本'
+$pendingTitle = 'E2E 待处理样本'
+$failedTitle = 'E2E 失败样本'
 $noMatchKeyword = 'no-such-title-e2e'
 $pageSelector = '[data-testid="video-list-page"]'
 $cardSelector = '[data-testid^="card-"]'
@@ -275,6 +275,83 @@ function Get-WebDriverElementTexts([string]$SessionId, [string]$Selector) {
 
 function Open-VideoListPage([string]$SessionId, [string]$Description) {
   Wait-WebDriverCondition $SessionId $Description "return Boolean(document.querySelector('$pageSelector'));"
+  try {
+    Wait-WebDriverCondition $SessionId 'the video list import entry to initialize' @"
+const header = document.querySelector('[data-testid="video-list-page"] header');
+if (!header) return false;
+const buttons = header.querySelectorAll('button');
+if (buttons.length !== 2) return false;
+return !buttons[0].disabled && !buttons[1].disabled;
+"@
+  } catch {
+    $observed = [string](Invoke-WebDriverScript $SessionId @"
+const header = document.querySelector('[data-testid="video-list-page"] header');
+if (!header) return 'header=absent';
+const buttons = Array.from(header.querySelectorAll('button'));
+return 'count=' + buttons.length + ' disabled=' + buttons.map((b) => b.disabled).join(',') + ' texts=' + buttons.map((b) => b.textContent.trim()).join('|');
+"@)
+    $script:facts['importEntryReadiness'] = $observed
+    Fail-Condition '视频列表页顶栏导入入口未在隔离空库上就绪：真实生产页面不出现「导入」「设置」两个可用按钮' "observed=$observed"
+  }
+}
+
+function Assert-TopBarComposition([string]$SessionId) {
+  Find-WebDriverElement $SessionId $pageSelector | Out-Null
+
+  $header = Find-WebDriverElement $SessionId '[data-testid="video-list-page"] header'
+  $script:facts['topBarText'] = ((Get-WebDriverElementText $SessionId $header).Trim())
+
+  $title = Find-WebDriverElement $SessionId '[data-testid="video-list-page"] header > span'
+  $titleText = (Get-WebDriverElementText $SessionId $title).Trim()
+  $script:facts['topBarTitle'] = $titleText
+
+  $search = Find-WebDriverElement $SessionId $searchSelector
+  $placeholder = Get-WebDriverElementAttribute $SessionId $search 'placeholder'
+  $searchType = Get-WebDriverElementAttribute $SessionId $search 'type'
+  $script:facts['searchPlaceholder'] = $placeholder
+  $script:facts['searchType'] = $searchType
+
+  Find-WebDriverElement $SessionId $sortSelector | Out-Null
+  $sortLabels = Get-WebDriverElementTexts $SessionId $sortOptionSelector
+  $sortValues = @()
+  foreach ($option in (Find-WebDriverElements $SessionId $sortOptionSelector)) {
+    $sortValues += (Get-WebDriverElementAttribute $SessionId $option 'value')
+  }
+  $script:facts['sortOptions'] = $sortLabels
+  $script:facts['sortOptionValues'] = $sortValues
+
+  $headerButtons = Find-WebDriverElements $SessionId $headerButtonSelector
+  $headerTexts = @()
+  $headerEnabled = @()
+  foreach ($button in $headerButtons) {
+    $headerTexts += ((Get-WebDriverElementText $SessionId $button).Trim())
+    $headerEnabled += [string](Test-WebDriverElementEnabled $SessionId $button)
+  }
+  $script:facts['headerButtons'] = $headerTexts
+  $script:facts['headerButtonsEnabled'] = $headerEnabled
+
+  if ($titleText -ne 'Rain') {
+    Fail-Condition '视频列表页顶栏组合不成立：缺少标题 Rain' "observed='$titleText' topBarText='$($script:facts['topBarText'])'"
+  }
+  if ($placeholder -ne '搜索标题' -or $searchType -ne 'text') {
+    Fail-Condition '视频列表页顶栏组合不成立：搜索框不是既有「搜索标题」文本输入' "placeholder='$placeholder' type='$searchType'"
+  }
+  if ($sortValues.Count -ne 3 -or ($sortValues -join '|') -ne 'lastStudied|createdAt|title') {
+    Fail-Condition '视频列表页顶栏组合不成立：排序控件不是既有 3 个选项值（lastStudied/createdAt/title）' "observed='$($sortValues -join '|')' labels='$($sortLabels -join '|')'"
+  }
+  if ($sortLabels.Count -ne 3 -or ($sortLabels -join '|') -ne '最近学习|导入时间|名称') {
+    Fail-Condition '视频列表页顶栏组合不成立：排序选项文案不是既有「最近学习/导入时间/名称」' "observed='$($sortLabels -join '|')' values='$($sortValues -join '|')'"
+  }
+  if ($headerTexts.Count -ne 2 -or ($headerTexts -join '|') -ne '导入|设置') {
+    Fail-Condition '视频列表页顶栏组合不成立：期望「导入」「设置」两个既有按钮' "observed='$($headerTexts -join '|')'"
+  }
+  if ($headerEnabled -contains 'False') {
+    Fail-Condition '视频列表页顶栏组合不成立：顶栏按钮在隔离空库上应可用' "observedButtons='$($headerTexts -join '|')' enabled='$($headerEnabled -join ',')'"
+  }
+  $settings = Find-WebDriverElement $SessionId '[data-testid="open-settings"]'
+  if ((Get-WebDriverElementText $SessionId $settings).Trim() -ne '设置') {
+    Fail-Condition '视频列表页顶栏组合不成立：设置入口文本异常' "observed='$((Get-WebDriverElementText $SessionId $settings).Trim())'"
+  }
 }
 
 function Assert-WebDriverElementEndpoints([string]$SessionId) {
@@ -282,48 +359,6 @@ function Assert-WebDriverElementEndpoints([string]$SessionId) {
   $script:facts['elementEndpoint'] = if ($probe) { 'supported' } else { 'unsupported' }
   if (-not $probe) {
     Fail-Condition '真实 WebDriver 元素端点不可用：无法以驱动读到的桌面 DOM 与真实点击裁判' '(POST /session/{id}/element returned no element for <html>)'
-  }
-}
-
-function Assert-TopBarComposition([string]$SessionId) {
-  Find-WebDriverElement $SessionId $pageSelector | Out-Null
-
-  $title = Find-WebDriverElement $SessionId '[data-testid="video-list-page"] header > span'
-  $titleText = (Get-WebDriverElementText $SessionId $title).Trim()
-  $script:facts['topBarTitle'] = $titleText
-  if ($titleText -ne 'Rain') {
-    Fail-Condition '视频列表页顶栏组合不成立：缺少标题 Rain' "observed='$titleText'"
-  }
-
-  $search = Find-WebDriverElement $SessionId $searchSelector
-  $placeholder = Get-WebDriverElementAttribute $SessionId $search 'placeholder'
-  $searchType = Get-WebDriverElementAttribute $SessionId $search 'type'
-  if ($placeholder -ne '搜索标题' -or $searchType -ne 'text') {
-    Fail-Condition '视频列表页顶栏组合不成立：搜索框不是既有「搜索标题」文本输入' "placeholder='$placeholder' type='$searchType'"
-  }
-
-  Find-WebDriverElement $SessionId $sortSelector | Out-Null
-  $sortLabels = Get-WebDriverElementTexts $SessionId $sortOptionSelector
-  $script:facts['sortOptions'] = $sortLabels
-  if ($sortLabels.Count -ne 3 -or ($sortLabels -join '|') -ne '最近学习|导入时间|名称') {
-    Fail-Condition '视频列表页顶栏组合不成立：排序控件不是既有 3 个选项（最近学习/导入时间/名称）' "observed='$($sortLabels -join '|')'"
-  }
-
-  $headerButtons = Find-WebDriverElements $SessionId $headerButtonSelector
-  $headerTexts = @()
-  foreach ($button in $headerButtons) { $headerTexts += ((Get-WebDriverElementText $SessionId $button).Trim()) }
-  $script:facts['headerButtons'] = $headerTexts
-  if ($headerTexts.Count -ne 2 -or ($headerTexts -join '|') -ne '导入|设置') {
-    Fail-Condition '视频列表页顶栏组合不成立：期望「导入」「设置」两个既有按钮' "observed='$($headerTexts -join '|')'"
-  }
-  foreach ($button in $headerButtons) {
-    if (-not (Test-WebDriverElementEnabled $SessionId $button)) {
-      Fail-Condition '视频列表页顶栏组合不成立：顶栏按钮在隔离空库上应可用' "observedButtons='$($headerTexts -join '|')'"
-    }
-  }
-  $settings = Find-WebDriverElement $SessionId '[data-testid="open-settings"]'
-  if ((Get-WebDriverElementText $SessionId $settings).Trim() -ne '设置') {
-    Fail-Condition '视频列表页顶栏组合不成立：设置入口文本异常' ''
   }
 }
 
@@ -586,6 +621,12 @@ try {
   Open-VideoListPage $sessionId 'the video list page'
   Assert-WebDriverElementEndpoints $sessionId
 
+  # 先裁判「受控夹具依赖条件」的前置事实（空库 + 夹具公开面），再裁判页面组合；
+  # 这样夹具缺失时报告的是缺哪三个条件，而不是被后续组合断言掩盖。
+  $phase = 'fixture-availability'
+  Write-Output 'Video List E2E phase: controlled fixture availability'
+  Assert-VideoListFixtureInterface $sessionId
+
   $phase = 'top-bar'
   Write-Output 'Video List E2E phase: video list top bar composition'
   Assert-TopBarComposition $sessionId
@@ -598,9 +639,6 @@ try {
   Write-Output 'Video List E2E phase: filtered empty state on the empty library'
   Assert-FilteredEmptyState $sessionId
 
-  $phase = 'fixture-availability'
-  Write-Output 'Video List E2E phase: controlled fixture availability'
-  Assert-VideoListFixtureInterface $sessionId
 
   $phase = 'seed-fixture'
   Write-Output 'Video List E2E phase: publish controlled fixture'
@@ -675,3 +713,4 @@ try {
   }
   if (-not $primaryError) { Remove-FailureDiagnostics }
 }
+if ($primaryError) { throw $primaryError }
