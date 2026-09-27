@@ -27,11 +27,17 @@ where
     }
 
     let run_mode = get_env("RAIN_E2E_RUN_MODE").unwrap_or_else(|| "full".to_string());
-    if run_mode != "full" && run_mode != "ui-proof" && run_mode != "runtime-settings" {
-        return Err("RAIN_E2E_RUN_MODE must be full, ui-proof, or runtime-settings".to_string());
+    if run_mode != "full"
+        && run_mode != "ui-proof"
+        && run_mode != "runtime-settings"
+        && run_mode != "video-list"
+    {
+        return Err(
+            "RAIN_E2E_RUN_MODE must be full, ui-proof, runtime-settings, or video-list".to_string(),
+        );
     }
     let database_path = required_env(&get_env, "RAIN_E2E_DB_PATH")?;
-    if run_mode == "runtime-settings" {
+    if run_mode == "runtime-settings" || run_mode == "video-list" {
         return Ok(Some(RealE2eConfig {
             enabled: true,
             run_mode,
@@ -87,13 +93,23 @@ where
     }))
 }
 
+/// 需要 owner 提供的 WebView2 参数的桌面 WebDriver E2E 模式。
+///
+/// 它们都要在真实 Tauri 窗口里被 `tauri-driver` 驱动，因此都必须覆盖窗口的
+/// `additional_browser_args`；普通应用、`full`/`ui-proof` 或空参数一律不覆盖，
+/// 避免 Hosted 兼容参数漂移进发布运行时。
+const WEBVIEW_ARGS_RUN_MODES: [&str; 2] = ["runtime-settings", "video-list"];
+
 pub fn read_runtime_settings_webview_args_from_env<F>(get_env: F) -> Option<String>
 where
     F: Fn(&str) -> Option<String>,
 {
-    if get_env("RAIN_E2E_MODE").as_deref() != Some("1")
-        || get_env("RAIN_E2E_RUN_MODE").as_deref() != Some("runtime-settings")
-    {
+    if get_env("RAIN_E2E_MODE").as_deref() != Some("1") {
+        return None;
+    }
+
+    let run_mode = get_env("RAIN_E2E_RUN_MODE")?;
+    if !WEBVIEW_ARGS_RUN_MODES.contains(&run_mode.as_str()) {
         return None;
     }
 
@@ -303,6 +319,37 @@ mod tests {
                 ("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments),
             ]),
             None
+        );
+    }
+
+    #[test]
+    fn e2e_video_list_mode_needs_only_an_isolated_database() {
+        let config = read(&[
+            ("RAIN_E2E_MODE", "1"),
+            ("RAIN_E2E_RUN_MODE", "video-list"),
+            ("RAIN_E2E_DB_PATH", "D:\\tmp\\rain-video-list-e2e.db"),
+        ])
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(config.run_mode, "video-list");
+        assert_eq!(config.database_path, "D:\\tmp\\rain-video-list-e2e.db");
+        assert_eq!(config.llm_api_key, "");
+        assert_eq!(config.video_path, "");
+        assert_eq!(config.whisper_model_path, "");
+    }
+
+    #[test]
+    fn video_list_e2e_forwards_explicit_webview2_arguments() {
+        let arguments = "--remote-debugging-port=9222 --disable-gpu";
+
+        assert_eq!(
+            read_webview_args(&[
+                ("RAIN_E2E_MODE", "1"),
+                ("RAIN_E2E_RUN_MODE", "video-list"),
+                ("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments),
+            ]),
+            Some(arguments.to_string())
         );
     }
 }

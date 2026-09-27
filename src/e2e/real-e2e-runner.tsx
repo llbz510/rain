@@ -34,7 +34,7 @@ import { useRainStore } from '@/store/rain-store'
 
 interface RealE2eConfig {
   enabled: boolean
-  runMode: 'full' | 'ui-proof' | 'runtime-settings'
+  runMode: 'full' | 'ui-proof' | 'runtime-settings' | 'video-list'
   evidenceId: string
   videoPath: string
   whisperModelPath: string
@@ -101,16 +101,32 @@ interface PendingImportRecoveryResult {
   error?: string
 }
 
+/**
+ * AC-VL-04 桌面 Judge 的受控夹具公开面：脚本只通过它请求建立隔离数据库中的
+ * 两份受控视频行（非 ready + 失败），夹具本身仍走生产 `getDb()`/`insertVideo`。
+ */
+interface VideoListDesktopFixture {
+  status: 'idle' | 'seeded' | 'failed'
+  error?: string
+  seed: () => void
+}
+
 declare global {
   interface Window {
     __RAIN_E2E_RESULT__?: RealE2eResult
     __RAIN_E2E_START__?: boolean
     __RAIN_RUNTIME_SETTINGS_SCHEMA__?: RuntimeSettingsSchemaResult
     __RAIN_PENDING_IMPORT_RECOVERY__?: PendingImportRecoveryResult
+    __RAIN_VIDEO_LIST_FIXTURE__?: VideoListDesktopFixture
   }
 }
 
 const PENDING_IMPORT_RECOVERY_VIDEO_ID = 'rain-pending-import-recovery-e2e-video'
+
+const VIDEO_LIST_PENDING_VIDEO_ID = 'rain-e2e-video-list-pending'
+const VIDEO_LIST_FAILED_VIDEO_ID = 'rain-e2e-video-list-failed'
+const VIDEO_LIST_PENDING_TITLE = 'E2E 待处理样本'
+const VIDEO_LIST_FAILED_TITLE = 'E2E 失败样本'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -270,6 +286,88 @@ async function publishPendingImportRecoveryFixture(seedIfMissing: boolean): Prom
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause)
     window.__RAIN_PENDING_IMPORT_RECOVERY__ = { status: 'failed', error }
+  }
+}
+
+let videoListFixtureSeeding = false
+
+function publishVideoListFixture(status: VideoListDesktopFixture['status'], error?: string): void {
+  window.__RAIN_VIDEO_LIST_FIXTURE__ = {
+    status,
+    ...(error ? { error } : {}),
+    seed: requestVideoListFixtureSeed,
+  }
+}
+
+function requestVideoListFixtureSeed(): void {
+  if (videoListFixtureSeeding) return
+  videoListFixtureSeeding = true
+  void seedVideoListFixture()
+}
+
+async function seedVideoListFixture(): Promise<void> {
+  try {
+    const db = await getDb()
+    const createdAt = Date.now()
+    const fixtures: Video[] = [
+      {
+        id: VIDEO_LIST_PENDING_VIDEO_ID,
+        title: VIDEO_LIST_PENDING_TITLE,
+        source: 'local',
+        filePath: 'D:\\rain-e2e\\video-list-pending.mp4',
+        thumbnail: '',
+        duration: 0,
+        language: '',
+        status: 'pending',
+        createdAt,
+        position: 0,
+        lastStudiedAt: 0,
+      },
+      {
+        id: VIDEO_LIST_FAILED_VIDEO_ID,
+        title: VIDEO_LIST_FAILED_TITLE,
+        source: 'local',
+        filePath: 'D:\\rain-e2e\\video-list-failed.mp4',
+        thumbnail: '',
+        duration: 0,
+        language: '',
+        status: 'failed',
+        stage: 'asr',
+        errorMessage: '受控夹具：导入失败（E2E）',
+        createdAt: createdAt + 1,
+        position: 0,
+        lastStudiedAt: 0,
+      },
+    ]
+    for (const fixture of fixtures) {
+      if (await getVideoById(db, fixture.id)) continue
+      await insertVideo(db, fixture)
+    }
+    publishVideoListFixture('seeded')
+  } catch (cause) {
+    publishVideoListFixture('failed', toError(cause).message)
+  }
+}
+
+/**
+ * AC-VL-04 桌面 Judge 的短模式：只让生产视频列表页保持在原位等待 WebDriver 编排，
+ * 不导航、不启动导入、不调用模型。受控夹具只在脚本通过公开面请求时写入，
+ * 因此首次启动的隔离数据库始终是真实空库。
+ */
+async function armVideoListDesktopFixture(): Promise<void> {
+  window.__RAIN_E2E_RESULT__ = {
+    status: 'running',
+    events: [{ at: nowIso(), event: 'video_list_armed' }],
+  }
+  try {
+    const db = await getDb()
+    const [pending, failed] = await Promise.all([
+      getVideoById(db, VIDEO_LIST_PENDING_VIDEO_ID),
+      getVideoById(db, VIDEO_LIST_FAILED_VIDEO_ID),
+    ])
+    publishVideoListFixture(pending && failed ? 'seeded' : 'idle')
+  } catch (cause) {
+    publishVideoListFixture('failed', toError(cause).message)
   }
 }
 
@@ -571,6 +669,10 @@ export function RealE2eRunner() {
               void publishPendingImportRecoveryFixture(false)
             }, 250)
           }
+          return
+        }
+        if (config.runMode === 'video-list') {
+          await armVideoListDesktopFixture()
           return
         }
         setStatus('running')
