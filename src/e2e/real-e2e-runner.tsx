@@ -765,8 +765,10 @@ export function RealE2eRunner() {
                   for (let index = 0; index < paragraphsHere; index += 1) {
                     paragraphIndex += 1
                     const paragraphSpan = sectionSpan / paragraphsHere
+                    const paragraphId = `e2e-catalog-paragraph-${paragraphIndex}`
+                    const paragraphStart = sectionStart + index * paragraphSpan
                     nodes.push({
-                      id: `e2e-catalog-paragraph-${paragraphIndex}`,
+                      id: paragraphId,
                       videoId: fixtureVideoId,
                       parentId: sectionId,
                       kind: 'paragraph',
@@ -781,6 +783,24 @@ export function RealE2eRunner() {
                 }
               }
               await insertNodes(db, nodes)
+              // t46 根因修复（t44 Spec 定位）：生产 `loadVideo` 要求「至少一个 paragraph 且 sentences 非空」
+              // （src/store/rain-store.ts:176/:180），否则返回 {ok:false} 并把 currentPage 留在 list，
+              // 真实点击「打开视频」后学习页永不出现。这里为每个 paragraph 经公开 insertSentences 补一条 sentence，
+              // 不改任何裁判判据、不延长等待。
+              const { insertSentences } = await import('@/models/database')
+              await insertSentences(
+                db,
+                nodes
+                  .filter((node: { kind: string }) => node.kind === 'paragraph')
+                  .map((node: { id: string; startTime: number; endTime: number }) => ({
+                    id: `e2e-catalog-sentence-${node.id}`,
+                    nodeId: node.id,
+                    text: 'E2E 夹具句子',
+                    startTime: node.startTime,
+                    endTime: node.endTime,
+                    sortOrder: 0,
+                  })),
+              )
               publishCatalogFixture('seeded')
             } catch (cause) {
               publishCatalogFixture('failed', toError(cause).message)

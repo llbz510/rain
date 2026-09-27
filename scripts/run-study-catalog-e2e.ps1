@@ -583,14 +583,53 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   $phase = 'restart-and-open-study'
   $sessionId = New-WebDriverSession $appBinary
   Wait-WebDriverCondition $sessionId 'the video list page after the desktop restart' "return Boolean(document.querySelector('$listPageSelector'));"
+  # 重启后的夹具状态（诊断要求①）：idle 表示隔离库看不到夹具行。
+  $script:facts['fixtureStatusAfterRestart'] = [string](Invoke-WebDriverScript $sessionId @"
+const fixture = $fixtureInterface;
+return fixture && typeof fixture === 'object' ? String(fixture.status || 'unknown') : 'absent';
+"@)
+  # 诊断要求②：实际读到的卡片数与卡主操作 aria-label 原文。
+  $cardButtons = @(Find-WebDriverElements $sessionId '[data-testid^="card-"] button')
+  $cardLabels = @()
+  foreach ($candidate in $cardButtons) { $cardLabels += (Get-WebDriverElementAttribute $sessionId $candidate 'aria-label') }
+  $script:facts['cardButtonCount'] = $cardButtons.Count
+  $script:facts['cardPrimaryActionLabels'] = $cardLabels
   Write-Output 'Study Catalog E2E phase: open the study page through the production card action'
-  $cardAction = Find-WebDriverElement $sessionId '[data-testid^="card-"] button'
-  $cardLabel = Get-WebDriverElementAttribute $sessionId $cardAction 'aria-label'
+  if ($cardButtons.Count -lt 1) {
+    Fail-Condition '重启后生产列表页没有可点击的卡片：隔离库中的夹具视频行未呈现' "cardButtonCount=0 fixtureStatusAfterRestart=$($script:facts['fixtureStatusAfterRestart'])"
+  }
+  $cardAction = $cardButtons[0]
+  $cardLabel = $cardLabels[0]
   if ($cardLabel -notmatch '打开视频') {
     Fail-Condition '列表卡主操作不是既有「打开视频」动作，无法经生产路径进入学习页' "aria-label='$cardLabel'"
   }
   Invoke-WebDriverElementClick $sessionId $cardAction
-  Wait-WebDriverCondition $sessionId 'the production study page' "return Boolean(document.querySelector('$pageSelector'));"
+  # 诊断要求③/④：等待判据、超时阈值、最后一次读到的状态，以及前端错误面/currentPage/媒体错误码。
+  $studyDeadline = (Get-Date).AddSeconds($MaxSeconds)
+  $studyReached = $false
+  do {
+    $studyReached = (Invoke-WebDriverScript $sessionId "return Boolean(document.querySelector('$pageSelector'));") -eq $true
+    if ($studyReached) { break }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $studyDeadline)
+  if (-not $studyReached) {
+    $diagnostics = [string](Invoke-WebDriverScript $sessionId @"
+const listWrapper = document.querySelector('[data-testid="video-list-page"]')?.parentElement ?? null;
+const alert = document.querySelector('[role="alert"]');
+const video = document.querySelector('video');
+return JSON.stringify({
+  currentPage: listWrapper ? (listWrapper.hasAttribute('hidden') ? 'not-list' : 'list') : 'unknown',
+  alertText: alert ? alert.textContent.trim() : null,
+  studyInterfacePresent: Boolean(document.querySelector('[data-testid="study-interface"]')),
+  videoPresent: Boolean(video),
+  videoErrorCode: video && video.error ? video.error.code : null,
+  cardButtonCount: document.querySelectorAll('[data-testid^="card-"] button').length,
+});
+"@)
+    $script:facts['studyPageTimeoutState'] = $diagnostics
+    $script:facts['studyPageWaitCriterion'] = "document.querySelector('$pageSelector') within $MaxSeconds s (250ms poll)"
+    Fail-Condition '真实点击卡主操作后生产学习页未出现：loadVideo 失败（最可能是夹具缺 sentences）或列表页报错，需按 observed 的 alert/currentPage 定位' "state=$diagnostics"
+  }
 
   $phase = 'wav-playback-probe'
   Write-Output 'Study Catalog E2E phase: synthetic WAV playback probe'
