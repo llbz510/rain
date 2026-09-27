@@ -364,6 +364,143 @@ return JSON.stringify(rows.map((row) => { const style = getComputedStyle(row); r
 "@)
 }
 
+function Invoke-WebDriverWheelScroll([string]$SessionId, [string]$ElementId, [int]$DeltaX) {
+  # 真实滚轮输入（W3C /actions wheel，origin = 目标元素）；t34 探针已证明 /actions 受支持。
+  Invoke-WebDriver 'Post' "/session/$SessionId/actions" @{
+    actions = @(@{
+      type = 'wheel'
+      id = 'wheel-1'
+      actions = @(@{ type = 'scroll'; origin = @{ $elementKey = $ElementId }; x = 0; y = 0; deltaX = $DeltaX; deltaY = 0; duration = 100 })
+    })
+  } | Out-Null
+  Invoke-WebDriver 'Delete' "/session/$SessionId/actions" | Out-Null
+  Start-Sleep -Milliseconds 250
+}
+
+function Get-WebDriverRowScrollLeft([string]$SessionId, [string]$Level) {
+  # scrollLeft 没有 W3C 端点：用 execute/sync 读真实 DOM 属性（可观测结果，不是替身判定）。
+  return (Invoke-WebDriverScript $SessionId @"
+const row = document.querySelector('[data-catalog-scroll-row="$Level"]');
+return row ? String(row.scrollLeft) : 'absent';
+"@).ToString().Trim()
+}
+
+function Assert-CurrentItemCentered([string]$SessionId) {
+  # ② 当前项居中跟随：真实点击中段目录节点（公开 seek）后，用驱动几何判据断言该节点被居中。
+  $targetSelector = '[data-catalog-scroll-row="structure"] [data-testid="progress-indicator-e2e-catalog-chapter-5"]'
+  $target = Find-WebDriverElement $SessionId $targetSelector
+  Invoke-WebDriverElementClick $SessionId $target
+  # 容差依据：生产的 scrollIntoView({block:'nearest', inline:'center'}) 只做子像素对齐，
+  # 目录行无额外内边距；中段节点两侧都有滚动余量，因此中心差应接近 0。这里以 ≤2px 起判，
+  # 若托管实测更大，必须记录实测值并写明依据后再定标（禁止无依据放大）。
+  $tolerancePx = 2.0
+  $owner = Find-WebDriverElement $SessionId '[data-catalog-scroll-row="structure"]'
+  $deadline = (Get-Date).AddSeconds(5)
+  $delta = $null
+  do {
+    Start-Sleep -Milliseconds 250
+    $itemRect = Get-WebDriverElementRect $SessionId (Find-WebDriverElement $SessionId $targetSelector)
+    $ownerRect = Get-WebDriverElementRect $SessionId $owner
+    $itemCenter = [double]$itemRect.x + ([double]$itemRect.width / 2)
+    $ownerCenter = [double]$ownerRect.x + ([double]$ownerRect.width / 2)
+    $delta = [Math]::Abs($itemCenter - $ownerCenter)
+  } while ($delta -gt $tolerancePx -and (Get-Date) -lt $deadline)
+  $script:facts['currentItemCenterDeltaPx'] = $delta
+  $script:facts['currentItemCenterTolerancePx'] = $tolerancePx
+  if ($delta -gt $tolerancePx) {
+    Fail-Condition '第②项不成立：真实点击中段目录节点后当前项未被居中跟随' "centerDeltaPx=$delta tolerance=$tolerancePx"
+  }
+}
+
+function Assert-FadeOwners([string]$SessionId) {
+  # ③ 边缘渐隐 owner：初态只右 → 真实滚轮至中段两侧同时 → 末端只左；
+  # 每处核对 aria-hidden / pointer-events / 方向渐变（computed style 仅作标注补充证据）。
+  foreach ($level in @('structure', 'paragraph')) {
+    $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$level""]"
+    $leftSelector = "[data-testid=""catalog-fade-left-$level""]"
+    $rightSelector = "[data-testid=""catalog-fade-right-$level""]"
+    $initialLeft = Find-WebDriverElement $SessionId $leftSelector -AllowMissing
+    $initialRight = Find-WebDriverElement $SessionId $rightSelector -AllowMissing
+    $script:facts["${level}FadeInitial"] = "left=$([bool]$initialLeft) right=$([bool]$initialRight) scrollLeft=$(Get-WebDriverRowScrollLeft $SessionId $level)"
+    if ($initialLeft -or -not $initialRight) {
+      Fail-Condition "第③项不成立：$level 行初态不是「只右」" "$($script:facts["${level}FadeInitial"])"
+    }
+    for ($attempt = 0; $attempt -lt 4; $attempt++) { Invoke-WebDriverWheelScroll $SessionId $owner 200 }
+    $midLeft = Find-WebDriverElement $SessionId $leftSelector -AllowMissing
+    $midRight = Find-WebDriverElement $SessionId $rightSelector -AllowMissing
+    $script:facts["${level}FadeMid"] = "left=$([bool]$midLeft) right=$([bool]$midRight) scrollLeft=$(Get-WebDriverRowScrollLeft $SessionId $level)"
+    if (-not $midLeft -or -not $midRight) {
+      Fail-Condition "第③项不成立：$level 行真实滚轮至中段后未同时出现两侧渐隐" "$($script:facts["${level}FadeMid"])"
+    }
+    foreach ($elementId in @($midLeft, $midRight)) {
+      if ((Get-WebDriverElementAttribute $SessionId $elementId 'aria-hidden') -ne 'true') {
+        Fail-Condition "第③项不成立：$level 行渐隐 owner 缺少 aria-hidden=true" ''
+      }
+    }
+    for ($attempt = 0; $attempt -lt 16; $attempt++) { Invoke-WebDriverWheelScroll $SessionId $owner 2000 }
+    $endLeft = Find-WebDriverElement $SessionId $leftSelector -AllowMissing
+    $endRight = Find-WebDriverElement $SessionId $rightSelector -AllowMissing
+    $script:facts["${level}FadeEnd"] = "left=$([bool]$endLeft) right=$([bool]$endRight) scrollLeft=$(Get-WebDriverRowScrollLeft $SessionId $level)"
+    if (-not $endLeft -or $endRight) {
+      Fail-Condition "第③项不成立：$level 行真实滚轮至末端后不是「只左」" "$($script:facts["${level}FadeEnd"])"
+    }
+  }
+  # 标注来源的补充证据：pointer-events 与渐隐方向（computed style 无法用元素端点读取）。
+  $script:facts['fadeComputedStyle'] = [string](Invoke-WebDriverScript $SessionId @"
+const fades = Array.from(document.querySelectorAll('[data-testid^="catalog-fade-"]'));
+return JSON.stringify(fades.map((fade) => { const style = getComputedStyle(fade); return { id: fade.getAttribute('data-testid'), pointerEvents: style.pointerEvents, backgroundImage: style.backgroundImage }; }));
+"@)
+  foreach ($entry in @(ConvertFrom-Json $script:facts['fadeComputedStyle'])) {
+    if ($entry.pointerEvents -ne 'none') {
+      Fail-Condition '第③项不成立：渐隐 owner 不是非交互（pointer-events 非 none）' "id=$($entry.id) pointerEvents=$($entry.pointerEvents)"
+    }
+    $expected = if ($entry.id -like '*fade-left-*') { 'to right' } else { 'to left' }
+    if ($entry.backgroundImage -notmatch [regex]::Escape($expected)) {
+      Fail-Condition '第③项不成立：渐隐方向渐变与 owner 方向不一致' "id=$($entry.id) backgroundImage=$($entry.backgroundImage)"
+    }
+  }
+}
+
+function Assert-PauseStopsForcedFollow([string]$SessionId) {
+  # ④ 暂停后不再强制跟随：真实播放推进 → 真实暂停 → 真实点击另一目录节点（含起点节点 seek 到 0），
+  # 两次位置变化前后滚动 owner 的 scrollLeft 相对基线不变。
+  $mediaState = [string](Invoke-WebDriverScript $SessionId @"
+const video = document.querySelector('video');
+return video ? JSON.stringify({ currentTime: video.currentTime, paused: video.paused }) : '{"present":false}';
+"@)
+  $script:facts['pauseFollowPreState'] = $mediaState
+  if ($mediaState -notmatch '"paused":true') {
+    Fail-Condition '第④项前置不成立：媒体不处于暂停态（t42 探针应在达标后暂停）' "observed=$mediaState"
+  }
+  $baseline = Get-WebDriverRowScrollLeft $SessionId 'structure'
+  $script:facts['pauseFollowBaselineScrollLeft'] = $baseline
+  $playButton = Find-WebDriverElement $SessionId '[data-testid="control-bar"] button'
+  Invoke-WebDriverElementClick $SessionId $playButton
+  Start-Sleep -Seconds 2
+  $afterAdvance = Get-WebDriverRowScrollLeft $SessionId 'structure'
+  $script:facts['pauseFollowAfterMediaAdvance'] = $afterAdvance
+  if ([double]$afterAdvance -ne [double]$baseline) {
+    Fail-Condition '第④项不成立：媒体时间推进改变了滚动 owner 的 scrollLeft' "baseline=$baseline after=$afterAdvance"
+  }
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="control-bar"] button')
+  Start-Sleep -Milliseconds 500
+  $pausedState = [string](Invoke-WebDriverScript $SessionId "const video = document.querySelector('video'); return video ? String(video.paused) : 'absent';")
+  $script:facts['pauseFollowPausedAgain'] = $pausedState
+  if ($pausedState -ne 'True') {
+    Fail-Condition '第④项前置不成立：第二次真实点击未使媒体暂停' "observed=$pausedState"
+  }
+  foreach ($nodeId in @('e2e-catalog-chapter-1', 'e2e-catalog-chapter-2')) {
+    $node = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""structure""] [data-testid=""progress-indicator-$nodeId""]"
+    Invoke-WebDriverElementClick $SessionId $node
+    Start-Sleep -Milliseconds 800
+    $after = Get-WebDriverRowScrollLeft $SessionId 'structure'
+    $script:facts["pauseFollowAfterSeek-$nodeId"] = $after
+    if ([double]$after -ne [double]$baseline) {
+      Fail-Condition '第④项不成立：暂停后公开目录 seek 仍强制滚动' "node=$nodeId baseline=$baseline after=$after"
+    }
+  }
+}
+
 $tauriDriver = $null
 $driverProcess = $null
 $sessionId = $null
@@ -463,8 +600,20 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   Write-Output 'Study Catalog E2E phase: judge 1 two-row catalog structure'
   Assert-CatalogTwoRowStructure $sessionId
 
+  $phase = 'judge-current-item-centered'
+  Write-Output 'Study Catalog E2E phase: judge 2 current item centered follow'
+  Assert-CurrentItemCentered $sessionId
+
+  $phase = 'judge-fade-owners'
+  Write-Output 'Study Catalog E2E phase: judge 3 edge fade owners'
+  Assert-FadeOwners $sessionId
+
+  $phase = 'judge-pause-stops-follow'
+  Write-Output 'Study Catalog E2E phase: judge 4 paused position changes do not force scrolling'
+  Assert-PauseStopsForcedFollow $sessionId
+
   $runSucceeded = $true
-  Write-Output 'Study Catalog desktop E2E phase A passed: fixture -> restart -> study page -> WAV playback -> two-row structure.'
+  Write-Output 'Study Catalog desktop E2E passed: fixture -> restart -> study page -> WAV playback -> two-row structure -> centered follow -> fade owners -> paused no-forced-follow.'
 } catch {
   $primaryError = $_
 } finally {
