@@ -269,14 +269,99 @@ if (!fixture || typeof fixture !== 'object') return 'absent';
 return String(fixture.status || 'unknown');
 "@)
   $script:facts['fixtureInterfaceStatus'] = $status
-  $script:facts['catalogBarPresent'] = [bool](Find-WebDriverElement $SessionId $listPageSelector -AllowMissing)
+  # 该 fact 记录的是「生产视频列表页是否出现」，名字必须与语义一致（t34 自曝缺陷的修正）。
+  $script:facts['videoListPagePresent'] = [bool](Find-WebDriverElement $SessionId $listPageSelector -AllowMissing)
   if ($status -eq 'absent') {
-    Fail-Condition 'AC-SU-01 的四项桌面条件无法判定：学习页长目录受控夹具公开接口未建立（两行结构/当前项居中跟随/边缘渐隐 owner/暂停后不再强制跟随都缺少夹具）' "interface=$fixtureInterface status=absent"
+    Fail-Condition 'AC-SU-01 的桌面条件无法判定：学习页长目录受控夹具公开接口未建立' "interface=$fixtureInterface status=absent"
   }
   if ($status -eq 'failed') {
     Fail-Condition '学习页长目录受控夹具公开接口报告建立失败' "status=failed"
   }
-  Fail-Condition '本段（t34）尚未实现四项裁判：夹具已建立但裁判实现属 t30b，禁止静默通过' "status=$status"
+}
+
+function Request-CatalogFixtureSeed([string]$SessionId) {
+  $requested = [string](Invoke-WebDriverScript $SessionId @"
+const fixture = $fixtureInterface;
+if (!fixture || typeof fixture.seed !== 'function') return 'absent';
+fixture.seed();
+return 'requested';
+"@)
+  if ($requested -ne 'requested') {
+    Fail-Condition '受控夹具公开接口缺少 seed：无法建立学习页长目录' "observed='$requested'"
+  }
+  Wait-WebDriverCondition $SessionId 'the controlled catalog fixture publication' @"
+const fixture = $fixtureInterface;
+if (!fixture) return false;
+return fixture.status === 'seeded' || fixture.status === 'failed';
+"@
+  $declared = [string](Invoke-WebDriverScript $SessionId @"
+const fixture = $fixtureInterface;
+return JSON.stringify({ status: fixture.status, durationSeconds: fixture.durationSeconds, videoId: fixture.videoId, currentNodeId: fixture.currentNodeId, chapterCount: fixture.chapterCount, sectionCount: fixture.sectionCount, paragraphCount: fixture.paragraphCount, error: fixture.error || null });
+"@)
+  $script:facts['catalogFixtureDeclaration'] = $declared
+  if ($declared -notmatch '"status":"seeded"') {
+    Fail-Condition '受控夹具未建立：学习页长目录未能写入隔离数据库' "declaration=$declared"
+  }
+}
+
+function Assert-WavPlaybackAdvances([string]$SessionId) {
+  # 真实点击生产播放按钮；currentTime/readyState/duration 用 execute/sync 读，
+  # 标注为「真实媒体属性读」，不是驱动 DOM 事实。
+  $playButton = Find-WebDriverElement $SessionId '[data-testid="control-bar"] button'
+  Invoke-WebDriverElementClick $SessionId $playButton
+  $deadline = (Get-Date).AddSeconds(30)
+  $state = ''
+  do {
+    Start-Sleep -Milliseconds 500
+    $state = [string](Invoke-WebDriverScript $SessionId @"
+const video = document.querySelector('video');
+if (!video) return '{"present":false}';
+return JSON.stringify({ present: true, currentTime: video.currentTime, readyState: video.readyState, duration: video.duration, paused: video.paused, errorCode: video.error ? video.error.code : null });
+"@)
+  } while ($state -notmatch '"currentTime":(1[0-9]|[2-9][0-9])' -and (Get-Date) -lt $deadline)
+  $script:facts['wavPlayback'] = $state
+  if ($state -notmatch '"currentTime":(1[0-9]|[2-9][0-9])') {
+    Fail-Condition '合成 WAV 未被 <video> 接受或未推进：真实播放 30s 内 currentTime 未到 10（该结论决定下一段是否改用 CI 内 ffmpeg 生成的媒体形态）' "observed=$state"
+  }
+  $pauseButton = Find-WebDriverElement $SessionId '[data-testid="control-bar"] button'
+  Invoke-WebDriverElementClick $SessionId $pauseButton
+}
+
+function Assert-CatalogTwoRowStructure([string]$SessionId) {
+  # ① 长目录两行结构 + 真实横向溢出：全部用驱动元素端点读真实几何。
+  foreach ($level in @('structure', 'paragraph')) {
+    Find-WebDriverElement $SessionId "[data-catalog-row=""$level""]" | Out-Null
+    $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$level""]"
+    $children = @(Find-WebDriverElements $SessionId "[data-catalog-scroll-row=""$level""] > *")
+    if ($children.Count -lt 2) {
+      Fail-Condition "长目录 $level 行缺少可裁判的子项" "count=$($children.Count)"
+    }
+    $ownerRect = Get-WebDriverElementRect $SessionId $owner
+    $firstRect = Get-WebDriverElementRect $SessionId $children[0]
+    $lastRect = Get-WebDriverElementRect $SessionId $children[$children.Count - 1]
+    $extent = ([double]$lastRect.x + [double]$lastRect.width) - [double]$firstRect.x
+    $script:facts["${level}RowOwnerWidth"] = $ownerRect.width
+    $script:facts["${level}RowExtent"] = $extent
+    $script:facts["${level}RowChildren"] = $children.Count
+    if ($extent -le [double]$ownerRect.width) {
+      Fail-Condition "长目录 $level 行没有真实横向溢出（横向不换行条件不成立）" "extent=$extent ownerWidth=$($ownerRect.width) children=$($children.Count)"
+    }
+  }
+  $structureItems = @(Find-WebDriverElements $SessionId '[data-catalog-scroll-row="structure"] [data-testid^="progress-indicator-"]')
+  $paragraphItems = @(Find-WebDriverElements $SessionId '[data-catalog-scroll-row="paragraph"] [data-testid^="paragraph-"]')
+  $script:facts['structureItemCount'] = $structureItems.Count
+  $script:facts['paragraphItemCount'] = $paragraphItems.Count
+  if ($structureItems.Count -lt 24) {
+    Fail-Condition '结构行（章节/小节）项目数不足' "count=$($structureItems.Count) expected>=24"
+  }
+  if ($paragraphItems.Count -lt 40) {
+    Fail-Condition '段落行项目数不足' "count=$($paragraphItems.Count) expected>=40"
+  }
+  # 补充证据（来源标注）：computed style 只作补充，不单独判决。
+  $script:facts['catalogRowComputedStyle'] = [string](Invoke-WebDriverScript $SessionId @"
+const rows = Array.from(document.querySelectorAll('[data-catalog-scroll-row]'));
+return JSON.stringify(rows.map((row) => { const style = getComputedStyle(row); return { level: row.getAttribute('data-catalog-scroll-row'), overflowX: style.overflowX, flexWrap: style.flexWrap }; }));
+"@)
 }
 
 $tauriDriver = $null
@@ -352,8 +437,34 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   Write-Output 'Study Catalog E2E phase: catalog fixture availability'
   Assert-CatalogFixtureAvailability $sessionId
 
+  $phase = 'seed-fixture'
+  Write-Output 'Study Catalog E2E phase: publish controlled catalog fixture'
+  Request-CatalogFixtureSeed $sessionId
+  Close-WebDriverSession $sessionId
+  $sessionId = $null
+
+  $phase = 'restart-and-open-study'
+  $sessionId = New-WebDriverSession $appBinary
+  Wait-WebDriverCondition $sessionId 'the video list page after the desktop restart' "return Boolean(document.querySelector('$listPageSelector'));"
+  Write-Output 'Study Catalog E2E phase: open the study page through the production card action'
+  $cardAction = Find-WebDriverElement $sessionId '[data-testid^="card-"] button'
+  $cardLabel = Get-WebDriverElementAttribute $sessionId $cardAction 'aria-label'
+  if ($cardLabel -notmatch '打开视频') {
+    Fail-Condition '列表卡主操作不是既有「打开视频」动作，无法经生产路径进入学习页' "aria-label='$cardLabel'"
+  }
+  Invoke-WebDriverElementClick $sessionId $cardAction
+  Wait-WebDriverCondition $sessionId 'the production study page' "return Boolean(document.querySelector('$pageSelector'));"
+
+  $phase = 'wav-playback-probe'
+  Write-Output 'Study Catalog E2E phase: synthetic WAV playback probe'
+  Assert-WavPlaybackAdvances $sessionId
+
+  $phase = 'judge-row-structure'
+  Write-Output 'Study Catalog E2E phase: judge 1 two-row catalog structure'
+  Assert-CatalogTwoRowStructure $sessionId
+
   $runSucceeded = $true
-  Write-Output 'Study Catalog desktop E2E passed.'
+  Write-Output 'Study Catalog desktop E2E phase A passed: fixture -> restart -> study page -> WAV playback -> two-row structure.'
 } catch {
   $primaryError = $_
 } finally {
