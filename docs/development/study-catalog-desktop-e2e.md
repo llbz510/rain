@@ -29,7 +29,7 @@ npm run e2e:study-catalog
 - `RAIN_E2E_MODE=1` + `RAIN_E2E_RUN_MODE=study-catalog` 只需要隔离 SQLite（`RAIN_E2E_DB_PATH`）与一份媒体文件路径（复用既有 `RAIN_E2E_VIDEO_PATH`）；不需要 evidence id、Whisper 模型或任何 LLM Key。
 - **首次启动必须是真实空库**：短模式只武装夹具公开面，不导航、不启动导入、不写任何业务行。
 - 夹具只经 `window.__RAIN_STUDY_CATALOG_FIXTURE__.seed()` 由脚本显式请求，仍走生产 `getDb()` / `insertVideo` / `insertNodes` / `insertSentences`：1 个 `status:'ready'`、`duration:14` 的视频；8 章 × 3 节 + **恰好 40 段落**（前 16 节各 2 段、后 8 节各 1 段），章 1.75s / 节 0.583s，时间轴全部落在 `[0,14]`；**每个 paragraph 都必须有一条 sentence**（生产的 `loadVideo` 要求「至少一个 paragraph 且 sentences 非空」，见 `src/store/rain-store.ts:176/:180`，否则学习页永不出现）。
-- 媒体形态：优先无外部工具依赖的 Node 生成 WAV；**该形态是否被 `<video>` 接受并推进 `currentTime` 至今未被观测**（上个 run 未跑进 `wav-playback-probe`）；若探针报告未推进，必须改用 CI 内 ffmpeg 生成的短视频并附探针证据。
+- 媒体形态：优先无外部工具依赖的 Node 生成 WAV；**该形态是否被 `<video>` 接受并推进 `currentTime` 至今未被观测**（所有已结论的 run 都未跑进 `wav-playback-probe`：`055a2fa` 的 run `36311722434` 停在 `restart-and-open-study`，`d14f384` 的 run 被下一次推送按 `concurrency` 取消）；若探针报告未推进，必须改用 CI 内 ffmpeg 生成的短视频并附探针证据。
 - 夹具落库后脚本**关闭并重建 WebDriver session**（真实进程重启），再真实点击生产列表卡主操作（`aria-label="打开视频：<标题>"`）进入学习页。
 
 ## 4. 失败诊断（脱敏、有界）
@@ -38,7 +38,7 @@ npm run e2e:study-catalog
 
 `summary.json` 必须给出 `phase`、主错误、**非空 `missingConditions`** 与 `observed`。`observed` 已包含：能力探针结论（`/element/{id}/rect`、`/actions`）、`fixtureInterfaceStatus`、`fixtureStatusAfterRestart`、`catalogFixtureDeclaration`、`cardButtonCount` 与 `cardPrimaryActionLabels`（原文）、`studyPageWaitCriterion`（判据 + 超时阈值）、`studyPageTimeoutState`（`currentPage` / `role="alert"` 文案 / study-interface 与 video 存在性 / `video.error.code`）等。已知 Key、`sk-*` 与 Bearer token 一律 `[REDACTED]`；诊断不含隔离 SQLite；成功 run 清理 stale 诊断。
 
-**已知诊断缺口（已登记）**：`tauri-driver` 的 stdout/stderr 在失败 artifact 中为 0 字节（既有模式的系统性行为）——因此在能修好之前，定位必须依赖 `summary.json` 的 `observed`。
+**已知诊断缺口（已登记，未修）**：`tauri-driver` 的 stdout/stderr 在 failure artifact 中为 **0 字节**，因此定位必须依赖 `summary.json` 的 `observed` 与阶段名。依据：run [`36311722434`](https://github.com/llbz510/rain/actions/runs/36311722434) 的 artifact `study-catalog-desktop-e2e-failure`（压缩 867 字节）解包后只有三个文件 —— `summary.json` 1059 字节、`tauri-driver.log` **0 字节**、`tauri-driver.err.log` **0 字节**；捕获路径与本 Judge 脚本及 AC-VL-04 的既有 owner 完全相同（`scripts/run-study-catalog-e2e.ps1:557-561` 与 `scripts/run-video-list-e2e.ps1:622-626` 的 `Start-Process -RedirectStandardOutput/-RedirectStandardError -WindowStyle Hidden`），属**两条桌面 Judge 共有的既有模式**。0 字节有两种可能（重定向捕获失效 / `tauri-driver` 本就静默），区分二者需要脚本侧实验，且任何修法都必须同时论证对 AC-VL-04 owner 的影响，故本次只登记不修。
 
 ## 5. 截图（仅附件）
 
@@ -49,7 +49,7 @@ npm run e2e:study-catalog
 - `.github/workflows/study-catalog-desktop-e2e.yml` 在 `pull_request`（paths 过滤到本 Judge 相关代码与脚本）上运行，使被审 head 上就有真实 run；`workflow_dispatch` 只是**合并后**的重放入口（新 workflow 文件在功能分支上无法 dispatch）。
 - 该 workflow **不是** master 必需状态检查，不改分支保护，不修改受保护分支，不 dispatch 任何 Release/GPU workflow，不使用任何 Rain secret、模型或 Whisper。
 - 与 AC-HE-05 的 owner（`runtime-settings-desktop-e2e.yml` + 其脚本）和 AC-VL-04 的 owner（`video-list-desktop-e2e.yml` + 其脚本）**完全独立**，本 Judge 不改动二者。
-- **证据对应规则（STD-67-4）**：桌面证据对应被测 head 的**代码树**；`paths` 有意不含 `docs/**`，因此若仅文档改动使 head 前移，必须先用 `git diff <旧 head> <新 head> -- <代码路径>` 证明代码树未变，否则需在合并后以 `workflow_dispatch` 在合并提交上重放，才可引用该证据。
+- **证据对应规则（STD-67-4）**：桌面证据对应被测 head 的**代码树**；`paths` 有意不含 `docs/**`，因此若仅文档改动使 head 前移，必须先用 `git diff <旧 head> <新 head> -- <代码路径>` 证明代码树未变，否则需在合并后以 `workflow_dispatch` 在合并提交上重放，才可引用该证据。实测补充：`pull_request` 事件的 `paths` 过滤按 **PR 相对基线的累计 diff** 判定，因此仅改 `docs/**` 的推送同样会在新 head 上重跑本 workflow，并因 `concurrency` 取消同一 ref 的上一轮（本分支实测：`d14f384` 的三条 run `36312506221`/`36312506232`/`36312506368` 被 `51cc9f1` 的推送取消）——取消属常态，引用证据仍须先证明代码树未变。
 - 不参与 `harness:check`；默认 Harness 不运行任何桌面 Judge。
 
 ## 7. 未覆盖边界（诚实声明）
