@@ -1,0 +1,52 @@
+﻿diff --git a/docs/PROJECT_STATE.md b/docs/PROJECT_STATE.md
+index 38cf7df..e6131d9 100644
+--- a/docs/PROJECT_STATE.md
++++ b/docs/PROJECT_STATE.md
+@@ -2377,6 +2377,16 @@ Protected PR [#46](https://github.com/llbz510/rain/pull/46) passed its Clean Win
+ 
+ The exact remote error was `Invoke-ReleaseEvidenceNsisInstallAndVerify is not recognized` after the workflow first imported `nvidia-release-evidence-contract.psm1` and then imported `release-artifact-generator.psm1`. A one-second local PowerShell loop first reproduced that exact import order: the verifier is exported after its module alone, but disappears after the generator's transitive `Import-Module -Force` reloads the same dependency. The public regression in `scripts/release-artifact-generator.test.ts` first RED with `Controlled workflow import sequence lost the NSIS install verifier.` The minimal correction removes only that nested `-Force`; the generator still loads the dependency, but no longer removes commands already exported to the workflow. The focused test is GREEN, the complete generator suite is GREEN (73/73), and the complete NVIDIA evidence-contract suite is GREEN (66/66). The full frontend suite is GREEN (99 files passed, 724 tests passed, 1 intentionally skipped); `tsc --noEmit`, `harness:control`, sequential `build:e2e` and production `build`, PowerShell AST for all 14 tracked scripts/modules, and `git diff --check` are also GREEN. Independent Spec and Standards reviews both return `PASS`, with P0/P1/P2 empty. A protected PR and another controlled hosted build remain pending. No local Cargo/Rust/Whisper/CUDA build, `harness:check`, real installer, GPU, model or LLM test has run for this correction.
+ 
++### 2026-08-25 user-cancelled controlled GPU artifact build
++
++PR [#47](https://github.com/llbz510/rain/pull/47) passed protected Clean Windows Harness run [`32851392526`](https://github.com/llbz510/rain/actions/runs/32851392526) and merged as `master@4baced9fc44c139b8a9fe20f6ddad0b0ff724776`. Controlled GPU Artifact Build run [`32852597521`](https://github.com/llbz510/rain/actions/runs/32852597521) used that tooling commit and fixed candidate target `3006757838b972b511917663e4ba8328804607d6`.
++
++The user explicitly directed Rain to abandon remote compilation. The run was cancelled while step 13, `Build CUDA worker and NSIS candidate remotely`, was still running. Steps 14 and 16–19 were skipped, so no release artifact manifest, core artifact, controlled build record, administrator launcher, control artifact or upload digest was produced. The canonical candidate-source cleanliness check and invocation-owned TEMP cleanup both completed successfully after cancellation.
++
++This cancellation is not a build failure diagnosis and is not an Artifact, GPU test, Release Evidence or formal Release. `AC-RL-01` remains Gap, `AC-RL-02/08/12` remain Partial, and `AC-RL-10/18` remain Gap. No candidate installer may be inferred from partial remote work. Unless the user later gives new explicit authorization, future sessions must not redispatch or replace this remote build, and must not route the abandoned compilation to local Cargo/Rust/Whisper/CUDA/installer execution. The next unique action is the read-only Launch feature-completeness audit already defined by the Active agent-first plan.
++
++This control-state sync changes documentation only. It does not change product code, workflow, locked Harness, Evidence, artifact files or the protected PR #47 history. Local validation is limited to `npm.cmd run harness:control` and `git diff --check`; no local Cargo/Rust/Whisper/CUDA build, `harness:check`, installer, GPU, model or LLM execution is permitted.
++
+ ## Maintenance checklist for every future session
+ 
+ Before making changes:
+diff --git a/docs/development/agent-first-development-plan.md b/docs/development/agent-first-development-plan.md
+index 3a74655..205b746 100644
+--- a/docs/development/agent-first-development-plan.md
++++ b/docs/development/agent-first-development-plan.md
+@@ -229,8 +229,8 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败
+ 
+ ## 7. 下一会话唯一推荐动作
+ 
+-当前原子 Slice 是 **M3 controlled merged-target artifact build**。它从 `3006757838b972b511917663e4ba8328804607d6` 的精确候选源码构建受控 NSIS 候选，但 workflow/generator 位于后续、独立记录的 tooling commit；两者不得混淆。该 Slice 只建立固定 `windows-2022` hosted Windows 构建，不能改用会漂移到 VS2026 的 `windows-2025`/`windows-latest` 或自托管/变量 runner：固定且校验精确为 4.0.0 的 CMake 展开目录必须同时服务 CUDA worker 和独立 Tauri/Cargo 主构建，完成两个消费者后才在 always/finally cleanup 中删除；以 source-derived installer 文件名/kind 与基本 MZ/PE 形状进入唯一 TEMP 的真实静默安装，从实际 installed tree 反算 artifact manifest，同时保留 7-Zip installer archive 解包 hygiene Judge 作为增量扫描。读取真实 installed tree 完成后，finally 运行生成的 uninstaller `/S`、核对退出、完整 payload 与可观察系统副作用清理，并聚合清除安装根、archive 根、owned target 与 CMake TEMP 的错误；再生成独立 build record 和手工管理员 Evidence launcher。为避免循环，first core upload 仅含 installer/manifest/checksums；其 digest 才允许写入 record，随后才生成 launcher 并第二次上传 control artifact。它不 dispatch workflow、不生成 Release Evidence、不发布 GitHub Release、不运行本机 Cargo/installer/GPU/model/LLM，也不把 `AC-RL-01/02/08/10/12` 升级。
++用户于 2026-08-25 明确要求彻底放弃远程编译。Controlled GPU Artifact Build run `32852597521` 已被人工取消：固定候选源码仍是 `3006757838b972b511917663e4ba8328804607d6`，控制工具提交是 `4baced9fc44c139b8a9fe20f6ddad0b0ff724776`；run 在 CUDA worker/NSIS 远程构建阶段终止，manifest、core artifact、controlled build record、launcher 和 control artifact 均未生成或上传。清理步骤成功。该结果不是 Artifact、GPU 实测、Evidence 或 Release，也不升级 `AC-RL-01/02/08/10/12`。
+ 
+-先以 fake installed-tree、fake installer-archive、fake process/system-side-effect adapter、PowerShell CLI、runner provenance、launcher 与 workflow safety seams 完成 RED-to-GREEN；随后才可通过 PR、现有 Clean Windows Harness、独立 Spec/Standards review 和受保护合并。原 `AC-RL-12` 解包 Judge 未经 Harness Migration 不得退役；archive scan 是 installed-tree scan 的增量合同，不可互相替代。只有合并后由用户人工 dispatch 的 workflow 才能构建精确 target；只有用户手工以管理员身份运行生成 launcher 且 provider readiness 通过，才可考虑真实 M3-S3 Evidence。reviewer 必须独立核对 candidate target SHA、tooling SHA、record、artifact bytes、日志和证据边界。
++除非用户以后重新明确授权，后续会话不得再次 dispatch、重跑或替代该远程编译，也不得改为本机 Cargo/Rust/Whisper/CUDA/installer 构建来绕过本决定。已实现的 workflow、generator、archive/installed-tree 双 Judge 与受保护合并历史保留，不因取消而退役；如未来恢复，仍须重新确认精确 target/tooling、受保护流程和全部 Evidence 边界。
+ 
+-本 Slice 的退出动作已经由用户于 2026-08-23 调整：受保护合并并确认 controlled build GREEN 后，不继续自动进入 M3-S3 真实 GPU Evidence、签名、许可或下载 UX。下一唯一 Slice 改为只读的 **Launch 功能完整性审计**：逐项对照 Confirmed AC、`harness-coverage.md`、生产路由/界面和真实公开接口，把“真实可用”“部分实现”“只有测试或影子入口”“未实现”分开记录，并据此选择一个用户可见的 Confirmed 功能缺口进入下一次 RED-to-GREEN。审计本身不修改 AC、不实现 Proposed 行为，也不把测试存在等同于功能完成。
++下一唯一 Slice 是只读的 **Launch 功能完整性审计**：逐项对照 Confirmed AC、`harness-coverage.md`、生产路由/界面和真实公开接口，把“真实可用”“部分实现”“只有测试或影子入口”“未实现”分开记录，并据此选择一个用户可见的 Confirmed 功能缺口进入下一次 RED-to-GREEN。审计本身不修改 AC、不实现 Proposed 行为，也不把测试存在等同于功能完成。
+diff --git a/docs/development/rain-project-delivery-plan.md b/docs/development/rain-project-delivery-plan.md
+index ecb34b9..6b12d06 100644
+--- a/docs/development/rain-project-delivery-plan.md
++++ b/docs/development/rain-project-delivery-plan.md
+@@ -223,7 +223,9 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
+ 
+ ### M3-S3 NVIDIA Windows Evidence
+ 
+-状态：`In progress — controlled artifact-build prerequisite`。runner safety enablement 已合并；确定性取消 fixture 和 session-scoped process-tree adapter 已存在，但未经权限验证的 provider subscription 继续 fail-closed。当前原子 Slice 从精确 candidate source target `3006757838b972b511917663e4ba8328804607d6` 建立独立、固定 `windows-2022` hosted controlled build、artifact manifest、build record 和手工管理员 launcher；不得改为 `windows-2025`/`windows-latest`、VS2026、self-hosted 或变量 runner，因为 CUDA 12.9 的受控 VS2022 边界需要稳定的 VS17 image。target source SHA 与 workflow/generator tooling SHA 必须分别记录和验证；workflow 按 `RUNNER_TEMP`、`GITHUB_WORKSPACE`、下载根和两个 target 根实际所在卷分别执行阶段磁盘门禁。native CUDA/LLVM/NSIS 和固定 CMake 4.0.0 的安装/下载清理/磁盘错误由一个深 module 聚合，只有 `cmakeReady` 后 workflow 才能消费 CMake root；展开目录必须贯穿 CUDA worker 与独立 Tauri/Cargo 主构建，之后在 always/finally cleanup 中删除。installer archive 解包根必须保留到 archive/installed-tree 双扫描完成后再聚合清理，且只有非空并含 AMD64 Rain 和 hash-matched release payload 的 7-Zip tree 才能声明 archive hygiene scope。它不 dispatch workflow、不构建本机候选、不执行短样本、不生成 Release Evidence，且不能通过保护合并直接重建候选或执行下列 Judge。
++状态：`Paused — remote compilation abandoned by user on 2026-08-25`。runner safety enablement 与受控构建实现保留，但 Controlled GPU Artifact Build run `32852597521` 已按用户要求在 CUDA worker/NSIS 远程构建阶段取消；后续 manifest、core/control artifacts、build record 和 launcher 步骤均未执行，清理步骤成功。没有候选 Artifact、GPU 实测、Evidence 或 Release，`AC-RL-08` 仍为 Partial。除非用户以后重新明确授权，不再 dispatch 或替代这条远程编译，也不得转为本机重型构建。
++
++以下条目保留为未来重新授权时才可执行的 M3-S3 Judge，不是当前工作队列：
+ 
+ - 安装精确目标提交的正式 GPU 增强候选包。
+ - 按 `CONTEXT.md` 的唯一资格谓词记录生产 worker probe、模型显存门禁、GPU/驱动/显存/协议和包/模型哈希；只签发该精确配置，不外推未验证型号。
