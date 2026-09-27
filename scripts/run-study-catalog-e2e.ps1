@@ -572,12 +572,19 @@ function Get-CatalogRowItemVisibility([string]$SessionId, [string]$Level, [strin
   }
 }
 
-function Move-CatalogRowItemIntoView([string]$SessionId, [string]$Level, [string]$TargetText, [int]$MaxSteps) {
+function Move-CatalogRowItemIntoView([string]$SessionId, [string]$Level, [string]$TargetText, [int]$MaxSteps, [string]$FactPrefix) {
   # 用**真实滚轮**（/actions wheel，origin = 行 owner）把目标行项滚入 owner 可视框：不用任何 JS 滚动，
   # 也不用 element-click（其预滚语义会污染基线）。每步把行项中心与 owner 中心对齐（单步限 ±800px），
   # 收敛后目标行项完整落在可见框内，才可以对它发 in-view centre 的真实指针点击。
+  # 宿主符号约定（本脚本实测，勿反）：**正 deltaX 增大 scrollLeft**——依据同脚本 Assert-FadeOwners 的实测：
+  # `for (… -lt 4) { … 200 }` → scrollLeft=800；`for (… -lt 16) { … 2000 }` → max 2072；
+  # 左端回滚的 `-2000` → scrollLeft 回到 0。因此步长必须是「行项中心 − owner 中心」：
+  # 行项在右 ⇒ 正 ⇒ 增大 scrollLeft；行项在左 ⇒ 负 ⇒ 减小 scrollLeft。
+  # 历史缺陷（t60 三方诊断，run 36321757895）：此处原写成 `ownerCenter - itemCenter`（符号反向）⇒
+  # 目标在最左而行已在 max 2072 时每步都被钳制，8 步零位移（恒等式 ownerLeft − scrollLeft = itemLeft = −1872 吻合）。
   $owner = Find-WebDriverElement $SessionId "[data-catalog-scroll-row=""$Level""]"
   $steps = 0
+  $stepFacts = @()
   $item = Find-CatalogRowItemByText $SessionId $Level $TargetText
   if ($null -eq $item) { return @{ itemId = $null; steps = $steps; visibility = $null } }
   $visibility = Get-CatalogRowItemVisibility $SessionId $Level $item
@@ -586,12 +593,21 @@ function Move-CatalogRowItemIntoView([string]$SessionId, [string]$Level, [string
     $itemRect = Get-WebDriverElementRect $SessionId $item
     $ownerCenter = [double]$ownerRect.x + ([double]$ownerRect.width / 2)
     $itemCenter = [double]$itemRect.x + ([double]$itemRect.width / 2)
-    $delta = [int][Math]::Round($ownerCenter - $itemCenter)
+    $delta = [int][Math]::Round($itemCenter - $ownerCenter)
     if ($delta -eq 0) { break }
     if ($delta -gt 800) { $delta = 800 }
     if ($delta -lt -800) { $delta = -800 }
+    $scrollLeftBefore = Get-WebDriverRowScrollLeft $SessionId $Level
     Invoke-WebDriverWheelScroll $SessionId $owner $delta
     $steps += 1
+    $scrollLeftAfter = Get-WebDriverRowScrollLeft $SessionId $Level
+    $stepFacts += "step=$steps delta=$delta scrollLeftBefore=$scrollLeftBefore scrollLeftAfter=$scrollLeftAfter"
+    $script:facts["${FactPrefix}IntoViewSteps-$TargetText"] = ($stepFacts -join ' | ')
+    # SR-t58-2 / STD-69-16：无进展即立刻以具名条件 Fail——不再安静烧完上界步数
+    # （t60 的 RED 正是被「8 步空转但只报最后状态」掩盖的）。
+    if ([double]$scrollLeftAfter -eq [double]$scrollLeftBefore) {
+      Fail-Condition "第④项前置不成立：真实滚轮该步无进展（滚动方向可能反向，或该方向已到滚动极限）" "item=$TargetText step=$steps delta=$delta scrollLeftBefore=$scrollLeftBefore scrollLeftAfter=$scrollLeftAfter rowMetrics=$(Get-CatalogRowScrollMetrics $SessionId $Level)"
+    }
     $item = Find-CatalogRowItemByText $SessionId $Level $TargetText
     if ($null -eq $item) { return @{ itemId = $null; steps = $steps; visibility = $null } }
     $visibility = Get-CatalogRowItemVisibility $SessionId $Level $item
@@ -816,7 +832,7 @@ function Invoke-PausedCatalogSeek([string]$SessionId, [string]$TargetText, [stri
   if ($null -eq $window) {
     Fail-Condition "第④项无法判定：行项「$TargetText」的夹具时间窗推导失败" "declaration=$($script:facts['catalogFixtureDeclaration'])"
   }
-  $moved = Move-CatalogRowItemIntoView $SessionId 'structure' $TargetText 8
+  $moved = Move-CatalogRowItemIntoView $SessionId 'structure' $TargetText 8 'pauseFollow'
   if ($null -eq $moved.itemId) {
     $script:facts['catalogRowItemCalibration'] = Get-CatalogRowItemCalibration $SessionId
     Fail-Condition "第④项不成立：结构行找不到真实行项「$TargetText」" "rowItems=$((Get-CatalogRowItems $SessionId 'structure').Count)"
