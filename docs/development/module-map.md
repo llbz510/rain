@@ -138,7 +138,7 @@ cancelAndWait(videoId)
 
 布局状态只决定区域可见性，不拥有学习事实。生产学习页在三种布局间切换时必须保留同一个 media 实例；隐藏视频不得卸载它，否则控制栏会失去真实播放对象并重置播放状态。M16 占位组件只裁判局部布局契约，生产行为由 `study-layout.test.tsx` 裁判。
 
-数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。`src/models/database-adapter.ts` 是内部 adapter seam：公共 `Database` 只含两种 adapter 都真实支持的 interface，SQLite 的 `exec/query` 与内存表读写不会互相伪装。检查点编码和读写归 `src/models/database-checkpoints.ts`，Node/Sentence 普通持久化归 `src/models/database-content.ts`，Video 普通记录、列表/搜索和进度归 `src/models/database-videos.ts`，视频跨表删除归 `src/models/database-video-deletion.ts`，Settings 单 key 与批量 interface 归 `src/models/database-settings.ts`，导入状态转换和恢复判断归 `src/models/database-import-state.ts`，原子导入事务归 `src/models/database-import-atomic.ts`，Note 映射、读取与写入归 `src/models/database-notes.ts`；普通读写与原子写入共享 `src/models/database-content-rows.ts` 的 Node/Sentence 行格式。Note/reference 的真实 SQLite 创建必须通过 `insert_note_atomically` 进入 `src-tauri/src/note_persistence.rs`，Video 删除必须通过 `delete_video_atomically` 进入 `src-tauri/src/video_deletion.rs`，Runtime Settings 批量提交必须通过 `apply_settings_atomically` 进入 `src-tauri/src/settings_persistence.rs`；这些跨记录行为都不能退回多次前端 SQL-plugin 调用。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接导入这些内部模块。
+数据库的稳定公共入口、职责到 AC/裁判的映射和拆分顺序见 `docs/development/database-control.md`。schema 已由 `src/models/database-schema.ts` 统一定义，内存字段列表和 Tauri 建表 SQL 不得再维护两份。`src/models/database-adapter.ts` 是内部 adapter seam：公共 `Database` 只含两种 adapter 都真实支持的 interface，SQLite 的 `exec/query` 与内存表读写不会互相伪装。检查点编码和读写归 `src/models/database-checkpoints.ts`，Node/Sentence 普通持久化归 `src/models/database-content.ts`，Video 普通记录、列表/搜索和进度归 `src/models/database-videos.ts`，视频跨表删除归 `src/models/database-video-deletion.ts`，Settings 单 key 与批量 interface 归 `src/models/database-settings.ts`，导入状态转换和恢复判断归 `src/models/database-import-state.ts`，原子导入事务归 `src/models/database-import-atomic.ts`，Note 映射、读取与写入归 `src/models/database-notes.ts`；普通读写与原子写入共享 `src/models/database-content-rows.ts` 的 Node/Sentence 行格式。Note/reference 的真实 SQLite 创建必须通过 `insert_note_atomically` 进入 `src-tauri/src/note_persistence.rs`，Video 删除必须通过 `delete_video_atomically` 进入 `src-tauri/src/thumbnail_lifecycle.rs`（先校验合法 Video ID，再委托 `src-tauri/src/video_deletion.rs` 在单连接事务内完成六表级联，提交后才执行受控 app-owned 缩略图文件副作用），`video_deletion.rs` 仍是事务内跨表删除与回滚的唯一执行者而不再是 command 入口，Runtime Settings 批量提交必须通过 `apply_settings_atomically` 进入 `src-tauri/src/settings_persistence.rs`；这些跨记录行为都不能退回多次前端 SQL-plugin 调用。业务调用方仍只从 `@/models/database` 使用有业务含义的操作，不得直接导入这些内部模块。
 
 当前加载接口是 `loadVideo(videoId) -> LoadVideoResult`。它在 Store 内完成状态、段落和句子完整性检查，成功后一次写入当前视频缓存；页面只根据失败结果显示错误。新的调用方不得绕开该接口自行拼装学习页状态。
 
@@ -212,7 +212,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 
 - 在线 URL 的受控本地媒体交接已进入 `AC-LV-17`：Controller 拥有可追踪记录、失败/取消/重试和 Pipeline 交接，Rust `ytdlp` module 拥有可取消探测/下载、进度、临时目录和最终提交，页面只保留输入适配。真实站点差异与完整外网 Evidence 仍是独立 Gap。
 - 模型能力记录、持久化、配置变化失效、角色分配拦截、三种角色探针以及本地导入/学习页运行入口门禁已实现。`ggml-large-v3.bin` CUDA + DashScope `qwen3-omni-flash`（结构化、文本助手）已有 schema v2 Evidence；下一个模型配置仍须独立探针和完整 E2E，不得继承这个 `Verified` 结论。
-- 本地缩略图创建、持久化和卡片渲染由 `AC-LV-18` 控制；应用所有缩略图随 Video 删除及孤儿 GC 已由 `AC-VL-05/06` 冻结语义，但对应 Rust lifecycle module、生产接线和真实文件/SQLite Judge 仍为 Gap。
+- 本地缩略图创建、持久化和卡片渲染由 `AC-LV-18` 控制；`AC-VL-05` 已由 Rust `thumbnail_lifecycle` 生产 owner 接到既有 Video 删除 transaction，使用合法 ID 派生唯一 app-owned path、提交后受控文件副作用和真实文件/SQLite Judge；`AC-VL-06` orphan GC 仍是独立 Gap。
 
 ## 8. Harness Migration 结果
 
@@ -248,7 +248,8 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | --- | --- | --- |
 | `AC-RL-01..20` | Tauri release config、GPU overlay/bundle、installer lifecycle、数据库 migration deep command、artifact/Evidence validator、人类 release/legal/security owner | 主程序保持 CPU-safe；CUDA 只在隔离 worker；安装/升级/卸载/签名/发布/回滚各自独立裁判，页面或 AI 不拥有私钥和法律批准 |
 | `AC-VL-01..04/07` | `VideoListPage` composition、`VideoCard`、公共 Database video query interface | 页面组合查询与动作，不复制排序/搜索/持久化规则；视觉与业务行为分层裁判 |
-| `AC-VL-05/06` | 新的 Rust thumbnail lifecycle deep module + 现有数据库删除 workflow | 只处理 app-owned `thumbnails/`；数据库 commit、keep-set 和真实文件副作用由深 module 协调，永不接受任意用户路径 |
+| `AC-VL-05` | Rust `thumbnail_lifecycle` deep module + 现有数据库删除 workflow | 只处理合法 ID 推导的 app-owned `thumbnails/` target；先 commit、后由 blocking handle-based filesystem owner 删除，Windows 必须核验 opened target 的 resolved path，永不接受任意用户路径 |
+| `AC-VL-06` | 同一 Rust thumbnail lifecycle deep module + keep-set/GC workflow | orphan keep-set、并发与受控 GC 仍未实现；复用 path validation，不得把扫描放回页面或 command adapter |
 | `AC-SU-01..07` | `StudyInterface` composition、`src/study/` navigation/session、catalog、VideoZone、shortcut/focus policy、layout persistence | 页面保持组合入口；播放/选择/预览/面板焦点使用共享事实，不在组件间复制快捷键或持久状态 |
 | `AC-UX-01..06` | `src/index.css` token system、生产组件、visual/accessibility policy | CSS token 是唯一视觉事实源；完整页面 visual/keyboard/axe/contrast Judge 不由 token 存在自证 |
 | `AC-PF-01..05` | 独立 performance/soak runners + 对应 startup/List/Study/progress/App lifecycle Owner | runner 只测量，不成为生产 Owner；冻结机器、fixture、样本数、p95、资源斜率和退出残留必须写入 Evidence |
