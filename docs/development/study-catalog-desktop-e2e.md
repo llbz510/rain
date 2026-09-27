@@ -24,11 +24,18 @@ npm run e2e:study-catalog
 | ③ 边缘渐隐 owner | 左端（`scrollLeft=0`）必须「只右」——该前置由**真实 `/actions` 滚轮负 deltaX 回滚**建立（②已把两行滚到中段，回滚不改渐隐判据，且不是用 JS 改写 `scrollLeft`）；用真实滚轮滚到中段要求两侧同时出现；再滚到末端要求「只左」；每处核对 `aria-hidden="true"`。`pointer-events:none` 与方向渐变（left→`to right`、right→`to left`）用 computed style 作**标注来源**的补充证据；显隐完全由真实滚动几何决定 |
 | ④ 暂停后不再强制跟随 | 前置：媒体暂停 → 真实点击行项「`E2E 章节 1`」（公开 seek 到 0）与「`E2E 章节 5`」：每次都必须**改变媒体 `currentTime`**（证明位置真的变了、且落在该节点时间窗内）而结构行 `scrollLeft` 相对基线不变；随后播放 2s 作正向对照（媒体真实推进 + 当前项仍被居中，与②同一机制），暂停后再做一次 seek 不变性断言。播放态跟随本身由②独立覆盖——生产的跟随只在 `isPlaying` 为真时生效，故「播放推进而 `scrollLeft` 必须不变」不是本 AC 的判据 |
 
+**判据路线、阈值与规模登记（以托管实测为依据）**
+- **路线 A（采用）**：只读目录行自身的生产标记——`[data-catalog-scroll-row="<level>"] > span` 计数、`data-catalog-current="true"` 定位当前项、行内文本（`E2E 章节 N` / `E2E 段落 N`）定位具体项；**不借用** side-tree 的 `progress-indicator-*` 或文本区的 `paragraph-*`。
+- **路线 B（未采用，登记备选）**：为生产目录项补稳定 `data-testid`（owner：`src/ui/components/catalog.tsx` 的 `CatalogBar.renderNode`，拟名 `catalog-item-<level>-<nodeId>`）。不采用的理由：现有 `data-catalog-current` + 行内文本已能稳定定位与计数，补 testid 要改产品组件却对判据无增量；若将来目录项文本改为可变或需要无文本定位，改走路线 B 并在此同步 testid 名称与 owner。
+- **阈值形态与托管实测**：结构行期望 = `chapterCount + sectionCount`、段落行期望 = `paragraphCount`（取自夹具声明，断言为**等值**，比旧的 `≥24` / `≥40` 下界更强）；run [`36312689535`](https://github.com/llbz510/rain/actions/runs/36312689535) 实测 `structureRowChildren=32`、`paragraphRowChildren=32`、`structureRow` 508 → extent 2580.36、`paragraphRow` 508 → extent 2499.09。**旧表述「结构行 `progress-indicator-*` ≥24、段落行 `paragraph-*` ≥40」已废弃**（同一 run 实测命中 0，属选择器错误；40 亦与生成规则不符）。
+- **32 项是否仍足以裁判本 AC**：两行各 32 项，横向延伸约为 owner 视口宽度的 5.1×（2580.36 / 508）与 4.9×（2499.09 / 508）⇒ 满足「长目录、横向可滚动」，③ 正是在两端与中段判出渐隐 owner 的方向切换；14s 时间轴内当前项切换 30+ 次，足以裁判 ② 的自动定位。故统一为 32 **不削弱任何判据**。
+- 新判据在 head `a6cc618` 上的托管 run（`36313685507`）结论未出（只推不等）；上表所有读数都以该 run 的 `observed` 为准复核。
+
 ## 3. 隔离与受控夹具
 
 - `RAIN_E2E_MODE=1` + `RAIN_E2E_RUN_MODE=study-catalog` 只需要隔离 SQLite（`RAIN_E2E_DB_PATH`）与一份媒体文件路径（复用既有 `RAIN_E2E_VIDEO_PATH`）；不需要 evidence id、Whisper 模型或任何 LLM Key。
 - **首次启动必须是真实空库**：短模式只武装夹具公开面，不导航、不启动导入、不写任何业务行。
-- 夹具只经 `window.__RAIN_STUDY_CATALOG_FIXTURE__.seed()` 由脚本显式请求，仍走生产 `getDb()` / `insertVideo` / `insertNodes` / `insertSentences`：1 个 `status:'ready'`、`duration:14` 的视频；8 章 × 3 节，**恰好 32 段落**（生成规则 `paragraphIndex < 16 ? 2 : 1` ⇒ 文档序前 8 节各 2 段、其余 16 节各 1 段；`t49/t50` 定位到旧声明写 40 与生成规则不符，已按实测把**生成 / 声明 / 阈值 / 文档四者统一为 32**），章 1.75s / 节 0.583s，时间轴全部落在 `[0,14]`；**每个 paragraph 都必须有一条 sentence**（生产的 `loadVideo` 要求「至少一个 paragraph 且 sentences 非空」，见 `src/store/rain-store.ts:176/:180`，否则学习页永不出现）。
+- 夹具只经 `window.__RAIN_STUDY_CATALOG_FIXTURE__.seed()` 由脚本显式请求，仍走生产 `getDb()` / `insertVideo` / `insertNodes` / `insertSentences`：1 个 `status:'ready'`、`duration:14` 的视频；8 章 × 3 节，**恰好 32 段落**（生成规则 `paragraphIndex < 16 ? 2 : 1` ⇒ 文档序前 8 节各 2 段、其余 16 节各 1 段；`t49/t50` 定位到旧声明写 40 与生成规则不符，已按实测把**生成 / 声明 / 阈值 / 文档四者统一为 32**（实测依据：run [`36312689535`](https://github.com/llbz510/rain/actions/runs/36312689535) 的 `paragraphRowChildren=32`，规模充分性见 §2 的判据登记），章 1.75s / 节 0.583s，时间轴全部落在 `[0,14]`；**每个 paragraph 都必须有一条 sentence**（生产的 `loadVideo` 要求「至少一个 paragraph 且 sentences 非空」，见 `src/store/rain-store.ts:176/:180`，否则学习页永不出现）。
 - 媒体形态：无外部工具依赖的 Node 生成 WAV（8000Hz / 16bit / 14s）。**该形态已被托管实证接受并真实推进**：run [`36312689535`](https://github.com/llbz510/rain/actions/runs/36312689535) 的 `wavPlayback={"present":true,"currentTime":10.109134,"readyState":4,"duration":14,"paused":false,"errorCode":null}` ⇒「改用 CI 内 ffmpeg 生成的短视频」这一分支**据实测关闭**，不再作为待办。
 - 夹具落库后脚本**关闭并重建 WebDriver session**（真实进程重启），再真实点击生产列表卡主操作（`aria-label="打开视频：<标题>"`）进入学习页。
 
