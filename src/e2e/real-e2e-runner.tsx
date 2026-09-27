@@ -34,7 +34,7 @@ import { useRainStore } from '@/store/rain-store'
 
 interface RealE2eConfig {
   enabled: boolean
-  runMode: 'full' | 'ui-proof' | 'runtime-settings' | 'video-list'
+  runMode: 'full' | 'ui-proof' | 'runtime-settings' | 'video-list' | 'study-catalog'
   evidenceId: string
   videoPath: string
   whisperModelPath: string
@@ -673,6 +673,17 @@ export function RealE2eRunner() {
         }
         if (config.runMode === 'video-list') {
           await armVideoListDesktopFixture()
+          return
+        }
+        if (config.runMode === 'study-catalog') {
+          // t34 骨架：本阶段只把「学习页长目录」短模式武装起来、保持生产视频列表页原位，
+          // 不做导航、不启动导入、不调用模型，也不写任何业务行。
+          // 受控夹具公开面（window.__RAIN_STUDY_CATALOG_FIXTURE__）与四项裁判实现属 t30b：
+          // 因此本阶段的 Judge 必须在「夹具未建立」处如实失败，而不是静默通过。
+          window.__RAIN_E2E_RESULT__ = {
+            status: 'running',
+            events: [{ at: nowIso(), event: 'study_catalog_armed' }],
+          }
           return
         }
         setStatus('running')

@@ -1,5 +1,7 @@
 # Video List 桌面 E2E（AC-VL-04 最小托管骨架）
 
+> 状态：Active
+> 更新日期：2026-09-27
 > 作用：为 `AC-VL-04` 提供**真实桌面 DOM + 真实点击**的最小托管裁判骨架。它不是产品规格、不签发 `Visual Evidence`、不覆盖其他 AC。
 > 位置：`scripts/run-video-list-e2e.ps1`（行为 Judge）、`.github/workflows/video-list-desktop-e2e.yml`（Hosted Windows 入口）、`src/e2e/real-e2e-runner.tsx` 的 `video-list` 短模式（受控夹具）、`src-tauri/src/e2e_config.rs`（E2E 门）。
 
@@ -61,6 +63,7 @@ npm run e2e:video-list
 - 不参与 `harness:check`：默认 Harness 不运行任何桌面 Judge。
 - 与 AC-HE-05 的 owner 完全独立：`.github/workflows/runtime-settings-desktop-e2e.yml` 与 `scripts/run-runtime-settings-e2e.ps1` 不被本 Slice 修改。
 - 实测同族 Hosted 桌面 run 耗时 6m36s–8m37s；本 workflow 预期 8–12 分钟（job timeout 60 分钟）。
+- **证据对应规则（STD-67-4）**：桌面证据对应被测 head 的**代码树**；若仅文档改动使 head 前移，必须先用 `git diff <旧 head> <新 head> -- <代码路径>` 证明代码树未变，否则需在合并后以 `workflow_dispatch` 在合并提交上重放，才可引用该证据。本 workflow 的 `paths` 有意不含 `docs/**`，故此规则是本 Judge 的常规引用前提。
 
 ## 7. 未覆盖边界（诚实声明）
 
