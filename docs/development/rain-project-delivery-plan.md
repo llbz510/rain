@@ -63,7 +63,7 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 - 本地视频导入、Stage2、学习页、模型管理、Runtime Settings、数据库原子边界和默认 Windows Harness 已形成强控制。
 - `AC-LV-21` 只有 Strong 行为和本机 NVIDIA 短样本，尚无受支持 NVIDIA 目标候选 Release Evidence。
 - Hosted Runtime Settings Judge 已在 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 上由 workflow_dispatch run `30756311932` 重放通过；该结论只属于此目标提交，后续相关桌面边界变化仍需重新签发。
-- 应用所有缩略图的删除和孤儿 GC 已由 `AC-VL-05/06` 冻结语义，但实现与真实文件 Judge 仍是 Gap。
+- `AC-VL-05` 已由生产 lifecycle + 真实文件系统/SQLite Judge 收口（PR #65）；仅 `AC-VL-06` 的 keep-set/GC 仍是 Gap。
 - risk 22 的 App-scope Controller Owner 与判别式 progress contract 已由 `AC-AR-05/06` 冻结，仍是非阻断实现债。
 - schema 升级兼容、正式安装生命周期、签名和发布许可已有 `AC-RL-*` 合同，但实现、外部 Evidence 与人类批准仍缺失。
 
