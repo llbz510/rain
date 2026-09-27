@@ -30,6 +30,16 @@ pub(crate) fn cleanup_after_generation_failure(
     }
 }
 
+/// The single controlled directory that owns every derived thumbnail. The
+/// AC-VL-05 deletion path and the AC-VL-06 collection path both resolve it
+/// through [`thumbnail_directory_for_app_data_root`], so the `"thumbnails"`
+/// directory name exists exactly once in this crate's production code.
+const CONTROLLED_THUMBNAIL_DIRECTORY: &str = "thumbnails";
+
+pub(crate) fn thumbnail_directory_for_app_data_root(app_data_root: &Path) -> PathBuf {
+    app_data_root.join(CONTROLLED_THUMBNAIL_DIRECTORY)
+}
+
 pub(crate) fn thumbnail_path_for_video_id(
     app_data_root: &Path,
     video_id: &str,
@@ -45,9 +55,7 @@ pub(crate) fn thumbnail_path_for_video_id(
         ));
     }
 
-    Ok(app_data_root
-        .join("thumbnails")
-        .join(format!("{video_id}.jpg")))
+    Ok(thumbnail_directory_for_app_data_root(app_data_root).join(format!("{video_id}.jpg")))
 }
 
 pub fn generate_thumbnail(
