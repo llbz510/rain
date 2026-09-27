@@ -104,7 +104,7 @@
 ## Proof closure / blocker ledger
 
 - `LV/ST`：带 Historical Evidence/current-target Gap 的行仍被精确目标 Evidence 阻断：`LV-03/05/07/08/09/11/12`、`ST-01/07`；此外 `LV-21` 的目标 NVIDIA Release Evidence Gap 也是 blocker（当前 user-paused）。`LV-01/04/10` 已 Strong，桌面/SQLite/真实事件仅为非阻断补强；不能用 jsdom、旧包或假截图替代真正 Required Evidence。
-- `VL`：阻断 Desktop/Visual 的只有 `VL-01`（Visual）、`VL-04`（Desktop）与 `VL-07`（Desktop/Visual）。`VL-02` 已由 Strong 的双 adapter 与生产 UI Judge 覆盖，无 Desktop 要求；`VL-03` 仍只需 Strong 的双 adapter 与生产 UI Judge，不需 Desktop；`VL-05` 已由生产 lifecycle 的隔离真实文件系统与真实 SQLite Judge 覆盖，`VL-06` 仍需实现其 Confirmed Slice/生产 Judge。
+- `VL`：阻断 Desktop/Visual 的只有 `VL-01`（Visual）、`VL-04`（Desktop）与 `VL-07`（Desktop/Visual）。`VL-02` 已由 Strong 的双 adapter 与生产 UI Judge 覆盖，无 Desktop 要求；`VL-03` 仍只需 Strong 的双 adapter 与生产 UI Judge，不需 Desktop；`VL-05` 已由生产 lifecycle 的隔离真实文件系统与真实 SQLite Judge 覆盖；`VL-06` 也已落地于同一 Rust `thumbnail_lifecycle` 深 module：keep-set 来自真实 `video` 行，真实 SQLite + 隔离真实目录 + 并发新建写窗口 Judge 已就位，tier Strong，无新增必需。
 - `SU/UX`：Desktop/Visual blocker 仅为 `SU-01`（Desktop）、`SU-02`（Desktop/Visual）、`SU-03`（Desktop）、`SU-04`（Desktop）、`SU-05`（Desktop/Visual）、`SU-06`（Desktop/Visual）、`UX-01/02/04`（Visual）、`UX-03`（Visual/Accessibility）、`UX-05/06`（Desktop/Accessibility）。`UX-06` 已有 VideoCard 局部生产键盘/名称 Judge，但其余 Launch 主操作、可见焦点、非纯颜色状态、axe、AA 与 Desktop Evidence 仍阻断。`SU-07` 只需 Strong，不要求 Desktop；截图只能作附件，不能单独裁判。
 - `HE`：`HE-05` 只能由改变该桌面边界后的目标提交 workflow_dispatch 重放；本 Slice 不 dispatch。
 - `PF`：每条都缺冻结主机、fixture、样本/p95 或 soak Evidence，不能由开发机感觉代替。
