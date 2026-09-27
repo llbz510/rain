@@ -34,7 +34,7 @@ import { useRainStore } from '@/store/rain-store'
 
 interface RealE2eConfig {
   enabled: boolean
-  runMode: 'full' | 'ui-proof' | 'runtime-settings'
+  runMode: 'full' | 'ui-proof' | 'runtime-settings' | 'video-list'
   evidenceId: string
   videoPath: string
   whisperModelPath: string
@@ -270,6 +270,17 @@ async function publishPendingImportRecoveryFixture(seedIfMissing: boolean): Prom
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause)
     window.__RAIN_PENDING_IMPORT_RECOVERY__ = { status: 'failed', error }
+  }
+}
+
+/**
+ * AC-VL-04 桌面 Judge 的短模式：只让生产视频列表页保持在原位等待 WebDriver 编排，
+ * 不导航、不启动导入、不调用模型、不写任何业务行。
+ */
+function armVideoListDesktopJudge(): void {
+  window.__RAIN_E2E_RESULT__ = {
+    status: 'running',
+    events: [{ at: nowIso(), event: 'video_list_armed' }],
   }
 }
 
@@ -571,6 +582,10 @@ export function RealE2eRunner() {
               void publishPendingImportRecoveryFixture(false)
             }, 250)
           }
+          return
+        }
+        if (config.runMode === 'video-list') {
+          armVideoListDesktopJudge()
           return
         }
         setStatus('running')
