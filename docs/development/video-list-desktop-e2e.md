@@ -71,3 +71,9 @@ npm run e2e:video-list
 ## 8. 编码注记
 
 `scripts/run-video-list-e2e.ps1` 以 **UTF-8 BOM + CRLF** 保存：`package.json` 在 Windows 上通过 `powershell.exe`（Windows PowerShell 5.1）执行该文件，无 BOM 的 UTF-8 中文断言字面量会被按 ANSI 解码并导致断言失配。
+
+同一原因还有两条硬性约束，二者都由托管 run 的真实失败证实（head `57b96fb` 的 run `36306426495` 在 `phase=top-bar` 以 404 失败）：
+
+- 发往 WebDriver 的请求 body 一律按 UTF-8 字节发送并声明 `application/json; charset=utf-8`：PowerShell 5.1 会把字符串 body 按 ANSI 编码发出，中文选择器会变成 `?` 并 404。
+- 选择器只用 ASCII：用 `header input[type="text"]`、`header select`、`header select option` 定位，再用驱动读回的 `aria-label` 断言「搜索视频标题」「排序」（因此可访问名断言反而比把中文写进选择器更强）。
+

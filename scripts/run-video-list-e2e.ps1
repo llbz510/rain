@@ -30,9 +30,9 @@ $noMatchKeyword = 'no-such-title-e2e'
 $pageSelector = '[data-testid="video-list-page"]'
 $cardSelector = '[data-testid^="card-"]'
 $headerButtonSelector = '[data-testid="video-list-page"] header button'
-$searchSelector = '[data-testid="video-list-page"] input[aria-label="搜索视频标题"]'
-$sortSelector = 'select[aria-label="排序"]'
-$sortOptionSelector = 'select[aria-label="排序"] option'
+$searchSelector = '[data-testid="video-list-page"] header input[type="text"]'
+$sortSelector = '[data-testid="video-list-page"] header select'
+$sortOptionSelector = '[data-testid="video-list-page"] header select option'
 $emptyCtaSelector = '[data-testid="video-list-page"] main button'
 $noResultText = '没有找到匹配的视频'
 $emptyCtaText = '导入你的第一个视频'
@@ -173,7 +173,10 @@ function Invoke-WebDriver([string]$Method, [string]$Path, $Body = $null) {
   if ($null -eq $Body) {
     return Invoke-RestMethod -Method $Method -Uri $uri -TimeoutSec $webDriverRequestSeconds
   }
-  return Invoke-RestMethod -Method $Method -Uri $uri -ContentType 'application/json' -Body ($Body | ConvertTo-Json -Depth 20) -TimeoutSec $webDriverRequestSeconds
+  # Windows PowerShell 5.1 会把字符串 body 按 ANSI 编码发送，选择器与注入脚本里的中文会变成 '?'，
+  # 导致本可命中的真实桌面 DOM 查询 404。这里统一按 UTF-8 字节发送并声明 charset。
+  $payload = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $Body -Depth 20))
+  return Invoke-RestMethod -Method $Method -Uri $uri -ContentType 'application/json; charset=utf-8' -Body $payload -TimeoutSec $webDriverRequestSeconds
 }
 
 function New-WebDriverSession([string]$ApplicationPath) {
@@ -306,17 +309,21 @@ function Assert-TopBarComposition([string]$SessionId) {
   $script:facts['topBarTitle'] = $titleText
 
   $search = Find-WebDriverElement $SessionId $searchSelector
+  $searchLabel = Get-WebDriverElementAttribute $SessionId $search 'aria-label'
   $placeholder = Get-WebDriverElementAttribute $SessionId $search 'placeholder'
   $searchType = Get-WebDriverElementAttribute $SessionId $search 'type'
+  $script:facts['searchAriaLabel'] = $searchLabel
   $script:facts['searchPlaceholder'] = $placeholder
   $script:facts['searchType'] = $searchType
 
-  Find-WebDriverElement $SessionId $sortSelector | Out-Null
+  $sort = Find-WebDriverElement $SessionId $sortSelector
+  $sortLabel = Get-WebDriverElementAttribute $SessionId $sort 'aria-label'
   $sortLabels = Get-WebDriverElementTexts $SessionId $sortOptionSelector
   $sortValues = @()
   foreach ($option in (Find-WebDriverElements $SessionId $sortOptionSelector)) {
     $sortValues += (Get-WebDriverElementAttribute $SessionId $option 'value')
   }
+  $script:facts['sortAriaLabel'] = $sortLabel
   $script:facts['sortOptions'] = $sortLabels
   $script:facts['sortOptionValues'] = $sortValues
 
@@ -333,8 +340,11 @@ function Assert-TopBarComposition([string]$SessionId) {
   if ($titleText -ne 'Rain') {
     Fail-Condition '视频列表页顶栏组合不成立：缺少标题 Rain' "observed='$titleText' topBarText='$($script:facts['topBarText'])'"
   }
-  if ($placeholder -ne '搜索标题' -or $searchType -ne 'text') {
-    Fail-Condition '视频列表页顶栏组合不成立：搜索框不是既有「搜索标题」文本输入' "placeholder='$placeholder' type='$searchType'"
+  if ($searchLabel -ne '搜索视频标题' -or $placeholder -ne '搜索标题' -or $searchType -ne 'text') {
+    Fail-Condition '视频列表页顶栏组合不成立：搜索框不是既有「搜索视频标题」文本输入' "aria-label='$searchLabel' placeholder='$placeholder' type='$searchType'"
+  }
+  if ($sortLabel -ne '排序') {
+    Fail-Condition '视频列表页顶栏组合不成立：排序控件缺少既有「排序」可访问名' "aria-label='$sortLabel'"
   }
   if ($sortValues.Count -ne 3 -or ($sortValues -join '|') -ne 'lastStudied|createdAt|title') {
     Fail-Condition '视频列表页顶栏组合不成立：排序控件不是既有 3 个选项值（lastStudied/createdAt/title）' "observed='$($sortValues -join '|')' labels='$($sortLabels -join '|')'"
