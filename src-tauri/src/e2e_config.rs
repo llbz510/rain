@@ -31,12 +31,33 @@ where
         && run_mode != "ui-proof"
         && run_mode != "runtime-settings"
         && run_mode != "video-list"
+        && run_mode != "study-catalog"
     {
         return Err(
-            "RAIN_E2E_RUN_MODE must be full, ui-proof, runtime-settings, or video-list".to_string(),
+            "RAIN_E2E_RUN_MODE must be full, ui-proof, runtime-settings, video-list, or study-catalog"
+                .to_string(),
         );
     }
     let database_path = required_env(&get_env, "RAIN_E2E_DB_PATH")?;
+    // study-catalog：只需要隔离数据库与一份可由 WebView 加载的媒体文件
+    // （复用既有 video_path 字段），不需要 evidence id、Whisper 模型或任何 LLM Key。
+    if run_mode == "study-catalog" {
+        let video_path = required_env(&get_env, "RAIN_E2E_VIDEO_PATH")?;
+        return Ok(Some(RealE2eConfig {
+            enabled: true,
+            run_mode,
+            evidence_id: String::new(),
+            video_path,
+            whisper_model_path: String::new(),
+            llm_base_url: String::new(),
+            llm_model: String::new(),
+            llm_api_key: String::new(),
+            whisper_backend: crate::runtime::runtime_capability()
+                .whisper_backend
+                .to_string(),
+            database_path,
+        }));
+    }
     if run_mode == "runtime-settings" || run_mode == "video-list" {
         return Ok(Some(RealE2eConfig {
             enabled: true,
@@ -95,10 +116,13 @@ where
 
 /// 需要 owner 提供的 WebView2 参数的桌面 WebDriver E2E 模式。
 ///
+/// `read_runtime_settings_webview_args_from_env` 由这里列出的**三个**桌面 WebDriver 模式
+/// （`runtime-settings`、`video-list`、`study-catalog`）共用；函数名保留了历史语义，
+/// 但作用域已不只 runtime-settings（后续触碰该文件时可改为中性名）。
 /// 它们都要在真实 Tauri 窗口里被 `tauri-driver` 驱动，因此都必须覆盖窗口的
 /// `additional_browser_args`；普通应用、`full`/`ui-proof` 或空参数一律不覆盖，
 /// 避免 Hosted 兼容参数漂移进发布运行时。
-const WEBVIEW_ARGS_RUN_MODES: [&str; 2] = ["runtime-settings", "video-list"];
+const WEBVIEW_ARGS_RUN_MODES: [&str; 3] = ["runtime-settings", "video-list", "study-catalog"];
 
 pub fn read_runtime_settings_webview_args_from_env<F>(get_env: F) -> Option<String>
 where

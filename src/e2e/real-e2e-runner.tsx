@@ -34,7 +34,7 @@ import { useRainStore } from '@/store/rain-store'
 
 interface RealE2eConfig {
   enabled: boolean
-  runMode: 'full' | 'ui-proof' | 'runtime-settings' | 'video-list'
+  runMode: 'full' | 'ui-proof' | 'runtime-settings' | 'video-list' | 'study-catalog'
   evidenceId: string
   videoPath: string
   whisperModelPath: string
@@ -673,6 +673,146 @@ export function RealE2eRunner() {
         }
         if (config.runMode === 'video-list') {
           await armVideoListDesktopFixture()
+          return
+        }
+        if (config.runMode === 'study-catalog') {
+          // AC-SU-01 短模式：只武装「学习页长目录」夹具公开面，不导航、不启动导入、不调用模型。
+          // 夹具只在脚本显式调用 seed() 时经生产 getDb()/insertVideo/insertNodes 写入，首启因此仍是真实空库。
+          window.__RAIN_E2E_RESULT__ = {
+            status: 'running',
+            events: [{ at: nowIso(), event: 'study_catalog_armed' }],
+          }
+          const fixtureVideoId = 'rain-e2e-study-catalog-video'
+          const fixtureCurrentNodeId = 'e2e-catalog-chapter-5'
+          const fixtureDurationSeconds = 14
+          const fixtureTitle = 'E2E 长目录样本'
+          let catalogSeeding = false
+          const publishCatalogFixture = (status: 'idle' | 'seeded' | 'failed', error?: string): void => {
+            ;(window as unknown as Record<string, unknown>).__RAIN_STUDY_CATALOG_FIXTURE__ = {
+              status,
+              ...(error ? { error: redactSecret(error) } : {}),
+              durationSeconds: fixtureDurationSeconds,
+              videoId: fixtureVideoId,
+              currentNodeId: fixtureCurrentNodeId,
+              title: fixtureTitle,
+              chapterCount: 8,
+              sectionCount: 24,
+              paragraphCount: 32, // 与 seed 的生成规则一致（t49/t50 定位：旧值 40 与实际产出不符，已统一为 32）
+              seed: () => {
+                if (catalogSeeding) return
+                catalogSeeding = true
+                void seedStudyCatalogFixture()
+              },
+            }
+          }
+          const seedStudyCatalogFixture = async (): Promise<void> => {
+            try {
+              const { insertNodes } = await import('@/models/database')
+              const db = await getDb()
+              const createdAt = Date.now()
+              if (!(await getVideoById(db, fixtureVideoId))) {
+                await insertVideo(db, {
+                  id: fixtureVideoId,
+                  title: fixtureTitle,
+                  source: 'local',
+                  filePath: config.videoPath,
+                  thumbnail: '',
+                  duration: fixtureDurationSeconds,
+                  language: '',
+                  status: 'ready',
+                  createdAt,
+                  position: 0,
+                  lastStudiedAt: 0,
+                })
+              }
+              // 长目录：8 章 × 3 节 + 恰好 32 段落（前 8 节各 2 段、其余 16 节各 1 段），时间轴全部落在媒体声明的 [0,14] 内。
+              const nodes: Parameters<typeof insertNodes>[1] = []
+              let sortOrder = 0
+              let paragraphIndex = 0
+              const chapterSpan = fixtureDurationSeconds / 8
+              for (let chapter = 1; chapter <= 8; chapter += 1) {
+                const chapterId = `e2e-catalog-chapter-${chapter}`
+                const chapterStart = (chapter - 1) * chapterSpan
+                nodes.push({
+                  id: chapterId,
+                  videoId: fixtureVideoId,
+                  parentId: null,
+                  kind: 'chapter',
+                  title: `E2E 章节 ${chapter}`,
+                  type: null,
+                  startTime: chapterStart,
+                  endTime: chapterStart + chapterSpan,
+                  text: null,
+                  sortOrder: sortOrder++,
+                })
+                for (let section = 1; section <= 3; section += 1) {
+                  const sectionId = `e2e-catalog-section-${chapter}-${section}`
+                  const sectionSpan = chapterSpan / 3
+                  const sectionStart = chapterStart + (section - 1) * sectionSpan
+                  nodes.push({
+                    id: sectionId,
+                    videoId: fixtureVideoId,
+                    parentId: chapterId,
+                    kind: 'section',
+                    title: `E2E 小节 ${chapter}.${section}`,
+                    type: null,
+                    startTime: sectionStart,
+                    endTime: sectionStart + sectionSpan,
+                    text: null,
+                    sortOrder: sortOrder++,
+                  })
+                  const paragraphsHere = paragraphIndex < 16 ? 2 : 1
+                  for (let index = 0; index < paragraphsHere; index += 1) {
+                    paragraphIndex += 1
+                    const paragraphSpan = sectionSpan / paragraphsHere
+                    const paragraphId = `e2e-catalog-paragraph-${paragraphIndex}`
+                    const paragraphStart = sectionStart + index * paragraphSpan
+                    nodes.push({
+                      id: paragraphId,
+                      videoId: fixtureVideoId,
+                      parentId: sectionId,
+                      kind: 'paragraph',
+                      title: `E2E 段落 ${paragraphIndex}`,
+                      type: 'concept',
+                      startTime: sectionStart + index * paragraphSpan,
+                      endTime: sectionStart + (index + 1) * paragraphSpan,
+                      text: `E2E 段落 ${paragraphIndex} 文本`,
+                      sortOrder: sortOrder++,
+                    })
+                  }
+                }
+              }
+              await insertNodes(db, nodes)
+              // t46 根因修复（t44 Spec 定位）：生产 `loadVideo` 要求「至少一个 paragraph 且 sentences 非空」
+              // （src/store/rain-store.ts:176/:180），否则返回 {ok:false} 并把 currentPage 留在 list，
+              // 真实点击「打开视频」后学习页永不出现。这里为每个 paragraph 经公开 insertSentences 补一条 sentence，
+              // 不改任何裁判判据、不延长等待。
+              const { insertSentences } = await import('@/models/database')
+              await insertSentences(
+                db,
+                nodes
+                  .filter((node: { kind: string }) => node.kind === 'paragraph')
+                  .map((node: { id: string; startTime: number; endTime: number }) => ({
+                    id: `e2e-catalog-sentence-${node.id}`,
+                    nodeId: node.id,
+                    text: 'E2E 夹具句子',
+                    startTime: node.startTime,
+                    endTime: node.endTime,
+                    sortOrder: 0,
+                  })),
+              )
+              publishCatalogFixture('seeded')
+            } catch (cause) {
+              publishCatalogFixture('failed', toError(cause).message)
+            }
+          }
+          try {
+            const db = await getDb()
+            const seeded = await getVideoById(db, fixtureVideoId)
+            publishCatalogFixture(seeded ? 'seeded' : 'idle')
+          } catch (cause) {
+            publishCatalogFixture('failed', toError(cause).message)
+          }
           return
         }
         setStatus('running')
