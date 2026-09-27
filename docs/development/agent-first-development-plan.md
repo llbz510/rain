@@ -156,11 +156,12 @@ npm run harness:control
 
 ### P2 — 为应用所有缩略图建立删除与孤儿 GC 产品合同
 
-状态：`AC-VL-05 implemented / locally Strong on current target；AC-VL-06 implementation Gap`；对应 `DEC-PRD-060` 与 `AC-VL-05/06`。当前 target 的 production lifecycle、真实 SQLite/文件 Judge 与独立审查已收口 AC-VL-05，但尚未进入受保护 PR 或合并，不得把此本地结论外推为 `AC-VL-06`、Desktop、Visual、安装器或 Release Evidence。
+状态：`AC-VL-05 implemented on protected PR #65 (unmerged)；AC-VL-06 implementation Gap`；对应 `DEC-PRD-060` 与 `AC-VL-05/06`。当前 target 的 production lifecycle 与真实 SQLite/文件 Judge 已就位并进入受保护 PR #65，但第一轮独立 Spec 复审判定 `needs_revision`（SR-1..SR-5）：当时 5 个用例并未覆盖生产最常见的「受控目录存在而 `<videoId>.jpg` 缺失」分支、真实访问失败和数据库失败补偿。本轮已补齐这三项真实 Judge，并同步修正模块 owner 描述、产品语义边界与过期的双审声明。第二轮 Spec/Standards 复审通过并合并前，不得把任何本地或 PR 结论外推为 `AC-VL-06`、Desktop、Visual、安装器或 Release Evidence。
 
 第一个原子 Slice 已在当前 target 实现 `AC-VL-05` 的已知 Video 缩略图删除合同；已确认边界包括：
 
 - 数据库提交后才删除已知 app-owned 缩略图；文件失败不得伪装成功，必须可见并允许受控重试；
+- 已确认的产品语义（由上述确认边界与 `AC-LV-13` 的既有卡片行为共同确定）：数据库提交成功而文件删除失败时，错误在当次会话可见、卡片保留、用户可在同一会话重试；重启后残留的缩略图**不在** `AC-VL-05` 的重试范围，明确归 `AC-VL-06` 孤儿 GC 处理，`AC-VL-05` 不做跨会话补偿；
 - 只允许删除 app-data `thumbnails/` 中由合法 Video ID 推导的路径，拒绝任意路径和用户源媒体；
 - 删除与 GC 共享一个 Rust thumbnail lifecycle 深模块，前端不拼接文件路径或补偿步骤；
 - orphan keep-set、并发新建、幂等、部分失败和有界运行留给独立 `AC-VL-06` Slice。
