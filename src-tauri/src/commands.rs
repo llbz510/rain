@@ -227,13 +227,15 @@ pub async fn delete_video_atomically(app: AppHandle, video_id: String) -> Result
     let mut connection = SqliteConnection::connect(database_path.to_string_lossy().as_ref())
         .await
         .map_err(|error| format!("Open Rain database: {error}"))?;
-    thumbnail_lifecycle::delete_video_and_thumbnail_on_connection(
+    thumbnail_lifecycle::delete_video_and_collect_orphans_on_connection(
         &mut connection,
         &app_data_root,
         &video_id,
+        &thumbnail_lifecycle::ORPHAN_COLLECTION_POLICY,
     )
     .await
     .map_err(|error| format!("Delete video atomically: {error}"))
+    .map(|collection| thumbnail_lifecycle::report_orphan_collection(&collection))
 }
 
 #[tauri::command]
