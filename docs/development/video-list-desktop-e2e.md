@@ -76,4 +76,3 @@ npm run e2e:video-list
 
 - 发往 WebDriver 的请求 body 一律按 UTF-8 字节发送并声明 `application/json; charset=utf-8`：PowerShell 5.1 会把字符串 body 按 ANSI 编码发出，中文选择器会变成 `?` 并 404。
 - 选择器只用 ASCII：用 `header input[type="text"]`、`header select`、`header select option` 定位，再用驱动读回的 `aria-label` 断言「搜索视频标题」「排序」（因此可访问名断言反而比把中文写进选择器更强）。
-
