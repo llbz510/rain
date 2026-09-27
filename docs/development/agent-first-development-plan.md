@@ -164,7 +164,7 @@ npm run harness:control
 - 已确认的产品语义（由上述确认边界与 `AC-LV-13` 的既有卡片行为共同确定）：数据库提交成功而文件删除失败时，错误在当次会话可见、卡片保留、用户可在同一会话重试；重启后残留的缩略图**不在** `AC-VL-05` 的重试范围，明确归 `AC-VL-06` 孤儿 GC 处理，`AC-VL-05` 不做跨会话补偿；
 - 只允许删除 app-data `thumbnails/` 中由合法 Video ID 推导的路径，拒绝任意路径和用户源媒体；
 - 删除与 GC 共享一个 Rust thumbnail lifecycle 深模块，前端不拼接文件路径或补偿步骤；
-- orphan keep-set、并发新建、幂等、部分失败和有界运行已由独立 `AC-VL-06` Slice 在受保护 PR #66 落地（同一深 module），待第 1 轮复审发现的关闭确认与合并；
+- orphan keep-set、并发新建、幂等、部分失败和有界运行已由独立 `AC-VL-06` Slice 在受保护 PR #66 落地（同一深 module），第 2 轮 Spec 与 Standards 复审已确认关闭并已随 PR #66 受保护合并（merge commit `3db8032`）；
 
 `AC-VL-06` Slice 已在受保护 PR #66 实现孤儿扫描与 GC：keep-set 只来自真实 `video` 行，候选只认 `thumbnail_storage` 的同一 ID/命名白名单，真实 SQLite + 隔离真实目录 + 并发新建写窗口 Judge 已就位；内存数据库或组件文案仍不能证明文件生命周期。
 
