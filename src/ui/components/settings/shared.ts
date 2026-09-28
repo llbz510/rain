@@ -30,14 +30,20 @@ export function testSavedQwenConnection(
 }
 
 export const COLORS = {
+  // 浅底套调色板。边框与次级文字的取值依据 docs/development/visual-contract.md §5.5.2（DEC-VC-02 边界 4「1px 边框一律 ≥3:1」）：
+  //   border  #6e7074 对 bg/panel/panel2 = 3.81 / 3.49 / 3.19（原 rgba(255,255,255,.08) 合成后仅 1.21–1.28）
+  //   border2 #7c828c 对 bg/panel/panel2 = 4.89 / 4.47 / 4.09（原 rgba(255,255,255,.05) 合成后仅 1.12–1.16）
+  //   dimmer  #868f99 对 bg/panel/panel2 = 5.77 / 5.27 / 4.83，且相对亮度 0.2701 仍低于 muted 的 0.2914（第三档不得比第二档更亮）
+  // 聚焦圈不在此处声明独立令牌：全应用统一由 src/index.css 的 `:focus-visible { outline: 2px dashed var(--color-fg) }` 提供，
+  // 在浅底套底色上该解析值对 bg/panel/panel2 仍 ≥3:1（VC-03④ 的判据是比值，不是某个专属于某一套的色值）。
   bg: '#0d1117',
   panel: '#161b22',
   panel2: '#1c232c',
   fg: '#e6edf3',
   muted: '#8b949e',
-  dimmer: '#6e7681',
-  border: 'rgba(255,255,255,.08)',
-  border2: 'rgba(255,255,255,.05)',
+  dimmer: '#868f99',
+  border: '#6e7074',
+  border2: '#7c828c',
   selBg: '#0a0d12',
   selText: 'rgba(230,237,243,.72)',
   concept: '#539bf5',
