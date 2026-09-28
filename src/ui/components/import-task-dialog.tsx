@@ -74,10 +74,11 @@ const buttonStyle: CSSProperties = {
 }
 
 const primaryButtonStyle: CSSProperties = {
+  // 视觉合同 DEC-VC-01：主按钮 = 描边款，不得使用彩色实底或白字（原 2.75:1 不达标）
   ...buttonStyle,
-  color: '#fff',
-  background: 'var(--color-accent)',
-  borderColor: 'var(--color-accent)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-fg)',
+  borderColor: 'var(--color-border)',
 }
 
 export function ImportTaskDialog({

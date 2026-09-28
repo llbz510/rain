@@ -2,13 +2,16 @@
 
 :root {
   /* ===== 暗色主题中性色（决策63）===== */
+  /* 边框与次要文字的取值依据 docs/development/visual-contract.md §5.4.1（DEC-VC-02「一律达标」）：
+     --color-border #8f8f8f 对 bg/surface/hover 最小 4.20:1（1px 边框要求 >=3:1）
+     --color-muted  #9a9a9a 对 bg/surface/hover 最小 4.83:1（文字要求 >=4.5:1） */
   --color-bg: #1a1a1a; /* 主背景 */
   --color-fg: #e5e5e5; /* 主文字 */
   --color-surface: #242424; /* 卡片/面板表面 */
   --color-surface-hover: #2e2e2e; /* 表面悬停 */
-  --color-border: #3a3a3a; /* 边框/分隔 */
-  --color-muted: #8a8a8a; /* 次要文字 */
-  --color-accent: #4a9eff; /* 选中高亮（非品牌色，纯灰白控件用中性） */
+  --color-border: #8f8f8f; /* 边框/分隔（原 #3a3a3a 仅 1.36–1.53:1） */
+  --color-muted: #9a9a9a; /* 次要文字（原 #8a8a8a 在悬停面上仅 3.93:1） */
+  --color-accent: #4a9eff; /* 仅作遗留兼容；控件不得用它作实底（决策65/VC-03） */
 
   /* ===== 段落四色（PARAGRAPH_COLORS，决策66）===== */
   --color-concept: #3b82f6; /* PARAGRAPH_COLORS.concept 蓝 */
@@ -103,6 +106,13 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ===== 聚焦圈（决策65 / 视觉合同 VC-03④）：浅灰白 2px 虚线 =====
+   放在 base 层，任何组件的内联样式都压不过它；`outline` 不参与盒模型，不改变现有版式。 */
+:focus-visible {
+  outline: 2px dashed var(--color-fg);
+  outline-offset: 2px;
 }
 
 /* ===== 暗色滚动条（配套暗色主题）===== */

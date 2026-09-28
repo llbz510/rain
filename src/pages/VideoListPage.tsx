@@ -85,9 +85,10 @@ const importButtonStyle: React.CSSProperties = {
   flex: '0 0 auto',
   height: '28px',
   padding: '0 var(--spacing-3)',
-  background: 'var(--color-accent)',
-  color: '#fff',
-  border: 'none',
+  // 视觉合同 DEC-VC-01：主按钮 = 描边款（底色为中性表面、1px 中性边框、无彩色实底）
+  background: 'var(--color-surface)',
+  color: 'var(--color-fg)',
+  border: '1px solid var(--color-border)',
   borderRadius: 'var(--radius-1)',
   fontSize: 'var(--font-size-sm)',
   cursor: 'pointer',
