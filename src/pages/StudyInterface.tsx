@@ -2,7 +2,7 @@
 // ========================================
 // M16 三模式学习界面（Task 5 组装）
 // 布局：CSS Grid 三列（左树 200px / 中间区 1fr / 右面板 320px）
-//       三行（顶栏 40px / 中间区 1fr / 控制栏 80px 或 0）
+//       三行（顶栏 40px / 中间区 1fr / 控制栏 40px〔--height-controlbar〕或 0）
 // 区域显隐完全由 src/ui/layout.ts 的 getVisibility(layoutMode) 决定。
 //   follow     → videoZone + textZone + catalogBar + sideTree + rightPanel
 //   textExpand → controlBar + textZone + catalogBar + sideTree + rightPanel

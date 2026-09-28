@@ -67,7 +67,7 @@
 
   /* ===== 固定高度（决策76）===== */
   --height-topbar: 40px;
-  --height-controlbar: 80px;
+  --height-controlbar: 40px;
 }
 
 /* ===== Reset（保留 Task 1）===== */

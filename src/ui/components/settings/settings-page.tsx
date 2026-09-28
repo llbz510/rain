@@ -279,7 +279,7 @@ export function SettingsPage() {
                       color: COLORS.fg,
                       background: COLORS.bg,
                       border: `1px solid ${COLORS.border}`,
-                      borderRadius: 6,
+                      borderRadius: 8,
                     }}
                   >
                     <option value="auto">自动（推荐）</option>
