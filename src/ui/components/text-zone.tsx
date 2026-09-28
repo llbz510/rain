@@ -9,6 +9,7 @@ import { shouldShowTranslation } from '@/ui/text-zone'
 import { getCurrentHighlightedSentence } from '@/ui/text-zone'
 import { resolveNodeNavigationTarget } from '@/study/navigation'
 import { ExcerptButton } from '@/ui/components/notes'
+import { TypeCapsule } from '@/ui/components/type-capsule'
 import type { Node, Sentence } from '@/models/types'
 
 interface ParagraphItemProps {
@@ -45,7 +46,7 @@ export function ParagraphItem({ paragraph, sentences, onSeek, onExcerpt, scrollR
   return (
     <div ref={paragraphRef} data-testid={`paragraph-${paragraph.id}`}>
       <div>
-        <span data-type-badge={paragraph.type} />
+        <span data-type-badge={paragraph.type}>{paragraph.type && <TypeCapsule type={paragraph.type} />}</span>
         <span>{paragraph.title}</span>
         {onExcerpt && (
           <ExcerptButton
