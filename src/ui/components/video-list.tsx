@@ -93,26 +93,49 @@ export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInf
     }
   }
 
+  const progressWidth = display.isComplete ? '100%' : `${display.progressPercent}%`
   return (
     <div data-testid={`card-${video.id}`} style={{ cursor: 'pointer' }}>
-      <button type="button" aria-label={primaryActionName} disabled={deleting} onClick={handleClick}>
-        {thumbnailSrc
-          ? <img src={thumbnailSrc} alt={video.title} />
-          : <span>暂无缩略图</span>}
-        <span>{video.title}</span>
-      </button>
-      <div>{display.durationText}</div>
-      <div>{display.progressPercent}%</div>
-      {display.isComplete && <span>✓</span>}
-      {display.statusBadge && (
-        <span
-          data-testid={`badge-${video.id}`}
-          data-status={display.statusBadge.type}
-          style={{ ...statusBadgeChipStyle, background: STATUS_BADGE_FILL[display.statusBadge.type] ?? STATUS_BADGE_FILL.pending }}
-        >
-          {statusBadgeText}
+      <button
+        type="button"
+        aria-label={primaryActionName}
+        disabled={deleting}
+        onClick={handleClick}
+        style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
+      >
+        {/* 缩略图容器：16:9 + 圆角 + 右下语言·来源角标 + 非就绪蒙层与左上徽章（决策 77） */}
+        <span data-testid={`thumb-${video.id}`} style={{ position: 'relative', display: 'block', aspectRatio: '16 / 9', borderRadius: 'var(--radius-2)', overflow: 'hidden', background: 'var(--color-surface-hover)' }}>
+          {thumbnailSrc
+            ? <img src={thumbnailSrc} alt={video.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-muted)' }}>暂无缩略图</span>}
+          {display.statusBadge && <span data-testid={`thumb-overlay-${video.id}`} aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)' }} />}
+          {!display.statusBadge && display.badges.length > 0 && (
+            <span data-testid={`thumb-meta-${video.id}`} style={{ position: 'absolute', right: 4, bottom: 4, padding: '1px 8px', borderRadius: 'var(--radius-1)', fontSize: 'var(--font-size-xs)', color: '#ffffff', background: 'var(--color-surface)' }}>
+              {display.badges.join(' · ')}
+            </span>
+          )}
+          {display.statusBadge && (
+            <span
+              data-testid={`badge-${video.id}`}
+              data-status={display.statusBadge.type}
+              style={{ ...statusBadgeChipStyle, position: 'absolute', top: 4, left: 4, background: STATUS_BADGE_FILL[display.statusBadge.type] ?? STATUS_BADGE_FILL.pending }}
+            >
+              {statusBadgeText}
+            </span>
+          )}
         </span>
-      )}
+        <span data-testid={`title-${video.id}`} style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontSize: 'var(--font-size-xs)' }}>{video.title}</span>
+      </button>
+      {/* 进度条（4px、中性档；已看完=满） + 右侧时长 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, display: 'block', height: '4px', borderRadius: 'var(--radius-1)', background: 'var(--color-surface-hover)', overflow: 'hidden' }}>
+          <span data-testid={`progress-fill-${video.id}`} style={{ display: 'block', width: progressWidth, height: '4px', background: 'var(--color-muted)' }} />
+        </span>
+        <span style={{ fontSize: 'var(--font-size-xs)' }}>{display.durationText}</span>
+      </div>
+      <div data-testid={`last-studied-${video.id}`} style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-muted)' }}>
+        {display.isComplete ? `已看完·${display.lastStudiedText}` : display.lastStudiedText}
+      </div>
       {importStatus && (
         <div data-testid={`import-status-${video.id}`}>
           <div>{importStatus.stageLabel} · {importStatus.percent}%</div>
