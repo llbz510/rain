@@ -126,20 +126,38 @@ const tabBarStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--color-border)',
 }
 
+/**
+ * 视觉合同 VC-03③：模式/Tab 激活态 = 底色变暗（决策65）。
+ * 原实现用品牌蓝色下划线表示激活，属强调色用法，已按 DEC-VC-01/VC-03 移除。
+ * 激活底色取 `--color-bg`（#1a1a1a，相对亮度 0.0103）——它比未激活的底 `--color-surface`（#242424，0.0176）更暗，
+ * 满足「激活态底色变暗」的可测判据；该值取自已确认的冻结四档中性色阶（决策64），不引入新色值。
+ * 下方 1px 分隔线仍用 `--color-border`（对面板 4.80:1，满足 1px 边框 ≥3:1）。
+ */
+export const tabActiveStyle: React.CSSProperties = {
+  background: 'var(--color-bg)',
+  color: 'var(--color-fg)',
+  borderBottom: '1px solid var(--color-border)',
+}
+
+export const tabInactiveStyle: React.CSSProperties = {
+  background: 'var(--color-surface)',
+  color: 'var(--color-muted)',
+  borderBottom: '1px solid var(--color-border)',
+}
+
 function tabButtonStyle(active: boolean): React.CSSProperties {
   return {
     flex: '1 1 0',
     height: '36px',
     padding: 0,
-    background: 'transparent',
-    color: active ? 'var(--color-fg)' : 'var(--color-muted)',
     border: 'none',
-    borderBottom: active
-      ? '2px solid var(--color-accent)'
-      : '2px solid transparent',
+    borderLeft: 'none',
+    borderRight: 'none',
+    borderTop: 'none',
     fontSize: 'var(--font-size-sm)',
     fontWeight: active ? 'var(--font-weight-semibold)' : 'var(--font-weight-normal)',
     cursor: 'pointer',
+    ...(active ? tabActiveStyle : tabInactiveStyle),
   }
 }
 
