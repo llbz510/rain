@@ -127,7 +127,7 @@ export function PreflightPanel({
                   fontSize: 12,
                   color: COLORS.muted,
                   padding: '6px 8px',
-                  borderRadius: 6,
+                  borderRadius: 8,
                   background: COLORS.panel2,
                 }}
               >
@@ -150,7 +150,7 @@ export function PreflightPanel({
                 gap: 8,
                 fontSize: 12,
                 padding: '6px 8px',
-                borderRadius: 6,
+                borderRadius: 8,
                 background: COLORS.panel2,
               }}
             >
