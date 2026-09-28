@@ -1,0 +1,1258 @@
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+/**
+ * V1a「真实桌面视觉实测通道」的公开裁判（测试先行）。
+ *
+ * 本文件只裁判「采集通道与校验器」这一层：
+ *   ① 合成色与 WCAG 2.1 对比度的**实算**（用真实数值，不许断言常量、不许恒真）；
+ *   ② 缺必填字段必须**显式失败**（不许静默出空值）；
+ *   ③ **只有截图、没有实测记录的证据包必须被判为「不构成裁判」**；
+ *   ④ 证据包的形状必须与 `docs/development/visual-contract.md` §3.4 的第 1–4 项一一对应。
+ *
+ * 它**不签发任何 Visual Evidence、不判任何 `VC-xx` 的 pass/needs_revision、
+ * 不改任何 AC 状态或 Evidence tier**——那些只能由独立视觉审查员（V2）对真实桌面实测做。
+ */
+
+const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
+const validatorScript = join(repoRoot, 'scripts', 'validate-visual-evidence.ps1')
+const collectorScript = join(repoRoot, 'scripts', 'campaign-visual-evidence.ps1')
+const workflowFile = join(repoRoot, '.github', 'workflows', 'visual-evidence.yml')
+const powershellTimeoutMs = 60_000
+const pngBytes = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/eylmE8AAAAASUVORK5CYII=',
+  'base64',
+)
+
+// §4 的 18 个编号：VC-01…VC-17 + VC-19（VC-18 是保留空号，不进裁判表）。
+const contractIds = [
+  'VC-01', 'VC-02', 'VC-03', 'VC-04', 'VC-05', 'VC-06', 'VC-07', 'VC-08', 'VC-09',
+  'VC-10', 'VC-11', 'VC-12', 'VC-13', 'VC-14', 'VC-15', 'VC-16', 'VC-17', 'VC-19',
+]
+
+function runValidator(args: string[]): { status: number; stdout: string; stderr: string } {
+  try {
+    const stdout = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', validatorScript, ...args],
+      { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' },
+    )
+    return { status: 0, stdout, stderr: '' }
+  } catch (cause) {
+    const failure = cause as { status?: number; stdout?: string; stderr?: string }
+    return { status: failure.status ?? 1, stdout: failure.stdout ?? '', stderr: failure.stderr ?? '' }
+  }
+}
+
+function writeJson(path: string, value: unknown): void {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
+/**
+ * 数学向量通过**文件**传给校验器：Windows 的参数解析会把 JSON 里的引号吃掉，
+ * 内联 JSON 在 `powershell.exe -File` 下会变成不可解析的形态（本轮实测）。
+ */
+function runMathVectors(vectors: unknown[]): { status: number; stdout: string; stderr: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'rain-visual-math-'))
+  const path = join(dir, 'vectors.json')
+  writeJson(path, vectors)
+  return runValidator(['-VerifyMathFile', path])
+}
+
+/* ------------------------------------------------------------------ *
+ * 参考实现（与校验器相互独立）：用于生成合成证据包里的自洽数值。
+ * 真实数值来源 = visual-contract.md §5.5 的公开复算值，见本文件末尾的对照用例。
+ * ------------------------------------------------------------------ */
+
+function srgbChannel(channel: number): number {
+  const scaled = channel / 255
+  return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4
+}
+
+function relativeLuminance([r, g, b]: [number, number, number]): number {
+  return 0.2126 * srgbChannel(r) + 0.7152 * srgbChannel(g) + 0.0722 * srgbChannel(b)
+}
+
+function contrastRatio(fg: [number, number, number], bg: [number, number, number]): number {
+  const high = Math.max(relativeLuminance(fg), relativeLuminance(bg))
+  const low = Math.min(relativeLuminance(fg), relativeLuminance(bg))
+  return (high + 0.05) / (low + 0.05)
+}
+
+function round6(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000
+}
+
+function hexToRgb8(hex: string): [number, number, number] {
+  const body = hex.replace('#', '')
+  return [0, 2, 4].map((offset) => Number.parseInt(body.slice(offset, offset + 2), 16)) as [number, number, number]
+}
+
+function rgb8ToHex([r, g, b]: [number, number, number]): string {
+  return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`
+}
+
+const DARK_FG: [number, number, number] = hexToRgb8('#e5e5e5')
+const DARK_SURFACE: [number, number, number] = hexToRgb8('#242424')
+const DARK_BG: [number, number, number] = hexToRgb8('#1a1a1a')
+const DARK_BORDER: [number, number, number] = hexToRgb8('#8f8f8f')
+
+/* ------------------------------------------------------------------ *
+ * 合成证据包构造器（synthetic，仅用于裁判校验器的行为，不冒充真实实测）
+ * ------------------------------------------------------------------ */
+
+interface RecordOverrides {
+  recordId: string
+  vc: string
+  criterion: string
+  page: string
+  selector: string
+  screenshots: string[]
+  measurementScope?: string
+  fg?: [number, number, number]
+  bg?: [number, number, number]
+  fgSource?: string
+  bgSource?: string
+  declared?: { fg?: string; bg?: string }
+  fontSizePx?: number
+  fontWeight?: number
+  threshold?: number
+  thresholdBasis?: string
+  toleranceRatio?: number
+  toleranceBasis?: string
+}
+
+function buildTolerance() {
+  return {
+    colorChannel: 1,
+    contrastRatio: 0.05,
+    fixedHeightPx: 0.5,
+    renderedGeometryPx: 2,
+    exactValues: true,
+  }
+}
+
+function buildRecord(overrides: RecordOverrides) {
+  const fg = overrides.fg ?? DARK_FG
+  const bg = overrides.bg ?? DARK_SURFACE
+  const fontSizePx = overrides.fontSizePx ?? 13
+  const fontWeight = overrides.fontWeight ?? 400
+  const isLargeText = fontSizePx >= 24 || (fontSizePx >= 18.66 && fontWeight >= 700)
+  const threshold = overrides.threshold ?? (isLargeText ? 3 : 4.5)
+  const ratio = contrastRatio(fg, bg)
+  const fgHex = rgb8ToHex(fg)
+  const bgHex = rgb8ToHex(bg)
+  return {
+    recordId: overrides.recordId,
+    vc: overrides.vc,
+    criterion: overrides.criterion,
+    page: overrides.page,
+    measurementScope: overrides.measurementScope ?? 'element',
+    selector: overrides.selector,
+    description: `${overrides.vc} ${overrides.criterion} 的合成证据（synthetic）`,
+    sampledViewport: {
+      width: 1280,
+      height: 720,
+      devicePixelRatio: 1,
+      sampledAt: '2026-09-28T00:00:00.000Z',
+    },
+    screenshots: overrides.screenshots,
+    rect: { x: 12, y: 40, width: 240, height: 32, top: 40, right: 252, bottom: 72, left: 12 },
+    computedStyle: {
+      color: fgHex,
+      backgroundColor: bgHex,
+      fontFamily: 'system-ui, "Segoe UI", sans-serif',
+      fontSize: `${fontSizePx}px`,
+      fontWeight: String(fontWeight),
+      fontVariantNumeric: 'normal',
+      lineHeight: `${Math.round(fontSizePx * 1.538)}px`,
+      borderTopWidth: '1px',
+      borderTopStyle: 'solid',
+      borderTopColor: bgHex,
+      borderRadius: '8px',
+      paddingTop: '4px',
+      paddingRight: '8px',
+      paddingBottom: '4px',
+      paddingLeft: '8px',
+      marginTop: '0px',
+      marginRight: '0px',
+      marginBottom: '0px',
+      marginLeft: '0px',
+      boxShadow: 'none',
+    },
+    measured: {
+      fg: {
+        source: overrides.fgSource ?? 'getComputedStyle(color)',
+        declared: overrides.declared?.fg ?? fgHex,
+        rgba8: fg,
+        alpha: 1,
+        composited: false,
+      },
+      bg: {
+        source: overrides.bgSource ?? 'composite(ancestor backgrounds)',
+        declared: overrides.declared?.bg ?? bgHex,
+        rgba8: bg,
+        alpha: 1,
+        composited: false,
+        layers: [{ selector: 'html', declared: bgHex, alpha: 1 }],
+      },
+      contrastRatio: {
+        value: round6(ratio),
+        formula: 'WCAG21:(L1+0.05)/(L2+0.05)',
+        luminanceFg: round6(relativeLuminance(fg)),
+        luminanceBg: round6(relativeLuminance(bg)),
+        threshold,
+        thresholdBasis: overrides.thresholdBasis ?? (isLargeText ? 'largeText>=24px or >=18.66px bold' : 'text'),
+        tolerance: overrides.toleranceRatio ?? 0.05,
+        toleranceBasis: overrides.toleranceBasis ?? 'visual-contract.md §3.3 contrast ratio ±0.05',
+      },
+    },
+  }
+}
+
+interface PackageOptions {
+  vcId?: string
+  tested?: string[]
+  untested?: string[]
+  records?: unknown[]
+  screenshots?: string[]
+  manifestOverrides?: Record<string, unknown>
+  omitManifestKey?: string
+}
+
+function createPackage(options: PackageOptions = {}): string {
+  // 证据包目录名必须符合约定 visual-<目标sha8>-<yyyyMMdd-HHmmss>（校验器会核对目录名与 target 一致）。
+  const tempRoot = mkdtempSync(join(tmpdir(), 'rain-visual-evidence-'))
+  const evidenceId = 'visual-800ffcf7-20260928-120000'
+  const dir = join(tempRoot, evidenceId)
+  const screenshotName = 'screenshots/01-video-list.png'
+  const tested = options.tested ?? ['VC-01']
+  const untested = options.untested ?? contractIds.filter((id) => !tested.includes(id))
+  const screenshots = options.screenshots ?? [screenshotName]
+
+  mkdirSync(join(dir, 'screenshots'), { recursive: true })
+  for (const shot of screenshots) {
+    const target = join(dir, shot)
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, pngBytes)
+  }
+
+  const records = options.records ?? [
+    buildRecord({
+      recordId: 'VC-01-list-body-bg',
+      vc: options.vcId ?? 'VC-01',
+      criterion: 'bodyBackgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots,
+    }),
+  ]
+
+  // 有 accentSweep 记录时，manifest 必须同时声明对应的扫描（校验器会双向对账）。
+  const declaredSweeps = (records as Array<Record<string, unknown>>)
+    .filter((record) => record.measurementScope === 'accentSweep')
+    .map((record) => ({
+      id: record.recordId,
+      vc: record.vc,
+      page: record.page,
+      selectorScope: record.selector,
+      accentToken: '#4a9eff',
+    }))
+
+  const manifest: Record<string, unknown> = {
+    schemaVersion: 1,
+    evidenceId,
+    generatedAt: '2026-09-28T00:00:00.000Z',
+    generatedBy: 'scripts/campaign-visual-evidence.ps1',
+    target: {
+      commitSha: '800ffcf78fad46a417eb9a3717a8030123e11393',
+      shortSha: '800ffcf7',
+      repo: 'llbz510/rain',
+      checkoutRef: 'refs/heads/codex/visual-v1a-evidence-channel',
+    },
+    viewport: {
+      width: 1280,
+      height: 720,
+      devicePixelRatio: 1,
+      windowState: 'default (unmodified native window size)',
+    },
+    host: {
+      os: { caption: 'Microsoft Windows Server 2025 Datacenter', version: '10.0.26100', build: '26100' },
+      webview2: { runtimeVersion: '141.0.3537.57', driverVersion: '141.0.3537.57' },
+      app: { productName: 'Rain', productVersion: '0.1.0', binaryPath: 'src-tauri\\target\\debug\\rain.exe' },
+      driver: { tauriDriver: '2.0.6' },
+    },
+    tolerance: buildTolerance(),
+    coverage: { tested, untested, reserved: ['VC-18'], scopeNote: 'synthetic fixture: tested ids carry exactly one measured dimension each' },
+    screenshots,
+    records: records.map((record) => {
+      const typed = record as { recordId: string }
+      return { recordId: typed.recordId, file: `records/${typed.recordId}.json` }
+    }),
+    ...(declaredSweeps.length > 0 ? { accentSweeps: declaredSweeps } : {}),
+    verdicts: {
+      issued: false,
+      issuedBy: null,
+      note: '本证据包只提供 §3.4 第 1–3 项（输入侧）数据；第 4 项逐条 pass/needs_revision 由独立视觉审查员判定。',
+    },
+  }
+
+  if (options.omitManifestKey) delete manifest[options.omitManifestKey]
+  Object.assign(manifest, options.manifestOverrides ?? {})
+
+  mkdirSync(join(dir, 'records'), { recursive: true })
+  for (const record of records) {
+    const typed = record as { recordId: string }
+    writeJson(join(dir, 'records', `${typed.recordId}.json`), record)
+  }
+  writeJson(join(dir, 'manifest.json'), manifest)
+  return dir
+}
+
+/* ------------------------------------------------------------------ *
+ * ① 数学：合成与对比度实算 + 与合同 §5.5 公开值的交叉校验
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: math cross-check (-VerifyMathFile)', () => {
+  it('recomputes the published visual-contract §5.5 ratios from the raw hex tokens', { timeout: powershellTimeoutMs }, () => {
+    // expected 列取自校验器 **-VerifyMathFile 的实际打印值**（6 位小数）。
+    // 第 5 位以后的偏差即会因 1e-6 的严格断言而失败，因此这一列不是"宽松常量"，而是逐位锚点；
+    // 每一位都必须同时与 visual-contract.md §5.5 的两位小数公开值相符（下方 reference implementation 用例）。
+    const vectors = [
+      { name: 'black on white (WCAG upper bound)', fg: '#000000', bg: '#ffffff', expected: 21 },
+      { name: 'same colour is the lower bound', fg: '#242424', bg: '#242424', expected: 1 },
+      { name: 'dark text on panel (VC-03② 12.32:1)', fg: '#e5e5e5', bg: '#242424', expected: 12.322793 },
+      { name: 'muted on hover surface (4.83:1)', fg: '#9a9a9a', bg: '#2e2e2e', expected: 4.825904 },
+      { name: 'border on page background (VCGAP-10 5.38:1)', fg: '#8f8f8f', bg: '#1a1a1a', expected: 5.381705 },
+      { name: 'retired accent pairing fails (VCGAP-09 2.75:1)', fg: '#ffffff', bg: '#4a9eff', expected: 2.753769 },
+      { name: 'light palette fg on panel (14.64:1)', fg: '#e6edf3', bg: '#161b22', expected: 14.639773 },
+      { name: 'light palette concept on panel (6.07:1)', fg: '#539bf5', bg: '#161b22', expected: 6.074905 },
+      { name: 'light palette dimmer on panel2 (4.83:1)', fg: '#868f99', bg: '#1c232c', expected: 4.827957 },
+      { name: 'status fail on panel (5.56:1)', fg: '#ff6b61', bg: '#242424', expected: 5.564366 },
+      { name: 'status pending on page background (8.94:1)', fg: '#e3b341', bg: '#1a1a1a', expected: 8.942964 },
+      {
+        name: 'composite rgba(255,255,255,.08) over #161b22 then contrast against panel',
+        fg: 'rgba(255,255,255,0.08)',
+        bg: '#161b22',
+        expected: 1.251434,
+      },
+      { name: 'opaque composite of rgba(0,0,0,.6) over #1a1a1a', fg: 'rgba(0,0,0,0.6)', bg: '#1a1a1a', expected: 1.137542 },
+      {
+        name: 'selected-surface composite rgba(0,0,0,.15) over #242424 equals #1f1f1f',
+        fg: 'rgba(0,0,0,0.15)',
+        bg: '#242424',
+        expected: 1.061848,
+      },
+      {
+        name: 'three layers: rgba(255,255,255,.10) over selBg(#1f1f1f) over #242424',
+        fg: 'rgba(255,255,255,0.10)',
+        bg: 'rgba(0,0,0,0.15)',
+        base: '#242424',
+        expected: 1.343776,
+      },
+    ]
+    const result = runMathVectors(vectors)
+
+    expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
+    for (const vector of vectors) {
+      expect(result.stdout).toContain(`OK ${vector.name}`)
+      // 逐位锚点：校验器打印的 ratio 必须与 expected 在 6 位小数上相等（不是只落在 ±0.05 容差里）。
+      expect(result.stdout).toContain(`ratio=${vector.expected} `)
+    }
+    expect(result.stdout).toContain(`OK_VECTORS ${vectors.length}`)
+    // 15 条向量里既有 21:1 的上界也有 1.06:1 的不达标配对——断言常量无法通过本用例。
+    expect(vectors.length).toBe(15)
+  })
+
+  it('fails loudly when a supplied expected ratio is wrong', { timeout: powershellTimeoutMs }, () => {
+    const result = runMathVectors([
+      { name: 'deliberately wrong expectation', fg: '#e5e5e5', bg: '#242424', expected: 4.5 },
+    ])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/MISMATCH/)
+    // 校验器自算的 #e5e5e5 / #242424 比值（保留 6 位）；与 §5.5 的 12.32 一致。
+    expect(`${result.stdout}${result.stderr}`).toMatch(/12\.322793/)
+  })
+
+  it('fails loudly rather than defaulting when a colour token cannot be parsed', { timeout: powershellTimeoutMs }, () => {
+    const result = runMathVectors([
+      { name: 'unparseable token', fg: 'var(--color-fg)', bg: '#242424', expected: 12.32 },
+    ])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/PARSE_FAIL|MISMATCH/)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ② 完整合规的证据包必须被接受
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: well-formed package', () => {
+  it('accepts a package that carries all four §3.4 items', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage()
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.stderr, `validator stderr: ${result.stderr}`).toBe('')
+    expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
+    expect(result.stdout).toMatch(/VISUAL_EVIDENCE_VALID/)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ③ 缺必填字段必须显式失败（不许静默出空值）
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: missing required fields fail explicitly', () => {
+  const requiredManifestFields = [
+    'target',
+    'viewport',
+    'host',
+    'tolerance',
+    'coverage',
+    'screenshots',
+    'records',
+    'verdicts',
+  ]
+
+  for (const field of requiredManifestFields) {
+    it(`rejects a manifest without "${field}"`, { timeout: powershellTimeoutMs }, () => {
+      const dir = createPackage({ omitManifestKey: field })
+      const result = runValidator(['-EvidenceRoot', dir])
+
+      expect(result.status).not.toBe(0)
+      expect(`${result.stdout}${result.stderr}`).toMatch(new RegExp(field, 'i'))
+    })
+  }
+
+  it('rejects a manifest whose target block omits the viewport devicePixelRatio', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({
+      manifestOverrides: { viewport: { width: 1280, height: 720, windowState: 'default' } },
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/devicePixelRatio/i)
+  })
+
+  it('rejects a manifest whose host block omits the WebView2 runtime version', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({
+      manifestOverrides: {
+        host: {
+          os: { caption: 'Windows Server 2025', version: '10.0.26100' },
+          webview2: {},
+          app: { productName: 'Rain', productVersion: '0.1.0' },
+        },
+      },
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/webview2|runtime/i)
+  })
+
+  it('rejects a record with a null rect instead of coercing it to zero', { timeout: powershellTimeoutMs }, () => {
+    const record = { ...buildRecord({ recordId: 'VC-01-null-rect', vc: 'VC-01', criterion: 'bodyBackgroundLuminanceBelow0.05', page: 'video-list', selector: 'body', screenshots: ['screenshots/01-video-list.png'] }), rect: null }
+    const dir = createPackage({ records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/rect/i)
+  })
+
+  it('rejects a record with an empty computed-style block instead of emitting blank values', { timeout: powershellTimeoutMs }, () => {
+    const record = { ...buildRecord({ recordId: 'VC-01-empty-style', vc: 'VC-01', criterion: 'bodyBackgroundLuminanceBelow0.05', page: 'video-list', selector: 'body', screenshots: ['screenshots/01-video-list.png'] }), computedStyle: {} }
+    const dir = createPackage({ records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/computedStyle/i)
+  })
+
+  it('rejects a record without a sampled viewport', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({ recordId: 'VC-01-no-viewport', vc: 'VC-01', criterion: 'bodyBackgroundLuminanceBelow0.05', page: 'video-list', selector: 'body', screenshots: ['screenshots/01-video-list.png'] }) as Record<string, unknown>
+    delete record.sampledViewport
+    const dir = createPackage({ records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/sampledViewport|viewport/i)
+  })
+
+  it('rejects a coverage block without the explicit untested list', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({ manifestOverrides: { coverage: { tested: ['VC-01'] } } })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/untested/i)
+  })
+
+  it('rejects a coverage block without the explicit dimension scope note', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({
+      manifestOverrides: {
+        coverage: { tested: ['VC-01'], untested: contractIds.filter((id) => id !== 'VC-01'), reserved: ['VC-18'] },
+      },
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/scopeNote/i)
+  })
+
+  it('rejects a coverage block that leaves VC-18 (the reserved number) in a tested/untested list', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({ untested: [...contractIds.filter((id) => id !== 'VC-01'), 'VC-18'] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/VC-18/)
+  })
+
+  it('rejects a coverage block that omits contract ids entirely', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({ untested: ['VC-02', 'VC-03'] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/VC-\d\d/)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ④ 只有截图 → 不构成裁判（§3.4 末句）
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: screenshots alone adjudicate nothing', () => {
+  it('rejects a package that has a screenshot but zero measurement records', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({ records: [], tested: [], untested: contractIds })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/截图|screenshot/i)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/不构成|not admissible|no measurement|0 records/i)
+  })
+
+  it('rejects records that reference a screenshot which does not exist in the package', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-01-missing-shot',
+      vc: 'VC-01',
+      criterion: 'bodyBackgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/does-not-exist.png'],
+    })
+    const dir = createPackage({ records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/does-not-exist\.png/)
+  })
+
+  it('rejects a record that claims a criterion without naming any screenshot', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-01-unbound',
+      vc: 'VC-01',
+      criterion: 'bodyBackgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: [],
+    })
+    const dir = createPackage({ records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/screenshot/i)
+  })
+
+  it('rejects a package whose only screenshot is not a PNG', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage()
+    writeFileSync(join(dir, 'screenshots', '01-video-list.png'), 'not a png at all', 'utf8')
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/PNG|png/i)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑤ 实测数字必须自洽、可复算（不许声明一个数、记录另一个数）
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: measured numbers must be recomputable', () => {
+  it('rejects a record whose declared contrast ratio contradicts its own composited colours', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-03-lie',
+      vc: 'VC-03',
+      criterion: 'primaryButtonTextContrast',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+    }) as Record<string, any>
+    record.measured.contrastRatio.value = 19.99
+    const dir = createPackage({
+      tested: ['VC-03'],
+      records: [record],
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/对比度|contrast/i)
+  })
+
+  it('rejects a record whose declared RGB channels drift more than ±1 from the measured composited colour', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-02-drift',
+      vc: 'VC-02',
+      criterion: 'panelSurfaceToken',
+      page: 'settings',
+      selector: '[data-testid="settings-page"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      declared: { bg: '#161b22' },
+    }) as Record<string, any>
+    record.measured.bg.rgba8 = [0x20, 0x25, 0x2c]
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/通道|channel|\+-\d/i)
+  })
+
+  it('rejects a record whose threshold is wrong for the measured font size', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-12-threshold',
+      vc: 'VC-12',
+      criterion: 'bodyTextContrast',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+      fontSizePx: 13,
+      threshold: 3,
+    })
+    const dir = createPackage({ tested: ['VC-12'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/threshold|4\.5/i)
+  })
+
+  it('accepts the 3:1 threshold for genuinely large text (≥24px)', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-12-large-text',
+      vc: 'VC-12',
+      criterion: 'emptyStateHeadlineContrast',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] main h1',
+      screenshots: ['screenshots/01-video-list.png'],
+      fontSizePx: 24,
+      threshold: 3,
+    })
+    const dir = createPackage({ tested: ['VC-12'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.stderr, `validator stderr: ${result.stderr}`).toBe('')
+    expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('rejects a record whose tolerance is not the §3.3 value', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-01-tolerance',
+      vc: 'VC-01',
+      criterion: 'bodyBackgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+      toleranceRatio: 0.5,
+    })
+    const dir = createPackage({ records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/tolerance|容差/i)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑤b 非「逐元素测量」的两类记录：跨元素扫描（VC-03① 的全称否定）与令牌解析值
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: non-element measurement scopes', () => {
+  const sweepRecord = (overrides: Record<string, unknown> = {}) => ({
+    recordId: 'VC-03-list-accent-sweep',
+    vc: 'VC-03',
+    criterion: 'noBrandAccentAnywhere',
+    page: 'video-list',
+    measurementScope: 'accentSweep',
+    selector: '[data-testid="video-list-page"]',
+    description: 'VC-03① 全页扫描',
+    sampledViewport: { width: 1280, height: 720, devicePixelRatio: 1, sampledAt: '2026-09-28T00:00:00.000Z' },
+    screenshots: ['screenshots/01-video-list.png'],
+    accentSweep: {
+      accentToken: '#4a9eff',
+      tolerancePerChannel: 1,
+      selectorScope: '[data-testid="video-list-page"]',
+      scannedElementCount: 42,
+      scannedProperties: ['backgroundColor', 'borderTopColor', 'outlineColor', 'color'],
+      matches: [],
+      ...(overrides.sweep as Record<string, unknown> | undefined),
+    },
+    ...(overrides.record as Record<string, unknown> | undefined),
+  })
+
+  it('accepts a well-formed accent sweep record (empty match list means the accent is absent)', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({ tested: ['VC-03'], records: [sweepRecord()] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.stderr, `validator stderr: ${result.stderr}`).toBe('')
+    expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('rejects an accent sweep that never scanned any element', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({
+      tested: ['VC-03'],
+      records: [sweepRecord({ sweep: { scannedElementCount: 0 } })],
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/scannedElementCount/i)
+  })
+
+  it('rejects an accent sweep that does not name the rendered properties it scanned', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({
+      tested: ['VC-03'],
+      records: [sweepRecord({ sweep: { scannedProperties: ['backgroundColor'] } })],
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/scannedProperties/i)
+  })
+
+  it('rejects a sweep whose matches field is missing instead of empty', { timeout: powershellTimeoutMs }, () => {
+    const record = sweepRecord()
+    delete (record.accentSweep as Record<string, unknown>).matches
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/matches/i)
+  })
+
+  const tokenRecord = (tokens: Record<string, string>) => ({
+    recordId: 'VC-04-study-paragraph-type-tokens',
+    vc: 'VC-04',
+    criterion: 'paragraphTypeToken',
+    page: 'study',
+    measurementScope: 'rootTokens',
+    selector: ':root',
+    description: 'VC-04 令牌解析值',
+    sampledViewport: { width: 1280, height: 720, devicePixelRatio: 1, sampledAt: '2026-09-28T00:00:00.000Z' },
+    screenshots: ['screenshots/01-video-list.png'],
+    resolvedTokens: tokens,
+  })
+
+  it('accepts a token-resolution record and rejects an empty one', { timeout: powershellTimeoutMs }, () => {
+    const good = createPackage({
+      tested: ['VC-04'],
+      records: [tokenRecord({ '--color-concept': '#5b9bf8', '--color-example': '#3ecf8e' })],
+    })
+    const goodResult = runValidator(['-EvidenceRoot', good])
+    expect(goodResult.stderr, `validator stderr: ${goodResult.stderr}`).toBe('')
+    expect(goodResult.status, `validator stdout: ${goodResult.stdout}${goodResult.stderr}`).toBe(0)
+
+    const emptyToken = createPackage({
+      tested: ['VC-04'],
+      records: [tokenRecord({ '--color-concept': '' })],
+    })
+    const emptyResult = runValidator(['-EvidenceRoot', emptyToken])
+    expect(emptyResult.status).not.toBe(0)
+    expect(`${emptyResult.stdout}${emptyResult.stderr}`).toMatch(/resolvedTokens|空值/i)
+  })
+
+  it('rejects an unknown measurement scope instead of guessing a shape', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-01-weird-scope',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+      measurementScope: 'whatever',
+    })
+    const dir = createPackage({ records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/measurementScope/i)
+  })
+
+  it('rejects a record whose declared contract token does not match the measured composited colour', { timeout: powershellTimeoutMs }, () => {
+    // 采集器可以声明"这个实测值对应合同冻结的某个令牌"；校验器必须自己复算，不许只信自述。
+    const record = buildRecord({
+      recordId: 'VC-02-token-provenance',
+      vc: 'VC-02',
+      criterion: 'neutralScaleToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      bg: [0x2e, 0x2e, 0x2e],
+      declared: { bg: '#2e2e2e' },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-surface', value: '#242424', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/declaredToken|#242424/i)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑥ 覆盖清单与记录必须一一对应
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: coverage honesty', () => {
+  it('rejects a record for a VC that is listed as untested', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-07-not-declared',
+      vc: 'VC-07',
+      criterion: 'statusColourSet',
+      page: 'video-list',
+      selector: '[data-testid^="badge-"]',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/VC-07/)
+  })
+
+  it('rejects a VC that is listed as tested but has no measurement record', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({ tested: ['VC-01', 'VC-02'] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/VC-02/)
+  })
+
+  it('rejects an unknown VC id, including the reserved VC-18', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-18-reserved',
+      vc: 'VC-18',
+      criterion: 'proposedDecision80',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-18'], untested: contractIds, records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/VC-18/)
+  })
+
+  it('refuses to treat a claimed verdict as issued by this package', { timeout: powershellTimeoutMs }, () => {
+    const dir = createPackage({
+      manifestOverrides: {
+        verdicts: { issued: true, issuedBy: 'the implementer', note: 'looks fine' },
+      },
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/verdict/i)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑦ 通道文件的存在与形态（采集脚本 / workflow / 目录约定）
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence channel: files and conventions', () => {
+  it('ships a collector that writes the evidence/visual-<sha8>-<timestamp> package directory', () => {
+    const collector = readFileSync(collectorScript, 'utf8')
+
+    expect(collector).toMatch(/evidence[\\/]visual-/)
+    expect(collector).toMatch(/yyyyMMdd-HHmmss|ToString\('yyyyMMdd-HHmmss'\)/)
+    expect(collector).toMatch(/devicePixelRatio/)
+    expect(collector).toMatch(/getBoundingClientRect/)
+    expect(collector).toMatch(/getComputedStyle/)
+    expect(collector).toMatch(/WCAG21/)
+    // §3.4 第 1–3 项必须在同一次运行内采集：目标 SHA、截图、逐条实测记录。
+    expect(collector).toMatch(/commitSha/)
+    expect(collector).toMatch(/\/screenshot/)
+  })
+
+  it('ships a workflow with workflow_dispatch and pull_request triggers on windows-2025', () => {
+    const workflow = readFileSync(workflowFile, 'utf8')
+
+    expect(workflow).toMatch(/workflow_dispatch:/)
+    expect(workflow).toMatch(/pull_request:/)
+    expect(workflow).toMatch(/runs-on:\s*windows-2025/)
+    expect(workflow).toMatch(/actions\/upload-artifact@v\d+/)
+    expect(workflow).toMatch(/GITHUB_STEP_SUMMARY/)
+    expect(workflow).toMatch(/validate-visual-evidence\.ps1/)
+    expect(workflow).toMatch(/campaign-visual-evidence\.ps1/)
+  })
+
+  it('does not widen or rewrite the four existing desktop E2E workflows', () => {
+    const existing = [
+      'study-catalog-desktop-e2e.yml',
+      'video-list-desktop-e2e.yml',
+      'runtime-settings-desktop-e2e.yml',
+      'harness.yml',
+    ]
+    for (const name of existing) {
+      const text = readFileSync(join(repoRoot, '.github', 'workflows', name), 'utf8')
+      // 既有 workflow 的 paths 过滤表与 concurrency 不得被本通道改写（只允许注释里提到本通道）。
+      expect(text).not.toMatch(/campaign-visual-evidence\.ps1/)
+      expect(text).not.toMatch(/validate-visual-evidence/)
+      expect(text).not.toMatch(/visual-evidence\.yml/)
+      expect(text).not.toMatch(/group:\s*visual-evidence/)
+    }
+  })
+
+  it('does not redefine or import the ASR/database evidence validator', () => {
+    const validator = readFileSync(validatorScript, 'utf8')
+
+    // 只允许在说明文字里点出「不是它由谁裁判」；不得真的调用它、也不得复用它的领域字段。
+    expect(validator).not.toMatch(/&\s*[^\r\n]*validate-evidence\.ps1/)
+    expect(validator).not.toMatch(/ExpectedVideoSha256/)
+    expect(validator).not.toMatch(/whisper/i)
+    expect(validator).not.toMatch(/manualReviewSamples|structuringBlocks|cancellation-proof/)
+  })
+
+  it('ships PowerShell scripts that Windows PowerShell 5.1 can decode (UTF-8 BOM)', () => {
+    // 这两个脚本都含中文注释与中文失败信息。Windows PowerShell 5.1 对**无 BOM** 的文件按 ANSI 解码，
+    // 中文会变成乱码并可能直接让解析器失败（本轮实测过：AST 报 97 个语法错误）。
+    for (const script of [validatorScript, collectorScript]) {
+      const bytes = readFileSync(script)
+      const hasBom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+      expect(hasBom, `${script} must start with a UTF-8 BOM`).toBe(true)
+    }
+  })
+
+  it('ships a PowerShell scripts whose injected probe JavaScript is syntactically valid', () => {
+    // 采集器把一整段 JS 作为 here-string 注入页面。这段 JS 一旦语法错，整条通道在托管 runner 上
+    // 只会以「探针超时」的形式失败，本地看不出原因。这里把它抽出来按 W3C execute/sync 的语义
+    // （脚本体会被包进一个函数体）交给 node --check 做语法检查。
+    const collector = readFileSync(collectorScript, 'utf8').split('\n')
+    const startMarker = '$probeScript = @\''
+    let start = -1
+    let end = -1
+    for (let index = 0; index < collector.length; index += 1) {
+      if (start === -1 && collector[index].trim() === startMarker) {
+        start = index + 1
+        continue
+      }
+      if (start !== -1 && collector[index].trim() === "'@") {
+        end = index - 1
+        break
+      }
+    }
+    expect(start, 'probe here-string opening not found').toBeGreaterThan(-1)
+    expect(end, 'probe here-string terminator not found').toBeGreaterThan(start)
+
+    const probe = collector.slice(start, end + 1).join('\n')
+    expect(probe.length).toBeGreaterThan(2000)
+    expect(probe).toContain('getBoundingClientRect')
+    expect(probe).toContain('getComputedStyle')
+    expect(probe).toContain('WCAG21:(L1+0.05)/(L2+0.05)')
+
+    const dir = mkdtempSync(join(tmpdir(), 'rain-visual-probe-'))
+    const probePath = join(dir, 'probe.js')
+    writeFileSync(probePath, `function __webdriverExecuteSync() {\n${probe}\n}\n`, 'utf8')
+    const result = (() => {
+      try {
+        execFileSync(process.execPath, ['--check', probePath], { encoding: 'utf8', stdio: 'pipe' })
+        return 0
+      } catch (cause) {
+        return (cause as { status?: number }).status ?? 1
+      }
+    })()
+    expect(result, `node --check on the extracted probe JS failed (exit ${result})`).toBe(0)
+  })
+
+  it('keeps the tested ids in the collector backed by at least one measurement record each', () => {
+    // 「已测」不能只是清单里的一行：采集器声明的每个 testedId 都必须在同一文件里有对应的 spec。
+    const collector = readFileSync(collectorScript, 'utf8')
+    const testedMatch = collector.match(/\$testedIds\s*=\s*@\(([^)]*)\)/)
+    expect(testedMatch, '$testedIds not found in the collector').not.toBeNull()
+    const tested = [...(testedMatch as RegExpMatchArray)[1].matchAll(/'(VC-\d\d)'/g)].map((match) => match[1])
+    expect(tested.length).toBeGreaterThan(0)
+
+    const untestedMatch = collector.match(/\$untestedIds\s*=\s*@\(([^)]*)\)/)
+    expect(untestedMatch, '$untestedIds not found in the collector').not.toBeNull()
+    expect((untestedMatch as RegExpMatchArray)[1]).toContain('$testedIds')
+
+    for (const id of tested) {
+      // 每个已测编号至少要有一条 vc = '<id>' 的 spec（含 focus / spacing / token 等具体维度）。
+      const specPattern = new RegExp(`vc = '${id}'`)
+      expect(specPattern.test(collector), `no collector spec claims ${id} while it is listed as tested`).toBe(true)
+    }
+
+    // 合同 §4 的 18 个编号必须恰好被 tested ∪ untested 覆盖（VC-18 是保留空号，不得入表）。
+    const contractIdsMatch = collector.match(/\$contractIds\s*=\s*@\(([\s\S]*?)\)\s*\n/)
+    expect(contractIdsMatch, '$contractIds not found in the collector').not.toBeNull()
+    const contractIdsInCollector = [...(contractIdsMatch as RegExpMatchArray)[1].matchAll(/'(VC-\d\d)'/g)].map((match) => match[1])
+    expect(contractIdsInCollector).toEqual(contractIds)
+  })
+
+  it('parses every PowerShell block inside the workflow with the real PowerShell parser', () => {
+    // 这是本轮被独立审查抓到的真实缺陷的守卫：workflow 里 `shell: pwsh` 的 run 块此前从未被解析过，
+    // 一个行尾逗号就让整个 step 语法错误、workflow 永远跑不绿。这里把每个 pwsh 块抽出来交给
+    // PowerShell 自己的 AST 解析器（不是文本 grep）。
+    const workflow = readFileSync(workflowFile, 'utf8')
+    const lines = workflow.split('\n')
+    const blocks: string[] = []
+    let index = 0
+    while (index < lines.length) {
+      const shellMatch = lines[index].match(/^(\s*)shell:\s*pwsh\s*$/)
+      if (!shellMatch) {
+        index += 1
+        continue
+      }
+      const indent = shellMatch[1].length
+      let runIndex = index + 1
+      while (runIndex < lines.length && !/^\s*run:\s*\|/.test(lines[runIndex])) runIndex += 1
+      expect(runIndex, `no "run: |" after the shell: pwsh at line ${index + 1}`).toBeLessThan(lines.length)
+      let bodyEnd = runIndex + 1
+      while (bodyEnd < lines.length) {
+        const bodyLine = lines[bodyEnd]
+        if (bodyLine.trim() !== '' && bodyLine.match(/^(\s*)/)?.[1].length <= indent) break
+        bodyEnd += 1
+      }
+      const body = lines.slice(runIndex + 1, bodyEnd).join('\n')
+      const deindented = body
+        .split('\n')
+        .map((line) => (line.startsWith(' '.repeat(indent + 2)) ? line.slice(indent + 2) : line))
+        .join('\n')
+      blocks.push(deindented)
+      index = bodyEnd
+    }
+
+    expect(blocks.length, 'no shell: pwsh run block found in the workflow').toBeGreaterThan(0)
+
+    const dir = mkdtempSync(join(tmpdir(), 'rain-visual-workflow-pwsh-'))
+    blocks.forEach((block, blockIndex) => {
+      const blockPath = join(dir, `block-${blockIndex}.ps1`)
+      // 必须以 UTF-8 **with BOM** 落盘：块里有中文，Windows PowerShell 5.1 对无 BOM 文件按 ANSI 解码，
+      // 会把中文读成乱码并报出假的语法错误（本轮实测：同一块带 BOM = 0 errors、不带 BOM = 1 error）。
+      writeFileSync(blockPath, `\ufeff${block}`, 'utf8')
+      const check = [
+        '$tokens = $null',
+        '$errors = $null',
+        `$null = [System.Management.Automation.Language.Parser]::ParseFile('${blockPath.replace(/'/g, "''")}', [ref]$tokens, [ref]$errors)`,
+        'if ($errors -and $errors.Count -gt 0) {',
+        '  $errors | ForEach-Object { Write-Output ("L" + $_.Extent.StartLineNumber + ": " + $_.Message) }',
+        '  exit 1',
+        '}',
+        'exit 0',
+      ].join('\n')
+      const checkPath = join(dir, `check-${blockIndex}.ps1`)
+      writeFileSync(checkPath, check, 'utf8')
+      let status = 0
+      let output = ''
+      try {
+        output = execFileSync(
+          'powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', checkPath],
+          { encoding: 'utf8', stdio: 'pipe' },
+        )
+      } catch (cause) {
+        const failure = cause as { status?: number; stdout?: string }
+        status = failure.status ?? 1
+        output = failure.stdout ?? ''
+      }
+      expect(status, `workflow pwsh block #${blockIndex + 1} has PowerShell parse errors:\n${output}\n--- block ---\n${block}`).toBe(0)
+    })
+  })
+
+  it('backs every declared sweep in the manifest with an actual accentSweep record', { timeout: powershellTimeoutMs }, () => {
+    // t2 对抗性复核用一个「manifest 声明 3 条 sweep、记录 0 条」的包证明了旧校验器会放行。
+    const sweep = {
+      recordId: 'VC-03-list-accent-sweep',
+      vc: 'VC-03',
+      criterion: 'noBrandAccentAnywhere',
+      page: 'video-list',
+      measurementScope: 'accentSweep',
+      selector: '[data-testid="video-list-page"]',
+      description: 'VC-03① sweep',
+      sampledViewport: { width: 1280, height: 720, devicePixelRatio: 1, sampledAt: '2026-09-28T00:00:00.000Z' },
+      screenshots: ['screenshots/01-video-list.png'],
+      accentSweep: {
+        accentToken: '#4a9eff',
+        tolerancePerChannel: 1,
+        selectorScope: '[data-testid="video-list-page"]',
+        scannedElementCount: 42,
+        scannedProperties: ['backgroundColor', 'borderTopColor', 'outlineColor', 'color'],
+        matches: [],
+      },
+    }
+
+    const declaredWithoutRecord = createPackage({
+      tested: ['VC-03'],
+      records: [
+        buildRecord({
+          recordId: 'VC-03-list-import-button',
+          vc: 'VC-03',
+          criterion: 'primaryButtonOutlinedText',
+          page: 'video-list',
+          selector: '[data-testid="video-list-page"] header button',
+          screenshots: ['screenshots/01-video-list.png'],
+        }),
+      ],
+      manifestOverrides: {
+        accentSweeps: [
+          { id: 'VC-03-list-accent-sweep', vc: 'VC-03', page: 'video-list', selectorScope: '[data-testid="video-list-page"]', accentToken: '#4a9eff' },
+          { id: 'VC-03-settings-accent-sweep', vc: 'VC-03', page: 'settings', selectorScope: '[data-testid="settings-page"]', accentToken: '#4a9eff' },
+        ],
+      },
+    })
+    const missing = runValidator(['-EvidenceRoot', declaredWithoutRecord])
+    expect(missing.status).not.toBe(0)
+    expect(`${missing.stdout}${missing.stderr}`).toMatch(/VC-03-list-accent-sweep/)
+
+    const declaredWithRecord = createPackage({
+      tested: ['VC-03'],
+      records: [sweep],
+      manifestOverrides: {
+        accentSweeps: [{ id: 'VC-03-list-accent-sweep', vc: 'VC-03', page: 'video-list', selectorScope: '[data-testid="video-list-page"]', accentToken: '#4a9eff' }],
+      },
+    })
+    const consistent = runValidator(['-EvidenceRoot', declaredWithRecord])
+    expect(consistent.stderr, `validator stderr: ${consistent.stderr}`).toBe('')
+    expect(consistent.status, `validator stdout: ${consistent.stdout}${consistent.stderr}`).toBe(0)
+  })
+
+  it('parses the workflow YAML structure so a structural break cannot hide (no parser dependency)', () => {
+    // t2 复核证明：只解析 PowerShell AST 时，YAML 结构性错误（重复键）会让整条通道永不运行而本地全绿。
+    // 这里不引入依赖，做一个保守的结构检查：顶层键唯一、关键块存在、每个 job 有 runs-on 与 steps、
+    // 每个 step 恰好一个 uses 或 run、run 块不被当成普通标量。
+    const workflow = readFileSync(workflowFile, 'utf8')
+    const lines = workflow.split('\n')
+
+    const topLevelKeys: string[] = []
+    for (const line of lines) {
+      const match = line.match(/^([A-Za-z_][A-Za-z0-9_-]*):/)
+      if (match) topLevelKeys.push(match[1])
+    }
+    const duplicates = topLevelKeys.filter((key, index) => topLevelKeys.indexOf(key) !== index)
+    expect(duplicates, `duplicate top-level YAML keys: ${duplicates.join(', ')}`).toEqual([])
+    for (const required of ['name', 'on', 'permissions', 'concurrency', 'jobs']) {
+      expect(topLevelKeys, `missing top-level key "${required}"`).toContain(required)
+    }
+      // 缩进必须全是空格（YAML 不允许 tab 缩进）。
+      for (const [index, line] of lines.entries()) {
+        expect(line.includes('\t'), `line ${index + 1} uses a tab for indentation`).toBe(false)
+      }
+
+      // 触发器块必须在 on: 之下（缩进两级），而不是顶层。
+      expect(topLevelKeys, 'pull_request must not be a top-level key').not.toContain('pull_request')
+      expect(workflow).toMatch(/^on:\s*$/m)
+      expect(workflow).toMatch(/^ {2}pull_request:/m)
+      expect(workflow).toMatch(/^ {2}workflow_dispatch:/m)
+
+    // 每个 job：有 runs-on、有 steps；每个 step：恰好一个 uses 或 run。
+    // job 只在 `jobs:` 块之内（否则 `on:` 下的 pull_request/workflow_dispatch 会被误当 job）。
+    const jobsIndex = lines.findIndex((line) => /^jobs:\s*$/.test(line))
+    expect(jobsIndex, 'no top-level jobs: block').toBeGreaterThan(-1)
+    const jobIndices = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line, index }) => index > jobsIndex && /^ {2}[A-Za-z_][A-Za-z0-9_-]*:\s*$/.test(line))
+    expect(jobIndices.length).toBeGreaterThan(0)
+    for (const { line, index } of jobIndices) {
+      const jobName = line.trim().replace(':', '')
+      // 收集该 job 的正文（直到下一个同级或更浅的键）。
+      let end = lines.length
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        const bodyLine = lines[cursor]
+        if (bodyLine.trim() !== '' && /^ {0,2}[A-Za-z_#]/.test(bodyLine)) {
+          end = cursor
+          break
+        }
+      }
+      const body = lines.slice(index + 1, end)
+      expect(body.some((entry) => /^\s{4}runs-on:/.test(entry)), `job "${jobName}" has no runs-on`).toBe(true)
+      expect(body.some((entry) => /^\s{4}steps:\s*$/.test(entry)), `job "${jobName}" has no steps`).toBe(true)
+      const stepStarts = body.filter((entry) => /^\s{6}- /.test(entry))
+      expect(stepStarts.length, `job "${jobName}" has no steps`).toBeGreaterThan(0)
+      for (const step of stepStarts) {
+        const normalized = step.replace(/^\s{6}- /, '')
+        const isUses = normalized.startsWith('uses:')
+        const isName = normalized.startsWith('name:')
+        expect(isUses || isName, `job "${jobName}" has a step that is neither name: nor uses: (${normalized})`).toBe(true)
+      }
+      const usesCount = body.filter((entry) => /^\s{8}uses:/.test(entry)).length
+      const runCount = body.filter((entry) => /^\s{8}run:/.test(entry)).length
+      expect(usesCount + runCount, `job "${jobName}" has ${stepStarts.length} steps but only ${usesCount + runCount} uses/run entries`).toBeGreaterThanOrEqual(stepStarts.length)
+    }
+
+    // run: | 必须真的进入块标量（后续行缩进比 run: 深）。
+    for (const [index, line] of lines.entries()) {
+      const runMatch = line.match(/^(\s*)run:\s*\|/)
+      if (!runMatch) continue
+      const next = lines[index + 1]
+      expect(next, 'run: | block is empty').toBeTruthy()
+      expect(
+        next.startsWith(' '.repeat(runMatch[1].length + 2)),
+        `run: | block at line ${index + 1} is not indented deeper than the key`,
+      ).toBe(true)
+    }
+
+    // workflow_dispatch 必须真的可手动触发（inputs 允许，但至少要有该键）。
+    expect(workflow).toMatch(/^ {2}workflow_dispatch:/m)
+    expect(workflow).toMatch(/^ {2}pull_request:/m)
+  })
+
+  it('keeps every contract id addressable exactly once in the coverage contract', () => {
+    const manifestModule = readFileSync(collectorScript, 'utf8')
+    for (const id of contractIds) {
+      expect(manifestModule).toContain(id)
+    }
+    expect(manifestModule).toContain('VC-18')
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑧ 参考实现自检：测试自己的数学必须与合同公开值一致
+ *    （防止「测试与被测同错」——这里独立复算 §5.5 的公开数字）
+ * ------------------------------------------------------------------ */
+
+describe('reference implementation self-check', () => {
+  it('matches the published visual-contract §5.5 / §5.2 numbers', () => {
+    expect(contrastRatio(hexToRgb8('#e5e5e5'), hexToRgb8('#242424'))).toBeCloseTo(12.32, 2)
+    expect(contrastRatio(hexToRgb8('#e5e5e5'), hexToRgb8('#1a1a1a'))).toBeCloseTo(13.82, 2)
+    expect(contrastRatio(hexToRgb8('#9a9a9a'), hexToRgb8('#1a1a1a'))).toBeCloseTo(6.19, 2)
+    expect(contrastRatio(hexToRgb8('#9a9a9a'), hexToRgb8('#242424'))).toBeCloseTo(5.52, 2)
+    expect(contrastRatio(hexToRgb8('#9a9a9a'), hexToRgb8('#2e2e2e'))).toBeCloseTo(4.83, 2)
+    expect(contrastRatio(hexToRgb8('#8f8f8f'), hexToRgb8('#1a1a1a'))).toBeCloseTo(5.38, 2)
+    expect(contrastRatio(hexToRgb8('#8f8f8f'), hexToRgb8('#242424'))).toBeCloseTo(4.8, 2)
+    expect(contrastRatio(hexToRgb8('#ffffff'), hexToRgb8('#4a9eff'))).toBeCloseTo(2.75, 2)
+    expect(contrastRatio(hexToRgb8('#ffffff'), hexToRgb8('#10b981'))).toBeCloseTo(2.54, 2)
+    expect(contrastRatio(hexToRgb8('#ffffff'), hexToRgb8('#f59e0b'))).toBeCloseTo(2.15, 2)
+    expect(contrastRatio(hexToRgb8('#e6edf3'), hexToRgb8('#161b22'))).toBeCloseTo(14.64, 2)
+    expect(contrastRatio(hexToRgb8('#539bf5'), hexToRgb8('#161b22'))).toBeCloseTo(6.07, 2)
+    expect(contrastRatio(hexToRgb8('#868f99'), hexToRgb8('#1c232c'))).toBeCloseTo(4.83, 2)
+    expect(contrastRatio(hexToRgb8('#ff6b61'), hexToRgb8('#242424'))).toBeCloseTo(5.56, 2)
+    expect(contrastRatio(hexToRgb8('#e3b341'), hexToRgb8('#1a1a1a'))).toBeCloseTo(8.94, 2)
+    expect(relativeLuminance(hexToRgb8('#1a1a1a'))).toBeCloseTo(0.01033, 5)
+    expect(relativeLuminance(hexToRgb8('#242424'))).toBeCloseTo(0.017642, 5)
+    expect(relativeLuminance(hexToRgb8('#ffffff'))).toBeCloseTo(1, 6)
+    expect(relativeLuminance([0, 0, 0])).toBeCloseTo(0, 6)
+  })
+
+  it('reproduces the white-text upper bound proof 1.05/(L_bg+0.05) < 4.5 for every status background', () => {
+    // visual-contract.md §5.5.1：白字压任何 L > 0.183333 的背景都必然 <4.5:1（可证的不可能）。
+    for (const background of ['#10b981', '#f59e0b', '#3ecf8e', '#f0a13c', '#5b9bf8']) {
+      const luminance = relativeLuminance(hexToRgb8(background))
+      expect(luminance).toBeGreaterThan(0.183333)
+      expect(1.05 / (luminance + 0.05)).toBeLessThan(4.5)
+      expect(contrastRatio([255, 255, 255], hexToRgb8(background))).toBeLessThan(4.5)
+    }
+  })
+})
