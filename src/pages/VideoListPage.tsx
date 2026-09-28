@@ -233,8 +233,11 @@ const modalBtnStyle: React.CSSProperties = {
 }
 
 const modalBtnPrimaryStyle: React.CSSProperties = {
-  border: '1px solid transparent',
-  background: 'rgba(255,255,255,.12)',
+  // 主按钮=描边款（决策 65 / VC-03②，VCGAP-21）：底 = 该套面板色、字 = fg、边框 1px = border 令牌。
+  // 原写法是 `rgba(255,255,255,.12)` 实底 + `1px solid transparent`（合成 #3e3e3e，字虽达标 8.49:1，
+  // 但不是描边款）。取值见 docs/development/visual-contract.md §5.5.1：字对底 12.32:1、边框对底 4.80:1。
+  border: '1px solid var(--color-border)',
+  background: 'var(--color-surface)',
   color: 'var(--color-fg)',
   padding: '4px 12px',
   borderRadius: 'var(--radius-1)',

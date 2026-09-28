@@ -53,24 +53,27 @@ export const COLORS = {
 } as const
 
 const TAG_STYLES: Record<string, CSSProperties> = {
+  // 细边取**全色同色值**（决策 71「类型色字 + 同色淡底 + 同色细边」）：原来用 alpha .3 的叠色细边，
+  // 对浅底三种底色只有 1.48–1.73:1，按 DEC-VC-02 边界 4「1px 边框一律 ≥3:1」不达标（VCGAP-22）。
+  // 全色值为 concept 6.07 / analogy 5.13 / example 6.81（对 panel #161b22，见 visual-contract.md §5.5.2）。
   llm: {
     color: COLORS.concept,
-    borderColor: 'rgba(83,155,245,.3)',
+    borderColor: COLORS.concept,
     background: 'rgba(83,155,245,.1)',
   },
   'asr-api': {
     color: COLORS.analogy,
-    borderColor: 'rgba(219,109,40,.3)',
+    borderColor: COLORS.analogy,
     background: 'rgba(219,109,40,.1)',
   },
   'whisper-local': {
     color: COLORS.example,
-    borderColor: 'rgba(63,185,80,.3)',
+    borderColor: COLORS.example,
     background: 'rgba(63,185,80,.1)',
   },
   vision: {
     color: COLORS.example,
-    borderColor: 'rgba(63,185,80,.3)',
+    borderColor: COLORS.example,
     background: 'rgba(63,185,80,.1)',
   },
 }
@@ -102,7 +105,7 @@ export const s = {
     fontFamily: 'inherit',
   } as CSSProperties,
   dangerBtn: {
-    border: '1px solid rgba(248,81,73,.3)',
+    border: `1px solid ${COLORS.fail}`,
     background: 'transparent',
     color: COLORS.fail,
     padding: '2px 8px',
@@ -122,8 +125,11 @@ export const s = {
     fontFamily: 'inherit',
   } as CSSProperties,
   primaryBtn: {
-    border: '1px solid transparent',
-    background: 'rgba(255,255,255,.12)',
+    // 主按钮=描边款（决策 65 / VC-03②，VCGAP-21）：底色 = 该套面板色、字 = fg、边框 1px = border 令牌；
+    // 原写法是 `rgba(255,255,255,.12)` 实底 + `1px solid transparent`（合成 #32363d，字虽达标 10.27:1，
+    // 但不是描边款）。取值见 visual-contract.md §5.5.2：字 panel 14.64:1、边框对 panel 3.49:1。
+    border: `1px solid ${COLORS.border}`,
+    background: COLORS.panel,
     color: COLORS.fg,
     padding: '4px 12px',
     borderRadius: 8,
