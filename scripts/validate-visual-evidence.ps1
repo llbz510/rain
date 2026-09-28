@@ -1,0 +1,1047 @@
+﻿<#
+.SYNOPSIS
+  视觉证据包校验器（V1a 采集通道的独立校验器）。
+
+.DESCRIPTION
+  裁判对象是 `docs/development/visual-contract.md` §3.4 定义的视觉证据包（**不是** ASR/整理/数据库/
+  有续事件/证明产物那类领域证据——那一类由既有的 `scripts/validate-evidence.ps1` 裁判，本文件
+  不引用、不重定义、不复用它的任何字段）。
+
+  §3.4 要求一次视觉证据包必须包含并与目标提交 SHA 绑定：
+    1. 目标提交 SHA、视口尺寸（含 `devicePixelRatio`）、宿主与版本；
+    2. 截图（附件）；
+    3. 每个判据的实测记录：`VC-xx` + 选择器 + 几何 + 计算样式 + 实际合成颜色 + 对比度比值 + 采样视口；
+    4. 逐条 `pass` / `needs_revision` 结论与差值。
+  本校验器强制第 1–3 项齐备且可复算，并**显式拒绝**第 4 项被采集方代为签发（第 4 项只能由
+  独立视觉审查员产出）。同时强制「本次已测 / 本次未测」两张清单。
+
+  本校验器**不做**的事：不签发 Visual Evidence、不判任何 `VC-xx` 的 pass/needs_revision、
+  不改任何 AC 状态或 Evidence tier、不宣布任何 AC 完成。
+
+.PARAMETER EvidenceRoot
+  证据包目录（含 `manifest.json`、`records/`、`screenshots/`）。缺省时扫描仓库根下的全部
+  `evidence/visual-*` 目录；一个都没有时按「无已入库证据包」如实报出并以 0 退出。
+
+.PARAMETER VerifyMathFile
+  自检模式：传入一个 UTF-8 JSON 文件的路径，文件内容为一个数组（每个元素
+  `{ name, fg, bg, expected }`，可选 `base`）。用本文件**生产路径上的**合成与 WCAG 2.1 对比度函数
+  逐条复算，与 `expected` 相差超过 ±0.05 即 `MISMATCH` 并以 1 退出。目的：使「合成与对比度数学」
+  可以被独立复算，而不是只存在于采集脚本里。
+  （用文件而不是命令行参数：Windows 参数解析会吃掉 JSON 里的引号，内联 JSON 不可用。）
+
+.PARAMETER RepoRoot
+  仓库根（缺省 = 本脚本上一级目录）。仅用于定位缺省扫描目录。
+
+.PARAMETER Tolerance
+  对比度复算容差（缺省 0.05 = §3.3）。
+#>
+param(
+  [string]$EvidenceRoot,
+  [string]$VerifyMathFile,
+  [string]$RepoRoot,
+  [double]$Tolerance = 0.05
+)
+
+$ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+  $RepoRoot = (Get-Item -LiteralPath (Split-Path -Parent $PSScriptRoot)).FullName
+}
+
+# 18 个可裁判编号：VC-01…VC-17 + VC-19。VC-18 是保留空号（决策 80 仍为 Proposed）。
+$script:ContractIds = @(
+  'VC-01', 'VC-02', 'VC-03', 'VC-04', 'VC-05', 'VC-06', 'VC-07', 'VC-08', 'VC-09',
+  'VC-10', 'VC-11', 'VC-12', 'VC-13', 'VC-14', 'VC-15', 'VC-16', 'VC-17', 'VC-19'
+)
+$script:ReservedIds = @('VC-18')
+
+# §3.3 的允许误差（冻结值；证据包里声明的容差必须与之逐项相等）。
+$script:FrozenTolerance = [ordered]@{
+  colorChannel = 1
+  contrastRatio = 0.05
+  fixedHeightPx = 0.5
+  renderedGeometryPx = 2
+  exactValues = $true
+}
+
+# 每条实测记录必须齐备的计算样式字段（§3.4 第 3 项「计算样式」的最小可裁判集）。
+$script:RequiredComputedStyleKeys = @(
+  'color', 'backgroundColor', 'fontFamily', 'fontSize', 'fontWeight', 'fontVariantNumeric',
+  'lineHeight', 'borderTopWidth', 'borderTopStyle', 'borderTopColor', 'borderRadius',
+  'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+  'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'boxShadow'
+)
+
+# 记录级几何字段（getBoundingClientRect 的逻辑像素）。
+$script:RequiredRectKeys = @('x', 'y', 'width', 'height', 'top', 'right', 'bottom', 'left')
+
+$script:Failures = New-Object System.Collections.Generic.List[string]
+$script:CheckedPackages = 0
+
+function Add-Failure([string]$Message) {
+  $script:Failures.Add($Message)
+}
+
+function Throw-IfFailed {
+  if ($script:Failures.Count -eq 0) { return }
+  $lines = @('VISUAL_EVIDENCE_INVALID:', [string]$script:Failures.Count, '项校验失败') -join ' '
+  $index = 0
+  foreach ($failure in $script:Failures) {
+    $index += 1
+    $lines += ('  [' + $index + '] ' + $failure)
+    Write-Warning ('visual evidence failure [' + $index + ']: ' + $failure)
+  }
+  throw ($lines -join ([Environment]::NewLine))
+}
+
+#region 颜色与对比度数学（复算基底）
+
+function ConvertTo-Rgb8([string]$Token) {
+  # 只接受可被本校验器逐字节复算的形式：hex 与 rgb()/rgba()。
+  # 任何其它形式（CSS 变量、颜色关键字、color() 等）一律 PARSE_FAIL——绝不静默取默认值。
+  # 返回值统一为 hashtable @{ rgb = [double[]](r,g,b); alpha = [double] }：
+  # 避免「有时返回数组、有时返回 hashtable」在 PowerShell 参数绑定下被解包（本轮实测过的坑）。
+  if ([string]::IsNullOrWhiteSpace($Token)) { throw 'PARSE_FAIL: empty colour token' }
+  $text = $Token.Trim()
+  if ($text.StartsWith('#')) {
+    $body = $text.Substring(1)
+    if ($body.Length -eq 3 -and $body -match '^[0-9a-fA-F]{3}$') {
+      $expanded = ''
+      foreach ($character in $body.ToCharArray()) { $expanded += ([string]$character + [string]$character) }
+      $body = $expanded
+    }
+    if ($body.Length -eq 6 -and $body -match '^[0-9a-fA-F]{6}$') {
+      return @{
+        rgb = [double[]]@(
+          [Convert]::ToInt32($body.Substring(0, 2), 16),
+          [Convert]::ToInt32($body.Substring(2, 2), 16),
+          [Convert]::ToInt32($body.Substring(4, 2), 16)
+        )
+        alpha = 1.0
+      }
+    }
+    if ($body.Length -eq 8 -and $body -match '^[0-9a-fA-F]{8}$') {
+      return @{
+        rgb = [double[]]@(
+          [Convert]::ToInt32($body.Substring(0, 2), 16),
+          [Convert]::ToInt32($body.Substring(2, 2), 16),
+          [Convert]::ToInt32($body.Substring(4, 2), 16)
+        )
+        alpha = ([Convert]::ToInt32($body.Substring(6, 2), 16) / 255.0)
+      }
+    }
+    throw ('PARSE_FAIL: unsupported hex colour token ' + $Token)
+  }
+  $functional = [regex]::Match($text, '(?i)^rgba?\(([^)]*)\)$')
+  if ($functional.Success) {
+    $parts = @($functional.Groups[1].Value -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    if ($parts.Count -ne 3 -and $parts.Count -ne 4) {
+      throw ('PARSE_FAIL: unsupported rgb()/rgba() token ' + $Token)
+    }
+    $channels = New-Object System.Collections.Generic.List[double]
+    foreach ($part in $parts[0..2]) {
+      $integer = [regex]::Match($part, '^[0-9]+$')
+      $percent = [regex]::Match($part, '^([0-9]*\.?[0-9]+)%$')
+      $channelValue = -1.0
+      if ($integer.Success) {
+        $channelValue = [double]$part
+      } elseif ($percent.Success) {
+        $channelValue = [double][Math]::Round([double]$percent.Groups[1].Value * 2.55)
+      } else {
+        throw ('PARSE_FAIL: unsupported rgb()/rgba() channel ' + $part + ' in ' + $Token)
+      }
+      if ($channelValue -lt 0 -or $channelValue -gt 255) { throw ('PARSE_FAIL: channel out of range in ' + $Token) }
+      $channels.Add($channelValue)
+    }
+    $alpha = 1.0
+    if ($parts.Count -eq 4) {
+      $plain = [regex]::Match($parts[3], '^[0-9]*\.?[0-9]+$')
+      $alphaPercent = [regex]::Match($parts[3], '^([0-9]*\.?[0-9]+)%$')
+      if ($plain.Success) {
+        $alpha = [double]$parts[3]
+      } elseif ($alphaPercent.Success) {
+        $alpha = ([double]$alphaPercent.Groups[1].Value / 100.0)
+      } else {
+        throw ('PARSE_FAIL: unsupported alpha ' + $parts[3] + ' in ' + $Token)
+      }
+      if ($alpha -lt 0 -or $alpha -gt 1) { throw ('PARSE_FAIL: alpha out of range in ' + $Token) }
+    }
+    return @{ rgb = [double[]]$channels.ToArray(); alpha = $alpha }
+  }
+  throw ('PARSE_FAIL: unsupported colour token ' + $Token)
+}
+
+function Get-Rgb8FromToken([string]$Token) {
+  $parsed = ConvertTo-Rgb8 $Token
+  if ([double]$parsed.alpha -lt 1.0) {
+    throw ('PARSE_FAIL: ' + $Token + ' is not opaque; composite it before comparing')
+  }
+  return [double[]]@($parsed.rgb)
+}
+
+function Get-CompositedRgb8([string]$Foreground, [string]$Backdrop, [string]$Base) {
+  # source-over 合成：结果按 sRGB 字节四舍五入后返回（§3.2「rgba 需按层合成到不透明底色上再比较」）。
+  # $Base 用于「半透明层压在半透明层上」的三层情形；缺省时 $Backdrop 必须本身不透明。
+  $backdropParsed = $null
+  if (-not [string]::IsNullOrWhiteSpace($Base)) {
+    $baseParsed = ConvertTo-Rgb8 $Base
+    $backdropParsed = ConvertTo-Rgb8 $Backdrop
+    $blendedBackdrop = New-Object System.Collections.Generic.List[double]
+    for ($blendIndex = 0; $blendIndex -lt 3; $blendIndex++) {
+      $blendedBackdrop.Add(
+        ([double]$backdropParsed.alpha * [double]$backdropParsed.rgb[$blendIndex]) +
+        ((1.0 - [double]$backdropParsed.alpha) * [double]$baseParsed.rgb[$blendIndex])
+      )
+    }
+    $backdropParsed = @{ rgb = [double[]]$blendedBackdrop.ToArray(); alpha = 1.0 }
+  } else {
+    $backdropParsed = ConvertTo-Rgb8 $Backdrop
+    if ([double]$backdropParsed.alpha -lt 1.0) {
+      throw ('PARSE_FAIL: backdrop ' + $Backdrop + ' is not opaque; supply the opaque base layer instead of assuming one')
+    }
+  }
+  $foregroundParsed = ConvertTo-Rgb8 $Foreground
+  $composited = New-Object System.Collections.Generic.List[int]
+  for ($mixIndex = 0; $mixIndex -lt 3; $mixIndex++) {
+    $blended = ([double]$foregroundParsed.alpha * [double]$foregroundParsed.rgb[$mixIndex]) +
+               ((1.0 - [double]$foregroundParsed.alpha) * [double]$backdropParsed.rgb[$mixIndex])
+    $composited.Add([int][Math]::Round($blended, [MidpointRounding]::AwayFromZero))
+  }
+  return [int[]]$composited.ToArray()
+}
+
+function Get-ChannelLuminance([double]$Channel) {
+  $scaled = $Channel / 255.0
+  if ($scaled -le 0.03928) { return $scaled / 12.92 }
+  return [Math]::Pow((($scaled + 0.055) / 1.055), 2.4)
+}
+
+function Get-RelativeLuminance([double[]]$Rgb) {
+  # 参数类型必须显式写成 [double[]]：PowerShell 的**命令调用**不做数组展开，
+  # 无类型参数会把 3 元素数组当成「多个位置参数」而只拿到第一个通道（本轮实测的坑）。
+  if ($null -eq $Rgb -or $Rgb.Count -ne 3) { throw 'PARSE_FAIL: relative luminance needs exactly 3 channels' }
+  $red = Get-ChannelLuminance ([double]$Rgb[0])
+  $green = Get-ChannelLuminance ([double]$Rgb[1])
+  $blue = Get-ChannelLuminance ([double]$Rgb[2])
+  return ((0.2126 * $red) + (0.7152 * $green) + (0.0722 * $blue))
+}
+
+function Get-ContrastRatio([double[]]$First, [double[]]$Second) {
+  # WCAG 2.1: (L1 + 0.05) / (L2 + 0.05)，L1 为较亮者。不取整，与采集侧同一口径。
+  $luminanceFirst = Get-RelativeLuminance $First
+  $luminanceSecond = Get-RelativeLuminance $Second
+  $lighter = [Math]::Max($luminanceFirst, $luminanceSecond)
+  $darker = [Math]::Min($luminanceFirst, $luminanceSecond)
+  return (($lighter + 0.05) / ($darker + 0.05))
+}
+
+function Get-ContrastRatioFromTokens([string]$Foreground, [string]$Backdrop, [string]$Base) {
+  # 判定用的「背景」是合成后的不透明底色：若给了 $Base，则 $Backdrop 先合成到 $Base 上。
+  # 用 List[double] 承载而不是数组变量：PowerShell 的数组在「函数返回 → 变量 → 参数」这条链上
+  # 会被反复解包（本轮实测：3 通道会退化成 "229 229 229" 这样的字符串），强类型集合不会。
+  if ([string]::IsNullOrWhiteSpace($Foreground)) { throw 'PARSE_FAIL: foreground token missing' }
+  if ([string]::IsNullOrWhiteSpace($Backdrop)) { throw 'PARSE_FAIL: backdrop token missing' }
+  $foregroundChannels = @(Get-CompositedRgb8 $Foreground $Backdrop $Base)
+  $backgroundChannels = @()
+  if ([string]::IsNullOrWhiteSpace($Base)) {
+    $backgroundChannels = @(Get-Rgb8FromToken $Backdrop)
+  } else {
+    $backgroundChannels = @(Get-CompositedRgb8 $Backdrop $Base '')
+  }
+  if ($foregroundChannels.Count -ne 3 -or $backgroundChannels.Count -ne 3) {
+    throw ('PARSE_FAIL: composited colours did not resolve to 3 channels each (fg=' +
+      $foregroundChannels.Count + ' bg=' + $backgroundChannels.Count + ')')
+  }
+  return Get-ContrastRatio (ConvertTo-DoubleArray $foregroundChannels) (ConvertTo-DoubleArray $backgroundChannels)
+}
+
+#endregion
+
+#region 自检模式
+
+function Invoke-MathVerification([string]$VectorsPath) {
+  # 向量从**文件**读入而不是命令行参数：Windows 的参数解析会把 JSON 里的引号吃掉，
+  # 使内联 JSON 变成 `[{name:single,...}]` 这种无法解析的形态（本轮实测）。
+  if (-not (Test-Path -LiteralPath $VectorsPath -PathType Leaf)) {
+    throw ('VERIFY_MATH_PARSE_FAIL: vectors file not found: ' + $VectorsPath)
+  }
+  $vectors = @()
+  try {
+    $parsed = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($VectorsPath, [System.Text.UTF8Encoding]::new($false)))
+  } catch {
+    throw ('VERIFY_MATH_PARSE_FAIL: vectors file is not valid JSON: ' + $_.Exception.Message)
+  }
+  foreach ($vector in @($parsed)) { $vectors += $vector }
+  if ($vectors.Count -eq 0) { throw 'VERIFY_MATH_PARSE_FAIL: at least one vector is required' }
+
+  $exitCode = 0
+  $verified = 0
+  foreach ($vector in $vectors) {
+    $name = [string]$vector.name
+    if ([string]::IsNullOrWhiteSpace($name)) { throw 'VERIFY_MATH_PARSE_FAIL: every vector needs a name' }
+    $base = ''
+    $baseProperty = $vector.PSObject.Properties['base']
+    if ($null -ne $baseProperty -and $null -ne $baseProperty.Value) { $base = [string]$baseProperty.Value }
+    try {
+      $ratio = Get-ContrastRatioFromTokens ([string]$vector.fg) ([string]$vector.bg) $base
+    } catch {
+      Write-Output ('PARSE_FAIL ' + $name + ' | ' + $_.Exception.Message)
+      $exitCode = 1
+      continue
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$vector.expected)) {
+      Write-Output ('PARSE_FAIL ' + $name + ' | expected value missing')
+      $exitCode = 1
+      continue
+    }
+    $expected = [double]$vector.expected
+    if ([Math]::Abs($ratio - $expected) -gt $Tolerance) {
+      $compositedForeground = ((Get-CompositedRgb8 ([string]$vector.fg) ([string]$vector.bg) $base) -join ',')
+      Write-Output ('MISMATCH ' + $name + ' | computed=' + $ratio.ToString('0.######') +
+        ' expected=' + $expected + ' delta=' + ([Math]::Abs($ratio - $expected)).ToString('0.######') +
+        ' tolerance=' + $Tolerance + ' compositedFg=rgb(' + $compositedForeground + ') backdrop=' + [string]$vector.bg)
+      $exitCode = 1
+      continue
+    }
+    $verified += 1
+    Write-Output ('OK ' + $name + ' ratio=' + $ratio.ToString('0.######') + ' expected=' + $expected)
+  }
+  Write-Output ('OK_VECTORS ' + $verified)
+  if ($exitCode -ne 0) {
+    throw ('VISUAL_EVIDENCE_MATH_INVALID: ' + ($vectors.Count - $verified) + ' vector(s) failed recomputation (tolerance=' + $Tolerance + ')')
+  }
+}
+
+#endregion
+
+#region 证据包校验
+
+function Get-JsonProperty($Object, [string]$Name) {
+  if ($null -eq $Object) { return $null }
+  if ($Object -is [string]) { return $null }
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) { return $null }
+  return $property.Value
+}
+
+function Test-JsonProperty($Object, [string]$Name) {
+  # ConvertFrom-Json 会把**空数组**也读成 $null，所以「字段缺失」与「字段是空数组」用
+  # Get-JsonProperty 分不开。要区分二者（matches 允许空数组但不允许缺字段）必须看属性是否存在。
+  if ($null -eq $Object) { return $false }
+  if ($Object -is [string]) { return $false }
+  return ($null -ne $Object.PSObject.Properties[$Name])
+}
+
+function Assert-RequiredProperty($Object, [string]$Name, [string]$Where) {
+  $value = Get-JsonProperty $Object $Name
+  if ($null -eq $value) {
+    Add-Failure ($Where + " 缺少必填字段 '" + $Name + "'（§3.4）；本校验器不会为缺失字段生成默认值")
+    return $null
+  }
+  return $value
+}
+
+function Assert-NonEmptyString($Object, [string]$Name, [string]$Where) {
+  $value = Assert-RequiredProperty $Object $Name $Where
+  if ($null -eq $value) { return $null }
+  if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value)) {
+    Add-Failure ($Where + " 的字段 '" + $Name + "' 必须是非空字符串")
+    return $null
+  }
+  return $value
+}
+
+function Assert-Number($Object, [string]$Name, [string]$Where) {
+  $value = Assert-RequiredProperty $Object $Name $Where
+  if ($null -eq $value) { return $null }
+  $number = 0.0
+  if (-not [double]::TryParse([string]$value, [ref]$number)) {
+    Add-Failure ($Where + " 的字段 '" + $Name + "' 必须是数值")
+    return $null
+  }
+  return $number
+}
+
+function Assert-PositiveNumber($Object, [string]$Name, [string]$Where) {
+  $number = Assert-Number $Object $Name $Where
+  if ($null -eq $number) { return $null }
+  if ($number -le 0) {
+    Add-Failure ($Where + " 的字段 '" + $Name + "' 必须为正数（实际 " + $number + "）")
+    return $null
+  }
+  return $number
+}
+
+function Assert-IdList($List, [string]$Where) {
+  $ids = New-Object System.Collections.Generic.List[string]
+  foreach ($entry in @($List)) {
+    $text = [string]$entry
+    if ($script:ReservedIds -contains $text) {
+      Add-Failure ($Where + " 含保留空号 '" + $text + "'：VC-18（决策 80 仍为 Proposed）整条不进入裁判表，既不算已测也不算未测")
+      continue
+    }
+    if ($script:ContractIds -notcontains $text) {
+      Add-Failure ($Where + " 含未知编号 '" + $text + "'：本合同只有 VC-01…VC-17 与 VC-19")
+      continue
+    }
+    if ($ids.Contains($text)) {
+      Add-Failure ($Where + " 重复列出 '" + $text + "'")
+      continue
+    }
+    $ids.Add($text)
+  }
+  return $ids
+}
+
+function Assert-PngFile([string]$Path, [string]$Where) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    Add-Failure ($Where + ' 指向的文件不存在：' + $Path + '（只有截图时本合同的任何一条都判不了）')
+    return $null
+  }
+  $bytes = [System.IO.File]::ReadAllBytes($Path)
+  if ($bytes.Length -lt 8) {
+    Add-Failure ($Where + ' 的文件短于 PNG 头：' + $Path)
+    return $null
+  }
+  $signature = @(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+  for ($index = 0; $index -lt $signature.Count; $index++) {
+    if ($bytes[$index] -ne $signature[$index]) {
+      Add-Failure ($Where + ' 不是 PNG 文件（magic bytes 不符）：' + $Path)
+      return $null
+    }
+  }
+  return [ordered]@{ path = $Path; bytes = $bytes.Length }
+}
+
+function ConvertTo-DoubleArray($Values) {
+  $list = New-Object System.Collections.Generic.List[double]
+  foreach ($entry in @($Values)) { $list.Add([double]$entry) }
+  return [double[]]$list.ToArray()
+}
+
+function Assert-DecomposedColour([string]$Declared, [double[]]$Measured, [string]$Label, [string]$FieldName, [string]$Where) {
+  # declared 必须是不透明值，且与实测合成色逐通道相差 ≤ §3.3 的 ±1。
+  try {
+    $declaredParsed = ConvertTo-Rgb8 $Declared
+    if ([double]$declaredParsed.alpha -lt 1.0) {
+      Add-Failure ($Where + '：' + $Label + '声明 ' + $Declared + ' 不是不透明值；实测记录必须先按 §3.2 合成')
+      return
+    }
+    for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+      if ([Math]::Abs([double]$declaredParsed.rgb[$channelIndex] - $Measured[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) {
+        Add-Failure ($Where + '：' + $FieldName + '=' + (($Measured | ForEach-Object { [int]$_ }) -join ',') +
+          ' 与声明的实测' + $Label + ' ' + $Declared + ' 相差超过 ±' + $script:FrozenTolerance.colorChannel + '/通道')
+        return
+      }
+    }
+  } catch {
+    Add-Failure ($Where + '：' + $Label + '实测值无法复算（' + $_.Exception.Message + '）')
+  }
+}
+
+function Assert-ManifestCoverage($Manifest, $Records, [string]$Where) {
+  $coverage = Assert-RequiredProperty $Manifest 'coverage' $Where
+  if ($null -eq $coverage) { return }
+  $testedRaw = Get-JsonProperty $coverage 'tested'
+  $untestedRaw = Get-JsonProperty $coverage 'untested'
+  # 缺任一张清单即视为未诚实标注（§3.4：必须显式列出「本次已测」与「本次未测」两张清单）。
+  if ($null -eq $testedRaw) {
+    Add-Failure ($Where + '.coverage 缺少 tested 清单（§3.4 要求显式列出本次已测）')
+    return
+  }
+  if ($null -eq $untestedRaw) {
+    Add-Failure ($Where + '.coverage 缺少 untested 清单（§3.4 要求显式列出本次未测；未测项一律视为未取得证据）')
+    return
+  }
+
+  $tested = @(Assert-IdList $testedRaw ($Where + '.coverage.tested'))
+  $untested = @(Assert-IdList $untestedRaw ($Where + '.coverage.untested'))
+
+  # 部分覆盖必须"诚实标注到维度"：只列编号不够——「已测 VC-03」可以指主按钮文字，也可以指聚焦圈。
+  # 因此要求显式写出本轮实测到的维度范围（scopeNote），与每条记录的 criterion 相互对账。
+  Assert-NonEmptyString $coverage 'scopeNote' ($Where + '.coverage') | Out-Null
+  $recordCriteria = @($Records | ForEach-Object { [string](Get-JsonProperty $_ 'criterion') })
+  if (-not ($recordCriteria | Where-Object { $_.Length -gt 0 })) {
+    Add-Failure ($Where + '：没有任何记录声明它测的是哪一维（criterion 全空）')
+  }
+
+  foreach ($id in $tested) {
+    if ($untested -contains $id) { Add-Failure ($Where + "：'" + $id + "' 同时出现在已测与未测两张清单里") }
+  }
+  foreach ($id in $script:ContractIds) {
+    if (($tested -notcontains $id) -and ($untested -notcontains $id)) {
+      Add-Failure ($Where + "：'" + $id + "' 既不在已测也不在未测清单里；未测项必须如实登记（§3.4）")
+    }
+  }
+
+  # 记录与清单必须一一对应：列了已测就必须有实测记录，有记录就必须列在已测。
+  $recordIds = @($Records | ForEach-Object { [string](Get-JsonProperty $_ 'vc') })
+  foreach ($id in $tested) {
+    if ($recordIds -notcontains $id) {
+      Add-Failure ($Where + "：'" + $id + "' 被列为已测，但证据包里没有任何该判据的实测记录")
+    }
+  }
+  foreach ($id in $recordIds) {
+    if ($tested -notcontains $id) {
+      Add-Failure ($Where + "：存在 '" + $id + "' 的实测记录，但它没有出现在已测清单里")
+    }
+  }
+}
+
+function Assert-RecordContrast($Record, $Ratio, [string]$Where) {
+  $declaredRatio = Assert-Number $Ratio 'value' ($Where + '.measured.contrastRatio')
+  $threshold = Assert-Number $Ratio 'threshold' ($Where + '.measured.contrastRatio')
+  $declaredTolerance = Assert-Number $Ratio 'tolerance' ($Where + '.measured.contrastRatio')
+  $formula = Assert-NonEmptyString $Ratio 'formula' ($Where + '.measured.contrastRatio')
+  $basis = Assert-NonEmptyString $Ratio 'toleranceBasis' ($Where + '.measured.contrastRatio')
+  $thresholdBasis = Assert-NonEmptyString $Ratio 'thresholdBasis' ($Where + '.measured.contrastRatio')
+
+  if ($null -ne $formula -and $formula -ne 'WCAG21:(L1+0.05)/(L2+0.05)') {
+    Add-Failure ($Where + '：对比度公式必须是 WCAG21:(L1+0.05)/(L2+0.05)，实际 ' + $formula)
+  }
+  if ($null -ne $basis -and $basis -notmatch '3\.3') {
+    Add-Failure ($Where + '：toleranceBasis 必须写明容差来源（§3.3），实际 ' + $basis)
+  }
+  if ($null -ne $declaredTolerance -and [Math]::Abs($declaredTolerance - $script:FrozenTolerance.contrastRatio) -gt 1e-9) {
+    Add-Failure ($Where + '：记录声明的对比度容差 ' + $declaredTolerance + ' 不等于 §3.3 的 ' + $script:FrozenTolerance.contrastRatio)
+  }
+
+  $measured = Get-JsonProperty $Record 'measured'
+  $fg = Get-JsonProperty $measured 'fg'
+  $bg = Get-JsonProperty $measured 'bg'
+  if ($null -eq $fg) {
+    Add-Failure ($Where + '.measured 缺少 fg（实际合成后的前景色）')
+    return
+  }
+  if ($null -eq $bg) {
+    Add-Failure ($Where + '.measured 缺少 bg（逐层合成到不透明底后的背景色）')
+    return
+  }
+  Assert-NonEmptyString $fg 'source' ($Where + '.measured.fg') | Out-Null
+  Assert-NonEmptyString $bg 'source' ($Where + '.measured.bg') | Out-Null
+  $fgRgba = Get-JsonProperty $fg 'rgba8'
+  $bgRgba = Get-JsonProperty $bg 'rgba8'
+  if ($null -eq $fgRgba) {
+    Add-Failure ($Where + '.measured.fg 缺少 rgba8')
+    return
+  }
+  if ($null -eq $bgRgba) {
+    Add-Failure ($Where + '.measured.bg 缺少 rgba8')
+    return
+  }
+
+  $fgChannels = ConvertTo-DoubleArray $fgRgba
+  $bgChannels = ConvertTo-DoubleArray $bgRgba
+  if ($fgChannels.Count -ne 3) { Add-Failure ($Where + '.measured.fg.rgba8 必须是 3 个通道'); return }
+  if ($bgChannels.Count -ne 3) { Add-Failure ($Where + '.measured.bg.rgba8 必须是 3 个通道'); return }
+
+  # 合成结果必须与记录里的实测值自洽（±1/通道）。
+  # 采集侧已把每一层合成到不透明底色上，因此 declared 与 rgba8 都必须是不透明值：
+  # 半透明值出现在此处即表示该记录没有按 §3.2 完成合成，如实失败而不是替它猜一个底。
+  $fgDeclared = Get-JsonProperty $fg 'declared'
+  if ($null -ne $fgDeclared) {
+    Assert-DecomposedColour ([string]$fgDeclared) $fgChannels '前景' 'measured.fg.rgba8' $Where
+  }
+  $bgDeclared = Get-JsonProperty $bg 'declared'
+  if ($null -ne $bgDeclared) {
+    Assert-DecomposedColour ([string]$bgDeclared) $bgChannels '底色' 'measured.bg.rgba8' $Where
+  }
+
+  # 令牌来源（可选）：采集器可以声明"这条实测值对应合同冻结的某个令牌/取值"。
+  # 那就必须由本校验器自己复算 —— 不许只信自述（§2.4 铁律 3）。
+  $declaredToken = Get-JsonProperty $Record 'declaredToken'
+  if ($null -ne $declaredToken) {
+    $tokenName = Assert-NonEmptyString $declaredToken 'name' ($Where + '.declaredToken')
+    $tokenValue = Assert-NonEmptyString $declaredToken 'value' ($Where + '.declaredToken')
+    Assert-NonEmptyString $declaredToken 'source' ($Where + '.declaredToken') | Out-Null
+    if ($null -ne $tokenName -and $null -ne $tokenValue) {
+      try {
+        $declaredTokenRgb = Get-Rgb8FromToken $tokenValue
+        $measuredChannels = $bgChannels
+        $measuredLabel = 'measured.bg.rgba8'
+        $foregroundMatch = $false
+        for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+          if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - $fgChannels[$channelIndex]) -le $script:FrozenTolerance.colorChannel) {
+            $foregroundMatch = $true
+          } else {
+            $foregroundMatch = $false
+            break
+          }
+        }
+        if ($foregroundMatch) {
+          $measuredChannels = $fgChannels
+          $measuredLabel = 'measured.fg.rgba8'
+        }
+        $matches = $true
+        for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+          if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - $measuredChannels[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) {
+            $matches = $false
+            break
+          }
+        }
+        if (-not $matches) {
+          Add-Failure ($Where + '：declaredToken ' + $tokenName + '=' + $tokenValue +
+            ' 与本条实测合成色（' + $measuredLabel + '=' + (($measuredChannels | ForEach-Object { [int]$_ }) -join ',') +
+            '、measured.fg.rgba8=' + (($fgChannels | ForEach-Object { [int]$_ }) -join ',') +
+            '）都不在 ±' + $script:FrozenTolerance.colorChannel + '/通道 内——声明的令牌来源无法解释这条实测值')
+        }
+      } catch {
+        Add-Failure ($Where + '：declaredToken.value 无法复算（' + $_.Exception.Message + '）')
+      }
+    }
+  }
+
+  # 对比度必须能由本校验器自己从合成色重算出来（±0.05）。
+  $recomputed = Get-ContrastRatio ([double[]]$fgChannels) ([double[]]$bgChannels)
+  $luminanceFg = Get-RelativeLuminance ([double[]]$fgChannels)
+  $luminanceBg = Get-RelativeLuminance ([double[]]$bgChannels)
+  if ($null -ne $declaredRatio -and [Math]::Abs($recomputed - $declaredRatio) -gt $Tolerance) {
+    Add-Failure ($Where + '：声明的对比度 ' + $declaredRatio + ' 与本校验器从合成色重算的 ' + $recomputed.ToString('0.######') +
+      ' 相差超过 ±' + $Tolerance)
+  }
+  foreach ($pair in @(
+    @{ name = 'luminanceFg'; declared = (Get-JsonProperty $Ratio 'luminanceFg'); recomputed = $luminanceFg },
+    @{ name = 'luminanceBg'; declared = (Get-JsonProperty $Ratio 'luminanceBg'); recomputed = $luminanceBg }
+  )) {
+    if ($null -eq $pair.declared) {
+      Add-Failure ($Where + '.measured.contrastRatio 缺少 ' + $pair.name)
+      continue
+    }
+    if ([Math]::Abs([double]$pair.declared - [double]$pair.recomputed) -gt 1e-6) {
+      Add-Failure ($Where + '：' + $pair.name + ' 声明 ' + $pair.declared + ' 与重算 ' + ([double]$pair.recomputed).ToString('0.######') + ' 不一致')
+    }
+  }
+
+  # 阈值必须与实测字号/字重匹配（§3.2：普通文本 4.5:1 / 大号文本 3:1）。
+  $computedStyle = Get-JsonProperty $Record 'computedStyle'
+  $fontSizeText = ''
+  $fontWeightText = ''
+  if ($null -ne $computedStyle) {
+    $fontSizeText = [string](Get-JsonProperty $computedStyle 'fontSize')
+    $fontWeightText = [string](Get-JsonProperty $computedStyle 'fontWeight')
+  }
+  $isNonText = ($null -ne $thresholdBasis -and $thresholdBasis -match 'nonText|non-text|UI')
+  $fontSizeMatch = [regex]::Match($fontSizeText, '^([0-9]*\.?[0-9]+)px$')
+  if ((-not $isNonText) -and $fontSizeMatch.Success) {
+    $fontSize = [double]$fontSizeMatch.Groups[1].Value
+    $fontWeight = 400.0
+    $weightMatch = [regex]::Match($fontWeightText, '^([0-9]+)$')
+    if ($weightMatch.Success) { $fontWeight = [double]$weightMatch.Groups[1].Value }
+    $isLargeText = ($fontSize -ge 24.0) -or (($fontSize -ge 18.66) -and ($fontWeight -ge 700))
+    $expectedThreshold = 4.5
+    if ($isLargeText) { $expectedThreshold = 3.0 }
+    if ($null -ne $threshold -and [Math]::Abs($threshold - $expectedThreshold) -gt 1e-9) {
+      Add-Failure ($Where + '：' + $fontSizeText + '/' + $fontWeightText + ' 的文本阈值必须是 ' + $expectedThreshold +
+        ':1，记录写的是 ' + $threshold + ':1')
+    }
+  }
+}
+
+function Assert-SharedRecordFields($Record, $ScreenshotNames, [string]$EvidenceDir, [string]$Where) {
+  # 三种 measurementScope 共有的部分：截图绑定（§3.4 第 2 项）与采样视口（第 3 项）。
+  $shots = Get-JsonProperty $Record 'screenshots'
+  if ($null -eq $shots -or @($shots).Count -eq 0) {
+    Add-Failure ($Where + '：没有任何截图绑定。只有截图时判不了任何一条，但反过来——没有截图的实测记录同样不构成 Visual Evidence（§2.4 铁律 2）')
+  } else {
+    foreach ($shot in @($shots)) {
+      $shotName = [string]$shot
+      if ([string]::IsNullOrWhiteSpace($shotName)) {
+        Add-Failure ($Where + '：screenshots 里存在空条目')
+        continue
+      }
+      if ($ScreenshotNames -notcontains $shotName) {
+        Add-Failure ($Where + "：引用的截图 '" + $shotName + "' 不在本包的截图清单里")
+      }
+      Assert-PngFile (Join-Path $EvidenceDir $shotName) ($Where + '.screenshots') | Out-Null
+    }
+  }
+  $viewport = Get-JsonProperty $Record 'sampledViewport'
+  if ($null -eq $viewport) {
+    Add-Failure ($Where + '：缺少 sampledViewport（§3.4 第 3 项的「采样视口」）')
+  } else {
+    Assert-PositiveNumber $viewport 'width' ($Where + '.sampledViewport') | Out-Null
+    Assert-PositiveNumber $viewport 'height' ($Where + '.sampledViewport') | Out-Null
+    Assert-PositiveNumber $viewport 'devicePixelRatio' ($Where + '.sampledViewport') | Out-Null
+    Assert-NonEmptyString $viewport 'sampledAt' ($Where + '.sampledViewport') | Out-Null
+  }
+}
+
+function Assert-AccentSweepRecord($Record, $ScreenshotNames, [string]$EvidenceDir, [string]$Where) {
+  # VC-03① 是**全称否定**（任何控件底色/边框/下划线都不得由 #4a9eff 渲染），单元素颜色测不出它。
+  # 这类记录的形状保守裁判：必须给出扫描范围、扫到的元素数、被扫描的渲染属性集合与（可为空的）匹配清单。
+  $sweep = Get-JsonProperty $Record 'accentSweep'
+  if ($null -eq $sweep) {
+    Add-Failure ($Where + '：measurementScope=accentSweep 的记录缺少 accentSweep 块')
+    return
+  }
+  $token = Assert-NonEmptyString $sweep 'accentToken' ($Where + '.accentSweep')
+  Assert-NonEmptyString $sweep 'selectorScope' ($Where + '.accentSweep') | Out-Null
+  Assert-NonEmptyString $Record 'selector' $Where | Out-Null
+  if ($null -ne $token -and $token -ne '#4a9eff') {
+    Add-Failure ($Where + '：accentSweep.accentToken 必须是被 VC-03① 点名的品牌强调色 #4a9eff，实际 ' + $token)
+  }
+  $scanned = Assert-Number $sweep 'scannedElementCount' ($Where + '.accentSweep')
+  if ($null -ne $scanned -and $scanned -lt 1) {
+    Add-Failure ($Where + '：accentSweep.scannedElementCount 必须至少为 1（没扫任何元素的"扫描"不构成扫描）')
+  }
+  $properties = Get-JsonProperty $sweep 'scannedProperties'
+  if ($null -eq $properties -or @($properties).Count -eq 0) {
+    Add-Failure ($Where + '.accentSweep：缺少 scannedProperties（必须写明扫了哪些被渲染的颜色属性）')
+  } else {
+    foreach ($required in @('backgroundColor', 'borderTopColor', 'outlineColor', 'color')) {
+      if (@($properties) -notcontains $required) {
+        Add-Failure ($Where + '.accentSweep.scannedProperties 缺少 ' + $required)
+      }
+    }
+  }
+  if (-not (Test-JsonProperty $sweep 'matches')) {
+    Add-Failure ($Where + '.accentSweep：缺少 matches（允许空数组，但不允许缺字段——空数组 = 未发现强调色）')
+  }
+  Assert-SharedRecordFields $Record $ScreenshotNames $EvidenceDir $Where
+}
+
+function Assert-RootTokenRecord($Record, $ScreenshotNames, [string]$EvidenceDir, [string]$Where) {
+  # 「令牌解析值」记录：只声明令牌值是什么（§2.5：token 存在 ≠ 被使用），故不要求 rect/对比度，
+  # 但必须真的给出解析值，且不得把"令牌存在"伪装成"页面用了它"（页面实例值由 element 记录给出）。
+  $tokens = Get-JsonProperty $Record 'resolvedTokens'
+  if ($null -eq $tokens) {
+    Add-Failure ($Where + '：measurementScope=rootTokens 的记录缺少 resolvedTokens')
+  } else {
+    $names = @($tokens.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($names.Count -eq 0) {
+      Add-Failure ($Where + '.resolvedTokens 为空——空值不得静默通过')
+    }
+    foreach ($name in $names) {
+      if ([string]::IsNullOrWhiteSpace([string](Get-JsonProperty $tokens $name))) {
+        Add-Failure ($Where + '.resolvedTokens.' + $name + ' 是空值（该令牌未解析出任何值）')
+      }
+    }
+  }
+  Assert-SharedRecordFields $Record $ScreenshotNames $EvidenceDir $Where
+}
+
+function Assert-Record($Record, $ScreenshotNames, [string]$EvidenceDir, [string]$Where) {
+  Assert-NonEmptyString $Record 'recordId' $Where | Out-Null
+  $vc = Assert-NonEmptyString $Record 'vc' $Where
+  if ($null -ne $vc) {
+    if ($script:ReservedIds -contains $vc) {
+      Add-Failure ($Where + "：'" + $vc + "' 是保留空号（决策 80 仍为 Proposed），不得作为判据记录")
+    } elseif ($script:ContractIds -notcontains $vc) {
+      Add-Failure ($Where + "：'" + $vc + "' 不是本合同的可裁判编号")
+    }
+  }
+  Assert-NonEmptyString $Record 'criterion' $Where | Out-Null
+  Assert-NonEmptyString $Record 'page' $Where | Out-Null
+  Assert-NonEmptyString $Record 'selector' $Where | Out-Null
+  Assert-NonEmptyString $Record 'description' $Where | Out-Null
+
+  # measurementScope 决定这条记录按哪种形状裁判（§3.4 第 3 项对"逐元素测量"的要求，
+  # 对"跨元素扫描"与"令牌解析值"这两类无法照搬）。
+  $scope = [string](Get-JsonProperty $Record 'measurementScope')
+  if ($scope -eq 'accentSweep') {
+    Assert-AccentSweepRecord $Record $ScreenshotNames $EvidenceDir $Where
+    return
+  }
+  if ($scope -eq 'rootTokens') {
+    Assert-RootTokenRecord $Record $ScreenshotNames $EvidenceDir $Where
+    return
+  }
+  if ($scope -ne 'element') {
+    Add-Failure ($Where + "：measurementScope 必须是 'element' / 'accentSweep' / 'rootTokens' 之一，实际 '" + $scope + "'")
+    return
+  }
+
+  Assert-SharedRecordFields $Record $ScreenshotNames $EvidenceDir $Where
+
+  # §3.4 第 3 项：几何（getBoundingClientRect 的逻辑像素）。
+  $rect = Get-JsonProperty $Record 'rect'
+  if ($null -eq $rect) {
+    Add-Failure ($Where + '：缺少 rect（§3.4 第 3 项的「几何」）；本校验器不会把缺失几何当 0 处理')
+  } elseif ($rect -is [string]) {
+    Add-Failure ($Where + '：rect 必须是对象，实际是字符串')
+  } else {
+    foreach ($key in $script:RequiredRectKeys) {
+      Assert-Number $rect $key ($Where + '.rect') | Out-Null
+    }
+  }
+
+  # §3.4 第 3 项：计算样式。
+  $computedStyle = Get-JsonProperty $Record 'computedStyle'
+  if ($null -eq $computedStyle) {
+    Add-Failure ($Where + '：缺少 computedStyle（§3.4 第 3 项的「计算样式」）')
+  } elseif ($computedStyle -is [string]) {
+    Add-Failure ($Where + '：computedStyle 必须是对象，实际是字符串')
+  } else {
+    foreach ($key in $script:RequiredComputedStyleKeys) {
+      $styleValue = Get-JsonProperty $computedStyle $key
+      if ($null -eq $styleValue -or ([string]$styleValue).Length -eq 0) {
+        Add-Failure ($Where + ".computedStyle：缺少必填字段 '" + $key + "'（空值同样不接受——不得静默出空值）")
+      }
+    }
+  }
+
+  # §3.4 第 3 项：采样视口由 Assert-SharedRecordFields 统一校验。
+
+  $measured = Get-JsonProperty $Record 'measured'
+  if ($null -eq $measured) {
+    Add-Failure ($Where + '：缺少 measured（实际合成颜色 + 对比度比值）')
+    return
+  }
+  $ratio = Get-JsonProperty $measured 'contrastRatio'
+  if ($null -eq $ratio) {
+    Add-Failure ($Where + '.measured：缺少 contrastRatio（§3.4 第 3 项）')
+  } else {
+    Assert-RecordContrast $Record $ratio $Where
+  }
+}
+
+function Assert-EvidencePackage([string]$EvidenceDir) {
+  $script:CheckedPackages += 1
+  $manifestPath = Join-Path $EvidenceDir 'manifest.json'
+  $where = "证据包 '" + $EvidenceDir + "'"
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    Add-Failure ($where + ' 缺少 manifest.json')
+    return
+  }
+
+  $manifest = $null
+  try {
+    $manifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($manifestPath, [System.Text.UTF8Encoding]::new($false)))
+  } catch {
+    Add-Failure ($where + ' 的 manifest.json 不是合法 JSON：' + $_.Exception.Message)
+    return
+  }
+
+  # §3.4 第 1 项：目标提交 SHA。
+  $target = Assert-RequiredProperty $manifest 'target' ($where + '.manifest')
+  if ($null -eq $target) { return }
+  $commitSha = Assert-NonEmptyString $target 'commitSha' ($where + '.manifest.target')
+  if ($null -ne $commitSha -and $commitSha -notmatch '^[0-9a-f]{40}$') {
+    Add-Failure ($where + '：target.commitSha 必须是完整 40 位小写 hex（§3.4 要求证据包与目标提交 SHA 绑定），实际 ' + $commitSha)
+  }
+  $shortSha = Assert-NonEmptyString $target 'shortSha' ($where + '.manifest.target')
+  if ($null -ne $shortSha -and $null -ne $commitSha -and $commitSha.Substring(0, 8) -ne $shortSha) {
+    Add-Failure ($where + "：target.shortSha '" + $shortSha + "' 与 commitSha 前 8 位不符")
+  }
+  Assert-NonEmptyString $target 'repo' ($where + '.manifest.target') | Out-Null
+
+  # 目录名必须与 target 一致：evidence/visual-<目标sha8>-<yyyyMMdd-HHmmss>/。
+  $directoryName = Split-Path -Leaf $EvidenceDir
+  if ($null -ne $shortSha -and $directoryName -notlike ('visual-' + $shortSha + '-*')) {
+    Add-Failure ($where + "：目录名 '" + $directoryName + "' 与 target.shortSha '" + $shortSha + "' 不一致（约定 visual-<sha8>-<yyyyMMdd-HHmmss>）")
+  }
+  if ($directoryName -notmatch '^visual-[0-9a-f]{8}-[0-9]{8}-[0-9]{6}$') {
+    Add-Failure ($where + "：目录名 '" + $directoryName + "' 不符合约定 visual-<目标sha8>-<yyyyMMdd-HHmmss>")
+  }
+
+  # §3.4 第 1 项：视口尺寸（含 devicePixelRatio）。
+  $viewport = Assert-RequiredProperty $manifest 'viewport' ($where + '.manifest')
+  if ($null -eq $viewport) { return }
+  Assert-PositiveNumber $viewport 'width' ($where + '.manifest.viewport') | Out-Null
+  Assert-PositiveNumber $viewport 'height' ($where + '.manifest.viewport') | Out-Null
+  Assert-PositiveNumber $viewport 'devicePixelRatio' ($where + '.manifest.viewport') | Out-Null
+  Assert-NonEmptyString $viewport 'windowState' ($where + '.manifest.viewport') | Out-Null
+
+  # §3.4 第 1 项：宿主与版本。
+  $hostBlock = Assert-RequiredProperty $manifest 'host' ($where + '.manifest')
+  if ($null -eq $hostBlock) { return }
+  $os = Get-JsonProperty $hostBlock 'os'
+  if ($null -eq $os) {
+    Add-Failure ($where + '.manifest.host 缺少 os')
+  } else {
+    Assert-NonEmptyString $os 'caption' ($where + '.manifest.host.os') | Out-Null
+    Assert-NonEmptyString $os 'version' ($where + '.manifest.host.os') | Out-Null
+  }
+  $webview = Get-JsonProperty $hostBlock 'webview2'
+  if ($null -eq $webview) {
+    Add-Failure ($where + '.manifest.host 缺少 webview2（§2.2 要求真实 WebView2 宿主与版本）')
+  } else {
+    $runtimeVersion = Assert-NonEmptyString $webview 'runtimeVersion' ($where + '.manifest.host.webview2')
+    $driverVersion = Assert-NonEmptyString $webview 'driverVersion' ($where + '.manifest.host.webview2')
+    if ($null -ne $runtimeVersion -and $null -ne $driverVersion -and $runtimeVersion -ne $driverVersion) {
+      Add-Failure ($where + "：WebView2 runtime '" + $runtimeVersion + "' 与 msedgedriver '" + $driverVersion + "' 不一致（宿主版本无法解释本次实测）")
+    }
+  }
+  $app = Get-JsonProperty $hostBlock 'app'
+  if ($null -eq $app) {
+    Add-Failure ($where + '.manifest.host 缺少 app（宿主应用与版本）')
+  } else {
+    Assert-NonEmptyString $app 'productName' ($where + '.manifest.host.app') | Out-Null
+    Assert-NonEmptyString $app 'productVersion' ($where + '.manifest.host.app') | Out-Null
+  }
+
+  # §3.3：容差必须显式写出，且与冻结值逐项相等。
+  # 注意：此处局部变量**不能**命名为 $tolerance —— PowerShell 变量名大小写不敏感，它会遮蔽
+  # 脚本参数 $Tolerance（§3.3 的 ±0.05），使所有子函数读到的是这个对象而不是数值（本轮实测）。
+  $toleranceBlock = Get-JsonProperty $manifest 'tolerance'
+  if ($null -eq $toleranceBlock) {
+    Add-Failure ($where + '：缺少 tolerance（§3.3 的允许误差必须写进记录，不许留给读者猜）')
+  } else {
+    foreach ($key in $script:FrozenTolerance.Keys) {
+      $declared = Get-JsonProperty $toleranceBlock $key
+      if ($null -eq $declared) {
+        Add-Failure ($where + ".manifest.tolerance：缺少 '" + $key + "'（§3.3 的容差必须显式写出）")
+        continue
+      }
+      $expectedTolerance = $script:FrozenTolerance[$key]
+      if ($expectedTolerance -is [bool]) {
+        if ([bool]$declared -ne $expectedTolerance) {
+          Add-Failure ($where + '.manifest.tolerance.' + $key + ' 必须是 ' + $expectedTolerance)
+        }
+      } elseif ([Math]::Abs([double]$declared - [double]$expectedTolerance) -gt 1e-9) {
+        Add-Failure ($where + '.manifest.tolerance.' + $key + ' 是 ' + $declared + '，§3.3 的冻结值是 ' + $expectedTolerance)
+      }
+    }
+  }
+
+  # 截图清单：§3.4 第 2 项。
+  $screenshots = Get-JsonProperty $manifest 'screenshots'
+  $screenshotNames = @()
+  $screenshotBytes = 0
+  if ($null -eq $screenshots -or @($screenshots).Count -eq 0) {
+    Add-Failure ($where + '：screenshots 清单为空（§3.4 第 2 项要求真实渲染截图）')
+  } else {
+    foreach ($entry in @($screenshots)) {
+      $name = [string]$entry
+      if ([string]::IsNullOrWhiteSpace($name)) {
+        Add-Failure ($where + '：screenshots 里存在空条目')
+        continue
+      }
+      if ($screenshotNames -contains $name) {
+        Add-Failure ($where + "：screenshots 重复列出 '" + $name + "'")
+        continue
+      }
+      $file = Assert-PngFile (Join-Path $EvidenceDir $name) ($where + '.screenshots')
+      if ($null -ne $file) {
+        $screenshotNames += $name
+        $screenshotBytes += [int]$file.bytes
+        # ≤2MB/张；超出时必须压缩或按页拆分，不许静默缩小或跳过。
+        if ([int]$file.bytes -gt 2MB) {
+          Add-Failure ($where + "：截图 '" + $name + "' 是 " + [int]$file.bytes + ' 字节，超过 2MB 上限；请压缩到 ≤2MB 或按页拆分')
+        }
+      }
+    }
+  }
+  Write-Output ('visual evidence package ' + $directoryName + ': screenshots=' + $screenshotNames.Count + ' bytes=' + $screenshotBytes)
+
+  # 第 4 项（pass/needs_revision）不得由采集方签发。
+  $verdicts = Get-JsonProperty $manifest 'verdicts'
+  if ($null -eq $verdicts) {
+    Add-Failure ($where + '.manifest 缺少 verdicts（必须显式写明本包未签发结论）')
+  } else {
+    $issued = Get-JsonProperty $verdicts 'issued'
+    if ($null -eq $issued) {
+      Add-Failure ($where + '.manifest.verdicts：缺少 issued（必须显式写明本包未签发结论）')
+    } elseif ([bool]$issued) {
+      Add-Failure ($where + '.manifest.verdicts：采集通道不得签发 pass/needs_revision（§2.1 要求裁判独立于实现者）；issued 必须为 false')
+    }
+  }
+
+  # 逐条实测记录。
+  $recordsRefs = Get-JsonProperty $manifest 'records'
+  $records = @()
+  if ($null -eq $recordsRefs -or @($recordsRefs).Count -eq 0) {
+    Add-Failure ($where + '：records 为空——只有截图时本合同的任何一条都判不了（§3.4 末句）：没有实测记录的证据包不构成裁判')
+  } else {
+    $seenRecordIds = @()
+    foreach ($reference in @($recordsRefs)) {
+      $recordFile = [string](Get-JsonProperty $reference 'file')
+      $recordId = [string](Get-JsonProperty $reference 'recordId')
+      if ([string]::IsNullOrWhiteSpace($recordFile)) {
+        Add-Failure ($where + '：records 条目缺少 file')
+        continue
+      }
+      $recordPath = Join-Path $EvidenceDir $recordFile
+      if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf)) {
+        Add-Failure ($where + '：实测记录文件不存在：' + $recordFile)
+        continue
+      }
+      $recordWhere = $where + " 记录 '" + $recordFile + "'"
+      $record = $null
+      try {
+        $record = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($recordPath, [System.Text.UTF8Encoding]::new($false)))
+      } catch {
+        Add-Failure ($recordWhere + ' 不是合法 JSON：' + $_.Exception.Message)
+        continue
+      }
+      if ([string]::IsNullOrWhiteSpace($recordId) -or $recordId -ne [string](Get-JsonProperty $record 'recordId')) {
+        Add-Failure ($recordWhere + "：manifest 里的 recordId '" + $recordId + "' 与记录本体不符")
+      }
+      if ($seenRecordIds -contains $recordId) {
+        Add-Failure ($where + "：recordId '" + $recordId + "' 重复")
+      }
+      $seenRecordIds += $recordId
+      Assert-Record $record $screenshotNames $EvidenceDir $recordWhere
+      $records += $record
+    }
+  }
+
+  Assert-ManifestCoverage $manifest $records $where
+
+  # manifest 里声称做过的扫描，必须在记录里有对应实体——不许只有声明、没有证据。
+  # （t2 对抗性复核用一个"声明 3 条 sweep、记录 0 条"的包证明了当时的校验器会放行。）
+  $declaredSweeps = Get-JsonProperty $manifest 'accentSweeps'
+  $sweepRecordIds = @($records | Where-Object { [string](Get-JsonProperty $_ 'measurementScope') -eq 'accentSweep' } | ForEach-Object { [string](Get-JsonProperty $_ 'recordId') })
+  if ($null -ne $declaredSweeps) {
+    $declaredIds = @($declaredSweeps | ForEach-Object { [string](Get-JsonProperty $_ 'id') })
+    foreach ($declaredId in $declaredIds) {
+      if ([string]::IsNullOrWhiteSpace($declaredId)) {
+        Add-Failure ($where + '.accentSweeps：存在没有 id 的声明条目')
+        continue
+      }
+      if ($sweepRecordIds -notcontains $declaredId) {
+        Add-Failure ($where + ".accentSweeps 声明了 '" + $declaredId + "'，但证据包里没有同 id 的 accentSweep 记录——声明了却没做，等于凭空多出一条「扫过了」")
+      }
+    }
+    foreach ($recordId in $sweepRecordIds) {
+      if ($declaredIds -notcontains $recordId) {
+        Add-Failure ($where + "：存在 accentSweep 记录 '" + $recordId + "'，但 manifest.accentSweeps 没有声明它")
+      }
+    }
+  } elseif ($sweepRecordIds.Count -gt 0) {
+    Add-Failure ($where + '：有 accentSweep 记录但 manifest 缺少 accentSweeps 声明块')
+  }
+
+  Write-Output ('visual evidence package ' + $directoryName + ': target=' + $shortSha + ' records=' + $records.Count)
+}
+
+#endregion
+
+#region 入口
+
+if (-not [string]::IsNullOrWhiteSpace($VerifyMathFile)) {
+  Invoke-MathVerification $VerifyMathFile
+  Write-Output 'VISUAL_EVIDENCE_MATH_VALID'
+  exit 0
+}
+
+$targets = @()
+if (-not [string]::IsNullOrWhiteSpace($EvidenceRoot)) {
+  if (-not (Test-Path -LiteralPath $EvidenceRoot -PathType Container)) {
+    throw ('证据包目录不存在：' + $EvidenceRoot)
+  }
+  $targets += (Get-Item -LiteralPath $EvidenceRoot).FullName
+} else {
+  $searchRoot = Join-Path $RepoRoot 'evidence'
+  if (Test-Path -LiteralPath $searchRoot -PathType Container) {
+    $targets += @(
+      Get-ChildItem -LiteralPath $searchRoot -Directory -Filter 'visual-*' |
+        Sort-Object -Property Name |
+        ForEach-Object { $_.FullName }
+    )
+  }
+  if ($targets.Count -eq 0) {
+    Write-Output ('no committed visual evidence package under ' + $searchRoot + ' (expected before the first hosted collection run)')
+    exit 0
+  }
+}
+
+foreach ($target in $targets) { Assert-EvidencePackage $target }
+
+Throw-IfFailed
+
+Write-Output ('VISUAL_EVIDENCE_VALID: ' + $script:CheckedPackages + ' 个证据包通过 §3.4 第 1–3 项与容差/覆盖清单校验')
+Write-Output 'note: 本校验器不签发任何 Visual Evidence，也不判任何 VC-xx 的 pass/needs_revision（§3.4 第 4 项由独立视觉审查员产出）。'
+exit 0
+
+#endregion

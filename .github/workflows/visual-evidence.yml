@@ -1,0 +1,272 @@
+name: Visual Evidence
+
+# V1a「真实桌面视觉实测通道」：在托管 windows-2025 上构建真实 Tauri 桌面应用、驱动它、
+# 采集 visual-contract.md §3.4 第 1–3 项（目标 SHA + 视口/宿主、真实截图、逐条实测记录），
+# 把证据包与截图作为 workflow artifacts 产出，并写 job summary。
+#
+# 触发：
+#   workflow_dispatch —— 对任意目标提交重放（要采某个提交就把输入或 ref 指到它）；
+#   pull_request      —— 供本通道自身的开发调试。
+# 本 workflow **不**参与 master 的必需状态检查，也**不**修改既有四条 workflow。
+#
+# 采集器只产出数据（§3.4 第 1–3 项）。逐条 pass/needs_revision（第 4 项）由独立视觉审查员判定，
+# 本通道不签发任何 Visual Evidence、不改任何 AC 状态或 Evidence tier。
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/visual-evidence.yml'
+      - 'scripts/campaign-visual-evidence.ps1'
+      - 'scripts/validate-visual-evidence.ps1'
+      - 'scripts/validate-visual-evidence.test.ts'
+      - 'docs/development/visual-contract.md'
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: '要采集的目标提交 SHA（留空 = 本次 workflow 运行的 head）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 轻量门禁：不需要真实桌面，**每次** PR 都跑。这是「通道脚本本身是否还能用」的默认门禁。
+  channel:
+    name: Visual evidence channel gate (no desktop needed)
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Validate the visual evidence validator (unit tests, real numbers)
+        run: npx vitest run scripts/validate-visual-evidence.test.ts
+
+      - name: Gate the collector scripts themselves
+        shell: pwsh
+        run: |
+          $scripts = @(
+            'scripts/validate-visual-evidence.ps1',
+            'scripts/campaign-visual-evidence.ps1'
+          )
+          foreach ($script in $scripts) {
+            # 含中文的脚本必须是 UTF-8 with BOM：Windows PowerShell 5.1 对无 BOM 文件按 ANSI 解码。
+            $bytes = [System.IO.File]::ReadAllBytes((Join-Path $env:GITHUB_WORKSPACE $script))
+            if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) {
+              throw "$script is missing its UTF-8 BOM; Windows PowerShell 5.1 would mis-decode it."
+            }
+            $tokens = $null
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE $script), [ref]$tokens, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+              throw "$script has $($errors.Count) PowerShell parse error(s); first: $($errors[0].Message)"
+            }
+            Write-Output "$script : BOM ok, AST ok ($($tokens.Count) tokens)"
+          }
+
+          # 校验器自身的数学自检：用合同 §5.5 的公开值复算（expected 保留两位小数，容差 ±0.05）。
+          $vectors = @(
+            @{ name = 'fg on panel (12.32:1)'; fg = '#e5e5e5'; bg = '#242424'; expected = 12.32 },
+            @{ name = 'border on page background (5.38:1)'; fg = '#8f8f8f'; bg = '#1a1a1a'; expected = 5.38 },
+            @{ name = 'retired accent pairing (2.75:1)'; fg = '#ffffff'; bg = '#4a9eff'; expected = 2.75 },
+            @{ name = 'white on panel (15.52:1)'; fg = '#ffffff'; bg = '#242424'; expected = 15.52 },
+            @{ name = 'composite rgba(255,255,255,.08) over panel (1.25:1)'; fg = 'rgba(255,255,255,0.08)'; bg = '#161b22'; expected = 1.25 }
+          )
+          $vectorPath = Join-Path $env:RUNNER_TEMP 'visual-evidence-math-vectors.json'
+          $vectors | ConvertTo-Json -Depth 5 | Out-File -FilePath $vectorPath -Encoding utf8
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate-visual-evidence.ps1 -VerifyMathFile $vectorPath
+          if ($LASTEXITCODE -ne 0) { throw "validate-visual-evidence.ps1 -VerifyMathFile failed with exit code $LASTEXITCODE" }
+
+  # 真实桌面采集：重活（Rust 构建 + 驱动真实应用），默认不在每次 PR 上跑。
+  # 需要显式开关（仓库变量 RAIN_RUN_VISUAL_EVIDENCE=1）或手动 workflow_dispatch。
+  # 这是**明示的成本取舍**：PR 上由上面的 channel job 保证通道脚本可用，
+  # 真实的桌面运行由 dispatch 或仓库变量触发。
+  collect:
+    name: Hosted Windows Visual Evidence Collection
+    needs: channel
+    runs-on: windows-2025
+    timeout-minutes: 60
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.RAIN_RUN_VISUAL_EVIDENCE == '1' }}
+    env:
+      CI: true
+      LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
+      CMAKE_CXX_FLAGS: /utf-8
+      CMAKE_C_FLAGS: /utf-8
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9222 --enable-features=msEdgeDevToolsWdpRemoteDebugging --disable-gpu --no-sandbox --disable-dev-shm-usage
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - name: Install pinned desktop toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.96.1 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "Rust installation failed with exit code $LASTEXITCODE" }
+          rustup default 1.96.1
+          if ($LASTEXITCODE -ne 0) { throw "Rust selection failed with exit code $LASTEXITCODE" }
+          choco upgrade llvm --version=22.1.7 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "LLVM installation failed with exit code $LASTEXITCODE" }
+          cargo install tauri-driver --version=2.0.6 --locked
+          if ($LASTEXITCODE -ne 0) { throw "tauri-driver installation failed with exit code $LASTEXITCODE" }
+          'C:\Program Files\LLVM\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          'C:\Program Files\CMake\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install matching WebView2 driver
+        shell: pwsh
+        run: |
+          $runtimeRoots = @()
+          if (${env:ProgramFiles(x86)}) {
+            $runtimeRoots += Join-Path ${env:ProgramFiles(x86)} 'Microsoft\EdgeWebView\Application'
+          }
+          if ($env:ProgramFiles) {
+            $runtimeRoots += Join-Path $env:ProgramFiles 'Microsoft\EdgeWebView\Application'
+          }
+          $runtime = $runtimeRoots |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory } |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if (-not $runtime) {
+            throw 'Microsoft Edge WebView2 Runtime was not found.'
+          }
+
+          $driverVersion = $runtime.Name
+          $toolsRoot = Join-Path $env:RUNNER_TEMP 'rain-webview2-driver'
+          $archivePath = Join-Path $toolsRoot 'edgedriver_win64.zip'
+          $driverDirectory = Join-Path $toolsRoot $driverVersion
+          New-Item -ItemType Directory -Force -Path $toolsRoot, $driverDirectory | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri "https://msedgedriver.microsoft.com/$driverVersion/edgedriver_win64.zip" -OutFile $archivePath
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $driverDirectory -Force
+          $driverPath = Join-Path $driverDirectory 'msedgedriver.exe'
+          if (-not (Test-Path -LiteralPath $driverPath)) {
+            throw "msedgedriver.exe was not found after extracting $archivePath"
+          }
+          "RAIN_E2E_WEBVIEW2_VERSION=$driverVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $driverDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify desktop toolchain
+        shell: pwsh
+        run: |
+          node --version
+          npm --version
+          rustc --version
+          cargo --version
+          $cmakeText = (cmake --version | Out-String).Trim()
+          Write-Output $cmakeText
+          $cmakeVersionText = [regex]::Match($cmakeText, '\d+(?:\.\d+){2}').Value
+          if ([string]::IsNullOrWhiteSpace($cmakeVersionText) -or [version]$cmakeVersionText -lt [version]'4.0.0') {
+            throw "CMake 4 or newer is required; observed $cmakeVersionText"
+          }
+          clang --version
+          Get-Command tauri-driver | Select-Object -ExpandProperty Source
+          $edgeDriver = Get-Command msedgedriver -ErrorAction Stop
+          & $edgeDriver.Source --version
+          $driverText = (& $edgeDriver.Source --version | Out-String).Trim()
+          $driverVersion = [regex]::Match($driverText, '\d+(?:\.\d+){3}').Value
+          Write-Output "Microsoft Edge WebView2 Runtime $env:RAIN_E2E_WEBVIEW2_VERSION"
+          if ([string]::IsNullOrWhiteSpace($driverVersion) -or $env:RAIN_E2E_WEBVIEW2_VERSION -ne $driverVersion) {
+            throw "Microsoft Edge WebView2 Runtime $env:RAIN_E2E_WEBVIEW2_VERSION does not exactly match msedgedriver $driverVersion"
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $env:LIBCLANG_PATH 'libclang.dll'))) {
+            throw "libclang.dll was not found under $env:LIBCLANG_PATH"
+          }
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Collect real desktop visual evidence
+        shell: pwsh
+        run: |
+          $target = '${{ inputs.target_sha }}'
+          if ([string]::IsNullOrWhiteSpace($target)) { $target = $env:GITHUB_SHA }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/campaign-visual-evidence.ps1 -TargetSha $target
+
+      - name: Validate the collected evidence package against visual-contract §3.4
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem -Path evidence -Directory -Filter 'visual-*' | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $package) { throw 'No visual evidence package was produced.' }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate-visual-evidence.ps1 -EvidenceRoot $package.FullName
+
+      - name: Write job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summaryPath = $env:GITHUB_STEP_SUMMARY
+          $packages = @(Get-ChildItem -Path evidence -Directory -Filter 'visual-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+          $lines = @()
+          $lines += '# Visual evidence collection (§3.4 items 1-3 only)'
+          $lines += ''
+          $lines += 'This job **collects** evidence. It does **not** issue Visual Evidence, does **not**'
+          $lines += 'decide `pass` / `needs_revision` for any `VC-xx`, and does **not** change any AC'
+          $lines += 'state or Evidence tier. Item 4 (per-criterion verdict and delta) belongs to the'
+          $lines += 'independent visual reviewer (visual-contract.md §2).'
+          $lines += ''
+          if ($packages.Count -eq 0) {
+            $lines += 'No evidence package was produced by this run.'
+          }
+          foreach ($package in $packages) {
+            $manifestPath = Join-Path $package.FullName 'manifest.json'
+            $lines += ('## `' + $package.Name + '`')
+            $lines += ''
+            if (Test-Path -LiteralPath $manifestPath) {
+              $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+              $lines += ('- target commit: `' + $manifest.target.commitSha + '`')
+              $lines += ('- viewport: ' + $manifest.viewport.width + 'x' + $manifest.viewport.height + ' @ dpr ' + $manifest.viewport.devicePixelRatio)
+              $lines += ('- host: ' + $manifest.host.os.caption + ' / WebView2 ' + $manifest.host.webview2.runtimeVersion + ' / ' + $manifest.host.app.productName + ' ' + $manifest.host.app.productVersion)
+              $lines += ('- tested: ' + ($manifest.coverage.tested -join ', '))
+              $lines += ('- untested (no evidence obtained): ' + ($manifest.coverage.untested -join ', '))
+              $lines += ('- records: ' + $manifest.records.Count + ' / screenshots: ' + $manifest.screenshots.Count)
+              $lines += ''
+              $lines += '| record | VC | selector | contrast | threshold | composited fg | composited bg |'
+              $lines += '| --- | --- | --- | --- | --- | --- | --- |'
+              foreach ($reference in $manifest.records) {
+                $recordPath = Join-Path $package.FullName $reference.file
+                if (-not (Test-Path -LiteralPath $recordPath)) { continue }
+                $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+                $ratio = $record.measured.contrastRatio
+                $fg = 'rgb(' + ($record.measured.fg.rgba8 -join ',') + ')'
+                $bg = 'rgb(' + ($record.measured.bg.rgba8 -join ',') + ')'
+                $lines += ('| `' + $record.recordId + '` | ' + $record.vc + ' | `' + $record.selector + '` | ' + $ratio.value + ':1 | ' + $ratio.threshold + ':1 | ' + $fg + ' | ' + $bg + ' |')
+              }
+            } else {
+              $lines += 'manifest.json missing.'
+            }
+            $lines += ''
+          }
+          $lines | Out-File -FilePath $summaryPath -Encoding utf8 -Append
+
+      - name: Upload visual evidence package
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: visual-evidence
+          path: evidence/visual-*
+          if-no-files-found: warn
+          retention-days: 30
