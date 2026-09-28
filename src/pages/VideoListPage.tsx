@@ -209,7 +209,7 @@ const modalInputStyle: React.CSSProperties = {
 }
 
 const errorStyle: React.CSSProperties = {
-  color: '#f85149',
+  color: '#e3b341',
   fontSize: 'var(--font-size-xs)',
 }
 
@@ -517,11 +517,11 @@ export function VideoListPage() {
                 right: 0,
                 marginTop: '4px',
                 background: 'var(--color-surface)',
-                border: '1px solid #f85149',
+                border: '1px solid #e3b341',
                 borderRadius: 'var(--radius-1)',
                 padding: '6px 10px',
                 fontSize: 'var(--font-size-xs)',
-                color: '#f85149',
+                color: '#e3b341',
                 whiteSpace: 'nowrap',
                 zIndex: 20,
               }}
@@ -539,11 +539,11 @@ export function VideoListPage() {
                 marginTop: '4px',
                 maxWidth: '480px',
                 background: 'var(--color-surface)',
-                border: '1px solid #d29922',
+                border: '1px solid #e3b341',
                 borderRadius: 'var(--radius-1)',
                 padding: '6px 10px',
                 fontSize: 'var(--font-size-xs)',
-                color: '#d29922',
+                color: '#e3b341',
                 zIndex: 20,
               }}
             >
