@@ -8,6 +8,26 @@ import { getCardAction, buildCardDisplay, buildDeleteConfirmation, getEmptyState
 import type { Video } from '@/models/types'
 import { localMediaUrl } from '@/ui/components/video'
 
+/**
+ * 状态徽章：白字只压「填充态」色（决策 69/70；视觉合同 §5.5.1 状态色，深底套）。
+ * 白字对比度：失败 #a82e26 → 6.81、处理中 #7a5a00 → 6.38、排队 #5b6470 → 6.00（均 ≥4.5）。
+ * 不得改用类型色或彩字态作白字承载：白字压 #10b981 / #f59e0b / #3ecf8e / #f0a13c 必然 <4.5
+ * （上界 1.05/(L_bg+0.05)，这些背景 L 都 > 0.183333）——见 VCGAP-12/VCGAP-13。
+ */
+const STATUS_BADGE_FILL: Record<string, string> = {
+  failed: '#a82e26',
+  processing: '#7a5a00',
+  pending: '#5b6470',
+}
+
+const statusBadgeChipStyle: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '1px 8px',
+  borderRadius: 'var(--radius-1)',
+  fontSize: 'var(--font-size-xs)',
+  color: '#ffffff',
+}
+
 interface VideoCardProps {
   video: Video
   onOpen?: (videoId: string) => void
@@ -36,7 +56,6 @@ export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInf
   const statusBadgeText = display.statusBadge?.type === 'processing' && importProgressPercent !== undefined
     ? `${display.statusBadge.label} ${importProgressPercent}%`
     : display.statusBadge?.label
-
   const handleClick = () => {
     if (deleting) return
     if (cardAction === 'openVideo') onOpen?.(video.id)
@@ -85,7 +104,15 @@ export function VideoCard({ video, onOpen, onOpenImport, onDelete, loadDeleteInf
       <div>{display.durationText}</div>
       <div>{display.progressPercent}%</div>
       {display.isComplete && <span>✓</span>}
-      {display.statusBadge && <span data-testid={`badge-${video.id}`} data-status={display.statusBadge.type}>{statusBadgeText}</span>}
+      {display.statusBadge && (
+        <span
+          data-testid={`badge-${video.id}`}
+          data-status={display.statusBadge.type}
+          style={{ ...statusBadgeChipStyle, background: STATUS_BADGE_FILL[display.statusBadge.type] ?? STATUS_BADGE_FILL.pending }}
+        >
+          {statusBadgeText}
+        </span>
+      )}
       {importStatus && (
         <div data-testid={`import-status-${video.id}`}>
           <div>{importStatus.stageLabel} · {importStatus.percent}%</div>
