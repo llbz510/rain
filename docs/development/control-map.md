@@ -19,7 +19,7 @@ Rain 的资料按“回答什么问题”分工。不要用一份文件回答所
 | 本次 Core Release 包含什么 | `docs/development/release-scope-contract.md` | Active、用户已确认并于 2026-08-03 修订的范围合同；记录 Launch/Post-release 去向、单一 GPU 增强安装包和受支持 NVIDIA 最低要求 |
 | 本次 Core Release 用什么 AC 验收 | `docs/development/acceptance-standard.md` | M1-S2 原确认 50 条合同；2026-08-03 Harness Migration 后 49 条仍 Confirmed，`AC-RL-07` 已 Superseded；`release-acceptance-contract.md` 保留确认历史和 31 条 Launch traceability |
 | 正式发布产物必须长什么样 | `docs/development/release-artifact-contract.md` | Active M3-S1 产物合同；定义唯一 NSIS、版本/identifier、CPU-safe 主程序、隔离 CUDA worker/runtime、manifest、禁止项和后续 Release Evidence Judge；不代表安装器已生成 |
-| 已确认的视觉规范怎样才算被裁判、以及它的取值定成什么 | `docs/development/visual-contract.md` | Active 可裁判视觉合同：把 `M13-visual-design.md` 中已有明确产品依据的 17 条决策（63–71、73–79、81；072 已 `Out-of-scope` 由 077 接管、080 仍为 `Proposed`）逐条转成带可测数字的判据、视觉审查员流程与缺口编号；并含用户 2026-09-28 确认的 4 条取值决定 `DEC-VC-01`…`04`（主按钮=描边款、一律达标及边界、按背景分两套调色板、状态叠加需达标）与 §5.4 全量标定表；不定义 AC、不改变 AC 状态、不签发 Visual Evidence |
+| 已确认的视觉规范怎样才算被裁判、以及它的取值定成什么 | `docs/development/visual-contract.md` | Active 可裁判视觉合同：把 `M13-visual-design.md` 中已有明确产品依据的 17 条决策（63–71、73–79、81；072 已 `Out-of-scope` 由 077 接管、080 仍为 `Proposed`）逐条转成带可测数字的判据、视觉审查员流程与缺口编号；并含用户 2026-09-28 确认的 4 条取值决定 `DEC-VC-01`…`04`（主按钮=描边款、一律达标及边界、按背景分两套调色板、状态叠加需达标）与 **§5.5 全量标定表**（§5.3 记录已关闭缺口、§5.4 记录排期顺序）；不定义 AC、不改变 AC 状态、不签发 Visual Evidence |
 | 用户希望产品做什么 | 根目录 `PRD.md` 和对应 `M*.md` | 已确认产品意图；不自动代表代码已经实现 |
 | 99 条历史产品决策当前由什么控制 | `docs/development/product-decision-coverage.md` | 72 条映射 Confirmed AC、23 条 Post-release Proposed、4 条 Out-of-scope；不是完成百分比 |
 | 本地视频主链路当前按什么设计 | `docs/superpowers/specs/2026-07-17-rain-real-local-video-repair-design.md` | 已实施修复的设计依据；与更晚的事实冲突时需要重新确认 |
