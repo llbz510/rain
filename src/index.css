@@ -14,10 +14,17 @@
   --color-accent: #4a9eff; /* 仅作遗留兼容；控件不得用它作实底（决策65/VC-03） */
 
   /* ===== 段落四色（PARAGRAPH_COLORS，决策66）===== */
-  --color-concept: #3b82f6; /* PARAGRAPH_COLORS.concept 蓝 */
-  --color-example: #10b981; /* PARAGRAPH_COLORS.example 绿 */
-  --color-analogy: #f59e0b; /* PARAGRAPH_COLORS.analogy 橙 */
-  --color-transition: #6b7280; /* PARAGRAPH_COLORS.transition 灰 */
+  /* 取值依据 docs/development/visual-contract.md §5.5.1「彩字态」（DEC-VC-03 深底亮一档；用户 2026-09-28 批准）：
+     concept #5b9bf8 压面板 5.54:1、example #3ecf8e 7.78:1、analogy #f0a13c 7.29:1、transition #9e9e9e 5.79:1（均 ≥4.5:1）；
+     原值 #3b82f6 / #10b981 / #f59e0b / #6b7280 压面板只有 4.22 / 2.54 / 2.15 / 3.21:1（VCGAP-14/15）。
+     本文件仍是这四种段落颜色的**唯一真相源**；类型胶囊（决策 71 / VC-09）用「该色字 + 同色 alpha .10 淡底 + 同色 1px 全色细边」，
+     见 src/ui/components/type-capsule.tsx，渲染在 src/ui/components/text-zone.tsx 段落头的 `data-type-badge` 占位处。
+     锁定 Harness harness/m13-visual.test.ts 的期望值已按本次用户批准同步重钉，记录见
+     docs/development/harness-migration-2026-09-28-paragraph-type-token-values.md。 */
+  --color-concept: #5b9bf8; /* PARAGRAPH_COLORS.concept 蓝 */
+  --color-example: #3ecf8e; /* PARAGRAPH_COLORS.example 绿 */
+  --color-analogy: #f0a13c; /* PARAGRAPH_COLORS.analogy 橙 */
+  --color-transition: #9e9e9e; /* PARAGRAPH_COLORS.transition 灰 */
 
   /* ===== 间距阶梯（SPACING_SCALE = [4,8,12,16,20,24,32,48]，决策76）===== */
   --spacing-1: 4px; /* SPACING_SCALE[0] */

@@ -13,8 +13,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
  *
  * 本裁判锁定「两套并存」的三件事：① 中性色阶两套都完整且单调（背景 < 面板 < 面板2/悬停）；
  * ② 两套已冻结取值各自达标；③ 同一语义的方向判据成立（深底更亮）。
- * **不在本裁判内的项**：深底套的四色令牌（`--color-concept/example/analogy/transition`）当前仍是
- * 旧值、由 `VCGAP-03`/`VCGAP-14`/`VCGAP-15` 登记并在 **S4** 修复——本裁判不为它们签发通过。
+ * **深底四色（S4 起在本裁判内）**：`--color-concept/example/analogy/transition` 已由 S4 落地为 §5.5.1 的「彩字态」值；
+ * 本裁判 ③ 直接读这四个令牌，并断言「同一语义深底套值恒比浅底套值更亮」。
  */
 
 const ROOT = process.cwd()
@@ -65,6 +65,10 @@ describe('VCGAP-04：两套色板并存、各自达标、方向判据成立', ()
       border: cssToken(indexCss, 'color-border'),
       fg: cssToken(indexCss, 'color-fg'),
       muted: cssToken(indexCss, 'color-muted'),
+      concept: cssToken(indexCss, 'color-concept'),
+      example: cssToken(indexCss, 'color-example'),
+      analogy: cssToken(indexCss, 'color-analogy'),
+      transition: cssToken(indexCss, 'color-transition'),
     }
     light = {
       bg: colorToken(shared, 'bg'),
@@ -75,6 +79,10 @@ describe('VCGAP-04：两套色板并存、各自达标、方向判据成立', ()
       dimmer: colorToken(shared, 'dimmer'),
       border: colorToken(shared, 'border'),
       border2: colorToken(shared, 'border2'),
+      concept: colorToken(shared, 'concept'),
+      example: colorToken(shared, 'example'),
+      analogy: colorToken(shared, 'analogy'),
+      fail: colorToken(shared, 'fail'),
     }
   })
 
@@ -108,20 +116,21 @@ describe('VCGAP-04：两套色板并存、各自达标、方向判据成立', ()
     expect(luminance(deep.muted)).toBeGreaterThan(luminance(light.muted))
   })
 
-  it('③ 方向判据的「类型色」部分：当前只登记 S4 目标值锚点，**不计入本 Slice 的关闭依据**', () => {
-    // 深底四色（--color-concept/example/analogy/transition）当前仍是旧值、由 VCGAP-03/14/15 登记并在 S4 落地，
-    // 所以这一组比对的两个值**都不来自当前源码**、无法失败——它是给 S4 的目标锚点，不是锁定。
-    // S4 必须把本条改成「读真实源码」再真判（合同 §5.4 的 S4 必做项）。
-    const s4Targets: Array<[string, string, string]> = [
-      ['概念蓝', '#5b9bf8', '#539bf5'],
-      ['例子绿', '#3ecf8e', '#3fb950'],
-      ['类比橙', '#f0a13c', '#db6d28'],
-      ['失败红', '#ff6b61', '#f85149'],
+  it('③ 方向判据（S4 起读真实源码、具备失败能力）：同一语义的深底套值必须比浅底套值更亮', () => {
+    // 两侧都来自真实源码：深底套 = index.css 的 --color-* 令牌，浅底套 = COLORS.*。
+    // S3 时深底四色还是旧值、本条只能对目标值做锚点；S4 落地后按合同 §5.4 的 S4 必做项改为读真实源码
+    // （已用旧令牌验证过它确实会失败：深底 #3b82f6 比浅底 #539bf5 更暗）。
+    const pairs: Array<[string, string, string]> = [
+      ['次要文字灰', deep.muted, light.muted],
+      ['概念蓝', deep.concept, light.concept],
+      ['例子绿', deep.example, light.example],
+      ['类比橙', deep.analogy, light.analogy],
+      ['过渡灰', deep.transition, light.dimmer],
     ]
-    for (const [name, deepTarget, lightValue] of s4Targets) {
-      expect(luminance(deepTarget), `${name}：S4 目标值必须比浅底套更亮`).toBeGreaterThan(luminance(lightValue))
+    for (const [name, deepValue, lightValue] of pairs) {
+      expect(luminance(deepValue), `${name}：深底套 ${deepValue} 必须比浅底套 ${lightValue} 更亮`).toBeGreaterThan(luminance(lightValue))
     }
-    // 浅底四色必须仍是 §5.5.2 的冻结值（这部分来自源码，有失败能力，见下一条）。
+    // 浅底四色必须仍是 §5.5.2 的冻结值（同样来自源码，防止被悄悄改回旧值）。
     expect(colorToken(shared, 'concept')).toBe('#539bf5')
     expect(colorToken(shared, 'example')).toBe('#3fb950')
     expect(colorToken(shared, 'analogy')).toBe('#db6d28')

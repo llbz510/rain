@@ -25,7 +25,7 @@ describe('M13: 应用实际加载的视觉令牌', () => {
       cssVariable('--color-example'),
       cssVariable('--color-analogy'),
       cssVariable('--color-transition'),
-    ]).toEqual(['#3b82f6', '#10b981', '#f59e0b', '#6b7280'])
+    ]).toEqual(['#5b9bf8', '#3ecf8e', '#f0a13c', '#9e9e9e'])
   })
 
   it('加载间距、字号、圆角和动效阶梯', () => {

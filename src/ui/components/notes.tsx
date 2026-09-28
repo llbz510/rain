@@ -81,7 +81,7 @@ function NoteItem({
             <button
               key={sid}
               onClick={() => onSeekSentence?.(sid)}
-              style={{ cursor: 'pointer', color: '#3b82f6' }}
+              style={{ cursor: 'pointer', color: 'var(--color-concept)' }}
             >
               引用:{sid}
             </button>
