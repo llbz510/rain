@@ -87,9 +87,14 @@ describe('U52: 删除按钮弹强确认（决策60）', () => {
     renderWithStore(<VideoCard video={readyVideo} nodeCount={25} noteCount={8} />)
     const deleteBtn = screen.getByRole('button', { name: /删除/ })
     await user.click(deleteBtn)
-    // 确认弹窗应该显示段数和笔记数
-    expect(screen.getByText(/25/)).toBeInTheDocument()
-    expect(screen.getByText(/8/)).toBeInTheDocument()
+    // 确认弹窗显示段数与笔记数。
+    // 这里**必须**整句精确断言，不能用 getByText(/25/) 这类"文本含 25 即命中"的宽松匹配：
+    // 卡片上的「最近学习」会渲染 `${天数} 天前`，当天的天数一旦含 "25"（例如 2026-09-29 的
+    // "20725 天前"）就会同时命中两个元素，用例按日期发作变红（2026-09-29 的真实事故）。
+    // 精确断言严格更强：它同时钉住段数、笔记数与整句文案，而不是"存在一个含数字的元素"。
+    expect(await screen.findByTestId('delete-confirm')).toHaveTextContent(
+      '删除视频「测试视频」将永久删除 25 个段落和 8 条笔记，不可恢复。',
+    )
   })
 })
 
