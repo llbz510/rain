@@ -267,6 +267,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: visual-evidence
-          path: evidence/visual-*
+          # 上传整个 evidence 目录（而不是只 evidence/visual-*）：失败时包目录里会有
+          # failure.json（含阶段、异常原文、环境事实与 driver 日志尾部），那是判断
+          # "驱动为什么拉不起会话"的第一现场——前两次失败正因为这里只传目录、把诊断丢了。
+          path: evidence/**
           if-no-files-found: warn
           retention-days: 30
