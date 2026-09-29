@@ -547,6 +547,69 @@ function Assert-RecordContrast($Record, $Ratio, [string]$Where) {
     Assert-DecomposedColour ([string]$bgDeclared) $bgChannels '底色' 'measured.bg.rgba8' $Where
   }
 
+  # ---------------------------------------------------------------- 边框 / 轮廓通道
+  # 边框类判据测的就是**边框颜色**。此前记录里没有边框通道，令牌无处对账，于是
+  # 「declaredToken 解释不了实测值」被判失败（run 36574308748 的 VC-02-settings-topbar-border）。
+  # 这里把每个边框通道按与 fg/bg **同一口径**校验：合成后必须不透明、且与自身 rgba8 ±1/通道 自洽。
+  # 缺失即失败：通道不见了不能静默当成"没测这条"。
+  $borderChannels = @{}
+  $border = Get-JsonProperty $measured 'border'
+  if ($null -eq $border) {
+    Add-Failure ($Where + '.measured 缺少 border（四边边框色的合成后通道）')
+  } else {
+    $borderRgba = Get-JsonProperty $border 'rgba8'
+    if ($null -eq $borderRgba) {
+      Add-Failure ($Where + '.measured.border 缺少 rgba8')
+    } else {
+      foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+        $channels = Get-JsonProperty $borderRgba $side
+        if ($null -eq $channels) {
+          Add-Failure ($Where + '.measured.border.rgba8 缺少 ' + $side)
+          continue
+        }
+        $doubles = ConvertTo-DoubleArray $channels
+        if ($doubles.Count -ne 3) {
+          Add-Failure ($Where + '.measured.border.rgba8.' + $side + ' 必须是 3 个通道')
+          continue
+        }
+        $borderChannels[$side] = $doubles
+      }
+    }
+  }
+  $outlineChannels = $null
+  $outline = Get-JsonProperty $measured 'outline'
+  if ($null -eq $outline) {
+    Add-Failure ($Where + '.measured 缺少 outline（轮廓色的合成后通道）')
+  } else {
+    $outlineRgba = Get-JsonProperty $outline 'rgba8'
+    if ($null -eq $outlineRgba) {
+      Add-Failure ($Where + '.measured.outline 缺少 rgba8')
+    } else {
+      $outlineDoubles = ConvertTo-DoubleArray $outlineRgba
+      if ($outlineDoubles.Count -ne 3) {
+        Add-Failure ($Where + '.measured.outline.rgba8 必须是 3 个通道')
+      } else {
+        $outlineChannels = $outlineDoubles
+      }
+    }
+    # 未渲染的轮廓必须显式声明，不能拿一个"测到的"颜色冒充画出来的聚焦圈。
+    $outlineRendered = Get-JsonProperty $outline 'rendered'
+    if ($null -eq $outlineRendered) {
+      Add-Failure ($Where + '.measured.outline 缺少 rendered（该轮廓是否真的被绘制）')
+    }
+  }
+
+  # ---------------------------------------------------------------- 颜色角色
+  # 每条记录必须声明它测的是哪个颜色角色，且该角色必须能被识别。
+  # 这把"这个令牌该出现在哪个通道"变成**可校验的结构事实**，而不是靠人读描述。
+  $role = [string](Get-JsonProperty $measured 'role')
+  $knownRoles = @('text', 'background', 'border', 'graphic')
+  if ([string]::IsNullOrWhiteSpace($role)) {
+    Add-Failure ($Where + '.measured 缺少 role（本条判据测的颜色角色：text/background/border/graphic）')
+  } elseif ($knownRoles -notcontains $role) {
+    Add-Failure ($Where + '.measured.role 不是已知角色：' + $role + '（已知：' + ($knownRoles -join '/') + '）。新种类的测量必须登记成新角色，不得静默丢弃。')
+  }
+
   # 令牌来源（可选）：采集器可以声明"这条实测值对应合同冻结的某个令牌/取值"。
   # 那就必须由本校验器自己复算 —— 不许只信自述（§2.4 铁律 3）。
   $declaredToken = Get-JsonProperty $Record 'declaredToken'
@@ -557,34 +620,55 @@ function Assert-RecordContrast($Record, $Ratio, [string]$Where) {
     if ($null -ne $tokenName -and $null -ne $tokenValue) {
       try {
         $declaredTokenRgb = Get-Rgb8FromToken $tokenValue
-        $measuredChannels = $bgChannels
-        $measuredLabel = 'measured.bg.rgba8'
-        $foregroundMatch = $false
-        for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
-          if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - $fgChannels[$channelIndex]) -le $script:FrozenTolerance.colorChannel) {
-            $foregroundMatch = $true
-          } else {
-            $foregroundMatch = $false
-            break
+        # 令牌必须落在**本条判据声明的颜色角色**对应的通道里。
+        # 这把"这个令牌该出现在哪个通道"从"靠人读描述"变成可校验的结构事实：
+        # 角色=border 的令牌却只出现在 bg/fg 通道 → 说明记录形状与判据不符，如实失败。
+        $roleChannels = @()
+        switch ($role) {
+          'text' { $roleChannels = @(@{ label = 'measured.fg.rgba8'; values = $fgChannels }) }
+          'background' { $roleChannels = @(@{ label = 'measured.bg.rgba8'; values = $bgChannels }) }
+          'border' {
+            foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+              if ($borderChannels.ContainsKey($side)) {
+                $roleChannels += @{ label = ('measured.border.rgba8.' + $side); values = $borderChannels[$side] }
+              }
+            }
+            if ($null -ne $outlineChannels) {
+              $roleChannels += @{ label = 'measured.outline.rgba8'; values = $outlineChannels }
+            }
+          }
+          'graphic' {
+            if ($null -ne $outlineChannels) {
+              $roleChannels += @{ label = 'measured.outline.rgba8'; values = $outlineChannels }
+            }
+            foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+              if ($borderChannels.ContainsKey($side)) {
+                $roleChannels += @{ label = ('measured.border.rgba8.' + $side); values = $borderChannels[$side] }
+              }
+            }
+            $roleChannels += @{ label = 'measured.fg.rgba8'; values = $fgChannels }
+          }
+          default { $roleChannels = @() }
+        }
+        if ($roleChannels.Count -gt 0) {
+          $matchedLabel = $null
+          foreach ($candidate in $roleChannels) {
+            $isMatch = $true
+            for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+              if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - [double]$candidate.values[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) {
+                $isMatch = $false
+                break
+              }
+            }
+            if ($isMatch) { $matchedLabel = [string]$candidate.label; break }
+          }
+          if ($null -eq $matchedLabel) {
+            Add-Failure ($Where + '：declaredToken ' + $tokenName + '=' + $tokenValue +
+              ' 与本条判据声明的颜色角色（role=' + $role + '）下的任何实测合成通道都不在 ±' + $script:FrozenTolerance.colorChannel + '/通道 内——声明的令牌来源无法解释这条实测值。已查通道：' +
+              (($roleChannels | ForEach-Object { $_.label + '=' + (($_.values | ForEach-Object { [int]$_ }) -join ',') }) -join ' | '))
           }
         }
-        if ($foregroundMatch) {
-          $measuredChannels = $fgChannels
-          $measuredLabel = 'measured.fg.rgba8'
-        }
-        $matches = $true
-        for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
-          if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - $measuredChannels[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) {
-            $matches = $false
-            break
-          }
-        }
-        if (-not $matches) {
-          Add-Failure ($Where + '：declaredToken ' + $tokenName + '=' + $tokenValue +
-            ' 与本条实测合成色（' + $measuredLabel + '=' + (($measuredChannels | ForEach-Object { [int]$_ }) -join ',') +
-            '、measured.fg.rgba8=' + (($fgChannels | ForEach-Object { [int]$_ }) -join ',') +
-            '）都不在 ±' + $script:FrozenTolerance.colorChannel + '/通道 内——声明的令牌来源无法解释这条实测值')
-        }
+        # 角色未知或该角色的通道缺失时上面已经报过失败；这里不重复报，也**不能**悄悄放行。
       } catch {
         Add-Failure ($Where + '：declaredToken.value 无法复算（' + $_.Exception.Message + '）')
       }
@@ -860,6 +944,18 @@ function Assert-EvidencePackage([string]$EvidenceDir) {
     $driverVersion = Assert-NonEmptyString $webview 'driverVersion' ($where + '.manifest.host.webview2')
     if ($null -ne $runtimeVersion -and $null -ne $driverVersion -and $runtimeVersion -ne $driverVersion) {
       Add-Failure ($where + "：WebView2 runtime '" + $runtimeVersion + "' 与 msedgedriver '" + $driverVersion + "' 不一致（宿主版本无法解释本次实测）")
+    }
+    # 版本**来源**必须显式声明。tauri-driver 拉起的应用可能不开调试端口，此时版本取自预检的
+    # 同主机同二进制读数 —— 这是**降级**，必须标注来源，不许静默当成等价替代。
+    # 缺失即失败：读不到来源就无法判断这条版本绑定的强度。
+    $runtimeVersionSource = Assert-NonEmptyString $webview 'runtimeVersionSource' ($where + '.manifest.host.webview2')
+    if ($null -ne $runtimeVersionSource) {
+      $knownSources = @('devtools', 'preflight-devtools')
+      foreach ($entry in ($runtimeVersionSource -split ',')) {
+        if ($knownSources -notcontains $entry.Trim()) {
+          Add-Failure ($where + "：runtimeVersionSource 含未知来源 '" + $entry.Trim() + "'（已知：" + ($knownSources -join '/') + "）。新来源必须登记，不得静默。")
+        }
+      }
     }
   }
   $app = Get-JsonProperty $hostBlock 'app'

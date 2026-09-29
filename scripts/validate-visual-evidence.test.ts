@@ -142,6 +142,12 @@ interface RecordOverrides {
   fgSource?: string
   bgSource?: string
   declared?: { fg?: string; bg?: string }
+  /** Which colour role the criterion measures; the validator maps the declared token onto this channel. */
+  role?: string
+  /** Composited border channels, one per side. */
+  border?: { top?: [number, number, number]; right?: [number, number, number]; bottom?: [number, number, number]; left?: [number, number, number] }
+  /** Composited outline channel. */
+  outline?: [number, number, number]
   fontSizePx?: number
   fontWeight?: number
   threshold?: number
@@ -209,6 +215,10 @@ function buildRecord(overrides: RecordOverrides) {
       boxShadow: 'none',
     },
     measured: {
+      // Every record declares which colour role its criterion measures, and carries a channel for every
+      // colour it could be talking about. The collector always emits all of these now, so the fixture
+      // mirrors the real shape -- otherwise these tests would assert against a record nothing produces.
+      role: overrides.role ?? 'text',
       fg: {
         source: overrides.fgSource ?? 'getComputedStyle(color)',
         declared: overrides.declared?.fg ?? fgHex,
@@ -223,6 +233,30 @@ function buildRecord(overrides: RecordOverrides) {
         alpha: 1,
         composited: false,
         layers: [{ selector: 'html', declared: bgHex, alpha: 1 }],
+      },
+      border: {
+        source: 'composite(own border color over the composited backdrop; §3.2)',
+        rgba8: {
+          bordertop: overrides.border?.top ?? bg,
+          borderright: overrides.border?.right ?? bg,
+          borderbottom: overrides.border?.bottom ?? bg,
+          borderleft: overrides.border?.left ?? bg,
+        },
+        declaredComputed: {
+          bordertop: bgHex,
+          borderright: bgHex,
+          borderbottom: bgHex,
+          borderleft: bgHex,
+        },
+        rendered: { top: true, right: true, bottom: true, left: true },
+      },
+      outline: {
+        source: 'composite(own outline color over the composited backdrop; §3.2)',
+        rgba8: overrides.outline ?? bg,
+        declaredComputed: bgHex,
+        style: 'none',
+        widthPx: 0,
+        rendered: false,
       },
       contrastRatio: {
         value: round6(ratio),
@@ -306,7 +340,10 @@ function createPackage(options: PackageOptions = {}): string {
     },
     host: {
       os: { caption: 'Microsoft Windows Server 2025 Datacenter', version: '10.0.26100', build: '26100' },
-      webview2: { runtimeVersion: '141.0.3537.57', driverVersion: '141.0.3537.57' },
+      // runtimeVersionSource is mandatory: when the app tauri-driver launches exposes no debug port the
+      // version comes from the preflight reading on the same host+binary, which is a DECLARED downgrade.
+      // Omitting the source would hide how strong the binding is, so the validator refuses to guess one.
+      webview2: { runtimeVersion: '141.0.3537.57', driverVersion: '141.0.3537.57', runtimeVersionSource: 'devtools' },
       app: { productName: 'Rain', productVersion: '0.1.0', binaryPath: 'src-tauri\\target\\debug\\rain.exe' },
       driver: { tauriDriver: '2.0.6' },
     },
@@ -831,6 +868,133 @@ describe('visual evidence validator: non-element measurement scopes', () => {
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/declaredToken|#242424/i)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑤b 颜色角色与通道：令牌必须落在它声明角色的通道里
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: colour role and channels', () => {
+  it('rejects a border-role token that no border channel can explain', { timeout: powershellTimeoutMs }, () => {
+    // 边框类判据测的是**边框颜色**。这条记录声明 role=border，但 border 通道里的颜色都不是
+    // --color-border 的 #6e7074 —— 令牌来源无法解释实测值，必须失败。
+    // （这正是托管 run 36574308748 里 VC-02-settings-topbar-border 的形状；当时记录根本没有
+    //  边框通道，因此校验器只能拿 fg/bg 去比、必然对不上。）
+    const record = buildRecord({
+      recordId: 'VC-02-border-role-mismatch',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header input[type="text"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      border: { top: [0x22, 0x22, 0x22], right: [0x22, 0x22, 0x22], bottom: [0x22, 0x22, 0x22], left: [0x22, 0x22, 0x22] },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#6e7074', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a token no channel can explain must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/role=border|#6e7074/i)
+  })
+
+  it('accepts a border-role token that the border channel does explain', { timeout: powershellTimeoutMs }, () => {
+    // 同一个令牌，只要边框通道里真有这个颜色就必须通过——证明上一条失败是因为对不上，不是因为
+    // 校验器一律拒绝 border 角色。
+    const record = buildRecord({
+      recordId: 'VC-02-border-role-match',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header input[type="text"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      border: { top: [0x6e, 0x70, 0x74], right: [0x6e, 0x70, 0x74], bottom: [0x6e, 0x70, 0x74], left: [0x6e, 0x70, 0x74] },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#6e7074', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, `expected pass, got: ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('rejects a record that does not declare which colour role it measured', { timeout: powershellTimeoutMs }, () => {
+    // 角色是把"这个令牌该出现在哪个通道"变成可校验结构事实的那一环；缺了它就只能靠人读描述。
+    const record = buildRecord({
+      recordId: 'VC-01-no-role',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    }) as Record<string, any>
+    delete record.measured.role
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a record without a declared colour role must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/role/i)
+  })
+
+  it('rejects a record that declares an unknown colour role', { timeout: powershellTimeoutMs }, () => {
+    // 新种类的测量必须登记成新角色，不得静默塞进已知角色里蒙混过关。
+    const record = buildRecord({
+      recordId: 'VC-01-unknown-role',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'shadow',
+    }) as Record<string, any>
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an unregistered colour role must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/known|已知|shadow/i)
+  })
+
+  it('rejects a package whose manifest omits the WebView2 version source', { timeout: powershellTimeoutMs }, () => {
+    // 版本可能是"驱动拉起的应用不开调试端口时取自预检"的降级读数。来源缺失就无法判断这条版本绑定
+    // 有多强，因此必须显式声明；校验器不许替它猜一个。
+    const record = buildRecord({
+      recordId: 'VC-01-version-source',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    delete manifest.host.webview2.runtimeVersionSource
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a missing runtimeVersionSource must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/runtimeVersionSource/i)
+  })
+
+  it('rejects a package whose manifest declares an unregistered version source', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-01-version-source-unknown',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    manifest.host.webview2.runtimeVersionSource = 'vibes'
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an unregistered version source must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/runtimeVersionSource|vibes/i)
   })
 })
 

@@ -419,3 +419,222 @@ describe('injected browser scripts must parse before they are ever sent', () => 
     expect(parsesAsFunctionBody('return "a\nb";').ok).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------------------------
+// The probe RECORD SHAPE. Parsing is necessary but not sufficient: a payload can be perfectly
+// valid JavaScript and still write a record the contract rejects. These tests run the collector's
+// real probe against a real DOM, so the record is judged by what it actually produces.
+// ---------------------------------------------------------------------------------------------
+
+/** Lift the collector's probe here-string out of the PowerShell source, exactly as it is injected. */
+function extractProbeScript(): string {
+  const lines = readFileSync(join(repoRoot, 'scripts', 'campaign-visual-evidence.ps1'), 'utf8').split('\n')
+  const startMarker = "$probeScript = @'"
+  let start = -1
+  let end = -1
+  for (let index = 0; index < lines.length; index += 1) {
+    if (start === -1 && lines[index].trim() === startMarker) {
+      start = index + 1
+      continue
+    }
+    if (start !== -1 && lines[index].trim() === "'@") {
+      end = index - 1
+      break
+    }
+  }
+  expect(start, 'probe here-string opening not found').toBeGreaterThan(-1)
+  expect(end, 'probe here-string terminator not found').toBeGreaterThan(start)
+  return lines.slice(start, end + 1).join('\n')
+}
+
+interface ProbeRecord {
+  probeId: string
+  missing?: boolean
+  measured?: {
+    role?: string
+    bg?: { declared?: string; rgba8?: number[]; alpha?: number; composited?: boolean; layers?: unknown[] }
+    fg?: { declared?: string; rgba8?: number[] }
+    border?: {
+      rgba8?: Record<string, number[]>
+      declaredComputed?: Record<string, string>
+      rendered?: Record<string, boolean>
+    }
+    outline?: { rgba8?: number[]; declaredComputed?: string; style?: string; widthPx?: number; rendered?: boolean }
+  }
+}
+
+/**
+ * Run the real probe against a minimal page and return its records.
+ *
+ * `virtualConsole` swallows jsdom CSS noise: the probe only reads inline styles here, and jsdom's
+ * "could not parse CSS stylesheet" chatter for attribute selectors is irrelevant to the record.
+ */
+async function runProbeOn(html: string, specs: unknown[]): Promise<ProbeRecord[]> {
+  const { JSDOM, VirtualConsole } = await import('jsdom')
+  const virtualConsole = new VirtualConsole()
+  const pageErrors: string[] = []
+  virtualConsole.on('jsdomError', (error: unknown) => pageErrors.push(String(error)))
+  const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, { virtualConsole, pretendToBeVisual: true })
+  const { window } = dom
+  // The probe waits on `document.fonts.ready` before measuring. jsdom does not implement the Font
+  // Loading API, so that await never settles and the probe would hang instead of recording. Stubbing
+  // it is faithful: the probe already treats font readiness as best-effort (it catches and continues).
+  Object.defineProperty(window.document, 'fonts', { value: { ready: Promise.resolve() }, configurable: true })
+  const globals = globalThis as unknown as Record<string, unknown>
+  const saved = new Map<string, unknown>()
+  for (const name of ['window', 'document', 'getComputedStyle', 'requestAnimationFrame']) {
+    saved.set(name, globals[name])
+    globals[name] = (window as unknown as Record<string, unknown>)[name]
+  }
+  // The probe reads its config off `window`, so it must be set on the jsdom window as well.
+  // `tolerance`/`toleranceBasis` are part of the real config the collector sends (`Invoke-VisualProbe`
+  // builds them from the frozen contract), so the harness must supply them too or every record throws.
+  const config = {
+    specs,
+    accentSweeps: [],
+    tolerance: { contrastRatio: 0.05, colorChannel: 1 },
+    toleranceBasis: 'visual-contract.md',
+  }
+  ;(window as unknown as Record<string, unknown>).__RAIN_VISUAL_PROBE_CONFIG__ = config
+  globals.__RAIN_VISUAL_PROBE_CONFIG__ = config
+  try {
+    const probe = extractProbeScript()
+    // The payload returns 'armed' IMMEDIATELY and finishes measuring in a detached async IIFE, so the
+    // result must be awaited rather than read right after the call returns.
+    // eslint-disable-next-line no-new-func
+    await new Function(probe)()
+    const armedWindow = window as unknown as { __RAIN_VISUAL_PROBE__?: { results?: ProbeRecord[] } }
+    const deadline = Date.now() + 5000
+    while (!armedWindow.__RAIN_VISUAL_PROBE__ && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    if (!armedWindow.__RAIN_VISUAL_PROBE__) {
+      // Surface WHY instead of a bare timeout: the probe finishes in a detached async IIFE whose
+      // rejection would otherwise be invisible here.
+      throw new Error('probe never armed; page errors: ' + JSON.stringify(pageErrors))
+    }
+    const armed = armedWindow.__RAIN_VISUAL_PROBE__
+    expect(armed, 'the probe must arm window.__RAIN_VISUAL_PROBE__').toBeDefined()
+    return armed!.results ?? []
+  } finally {
+    for (const [name, value] of saved) globals[name] = value
+    window.close()
+  }
+}
+
+describe('the collector probe writes records the contract accepts', () => {
+  it('measured.bg.declared is the COMPOSITED opaque colour, not the element raw backgroundColor', async () => {
+    // Contract §3.2: rgba values are compared only after being composited onto an opaque backdrop.
+    // validate-visual-evidence.ps1 enforces this with Assert-DecomposedColour: `declared` must be
+    // opaque AND within ±1/channel of the composited `rgba8`.
+    //
+    // The element below is exactly the shape that broke a real hosted run: the measured element's own
+    // backgroundColor is fully transparent, so `declared` used to be "rgba(0, 0, 0, 0)" while `rgba8`
+    // correctly held the composited ancestor colour -- and the package failed its own self-validation.
+    // Both sides must therefore be the composite.
+    const results = await runProbeOn(
+      '<div id="page" style="background-color: rgb(26, 26, 26)"><span id="label" style="background-color: rgba(0, 0, 0, 0); color: rgb(229, 229, 229)">x</span></div>',
+      [
+        {
+          id: 'anchor-transparent-bg',
+          vc: 'VC-01',
+          criterion: 'backgroundLuminanceBelow0.05',
+          page: 'video-list',
+          selector: '#label',
+          description: 'anchor',
+        },
+      ],
+    )
+    const record = results.find((entry) => entry.probeId === 'anchor-transparent-bg')
+    expect(record, 'the probe must return a record for the spec').toBeDefined()
+    expect(record!.missing, 'the anchor element must be found').toBeFalsy()
+    const bg = record!.measured!.bg!
+    // The composite of a transparent layer over rgb(26,26,26) is rgb(26,26,26).
+    expect(bg.rgba8, 'rgba8 is the composite').toEqual([26, 26, 26])
+    expect(bg.declared, 'declared must be the same opaque composite, not rgba(0, 0, 0, 0)').toBe('rgb(26, 26, 26)')
+    expect(bg.declared, 'declared must not be a transparent value').not.toMatch(/rgba?\([^)]*,\s*0(\.0+)?\s*\)/)
+    expect(bg.alpha, 'declared/rgba8 are opaque').toBe(1)
+    expect(bg.composited).toBe(true)
+    // The raw computed value is kept for traceability, so nothing is lost by the change.
+    expect((bg as unknown as { declaredComputed?: string }).declaredComputed).toBe('rgba(0, 0, 0, 0)')
+  })
+
+  it('records a composited channel for every border side and for the outline', async () => {
+    // A border-token criterion measures the BORDER colour, but the record used to have no border
+    // channel at all: the value sat in computedStyle.borderTopColor as text, so the validator could not
+    // check the declared token against anything and failed the record
+    // (run 36574308748, VC-02-settings-topbar-border: 'declaredToken ... cannot explain this measurement').
+    // Each side and the outline now gets an opaque composited channel.
+    const results = await runProbeOn(
+      '<div id="page" style="background-color: rgb(26, 26, 26)">' +
+        // Long-hand properties on purpose: jsdom does not expand the `border`/`outline` shorthands, and
+        // getComputedStyle would then report empty strings for the very properties under test.
+        '<span id="bordered" style="color: rgb(229, 229, 229); border-top-width: 1px; border-top-style: solid; border-top-color: rgb(110, 112, 116); border-left-width: 1px; border-left-style: solid; border-left-color: rgba(0, 0, 0, 0); outline-color: rgb(74, 158, 255); outline-style: dashed; outline-width: 2px">x</span>' +
+        '</div>',
+      [
+        {
+          id: 'anchor-border',
+          vc: 'VC-02',
+          criterion: 'neutralScaleBorderToken',
+          page: 'video-list',
+          selector: '#bordered',
+          description: 'anchor',
+          nonText: true,
+          colorRole: 'border',
+          declaredToken: '--color-border',
+          declaredTokenValue: '#6e7074',
+        },
+      ],
+    )
+    const record = results.find((entry) => entry.probeId === 'anchor-border')
+    expect(record, 'the probe must return a record for the spec').toBeDefined()
+    const border = record!.measured!.border!
+    expect(border, 'the record must carry a border channel').toBeDefined()
+    expect(Object.keys(border.rgba8 ?? {}).sort(), 'all four sides must be recorded').toEqual([
+      'borderbottom',
+      'borderleft',
+      'borderright',
+      'bordertop',
+    ])
+    // The declared border colour is present and opaque.
+    expect(border.rgba8!.bordertop, 'the top border is measured').toEqual([110, 112, 116])
+    // A transparent side composites onto the backdrop instead of staying rgba(0,0,0,0).
+    expect(border.rgba8!.borderleft, 'a transparent side composites onto the backdrop').toEqual([26, 26, 26])
+    expect(border.declaredComputed!.borderleft, 'the raw computed value is still traceable').toContain('rgba')
+    // Rendering state is explicit rather than implied.
+    expect(border.rendered!.top).toBe(true)
+    expect(border.rendered!.left).toBe(true)
+    // The outline is its own channel, with its style and width.
+    const outline = record!.measured!.outline!
+    expect(outline.rgba8, 'the outline colour is measured').toEqual([74, 158, 255])
+    expect(outline.style, 'the outline style is recorded').toBe('dashed')
+    expect(outline.rendered, 'a rendered outline says so').toBe(true)
+    // The measured ROLE is a structural fact, so the validator can map token -> channel.
+    expect(record!.measured!.role, 'the record declares which colour role it measured').toBe('border')
+  })
+
+  it('marks an unrendered outline as not rendered instead of pretending it was measured', async () => {
+    const results = await runProbeOn(
+      '<div id="page" style="background-color: rgb(26, 26, 26)">' +
+        '<span id="plain" style="color: rgb(229, 229, 229); outline-style: none; outline-color: rgb(74, 158, 255); outline-width: 0px">x</span>' +
+        '</div>',
+      [
+        {
+          id: 'anchor-no-outline',
+          vc: 'VC-03',
+          criterion: 'focusRing2pxDashedFg',
+          page: 'video-list',
+          selector: '#plain',
+          description: 'anchor',
+          colorRole: 'graphic',
+        },
+      ],
+    )
+    const outline = results.find((entry) => entry.probeId === 'anchor-no-outline')!.measured!.outline!
+    // outline-style: none means the colour is not painted; the record must say so rather than let a
+    // "measured" outline colour stand in for a focus ring that was never drawn.
+    expect(outline.rendered, 'an outline that is not painted must say so').toBe(false)
+    expect(outline.style, 'the unrendered style is recorded verbatim').toBe('none')
+    expect(outline.rgba8, 'the channel still exists so the shape is stable').toBeDefined()
+  })
+})
