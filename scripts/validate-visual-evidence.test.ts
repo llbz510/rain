@@ -1572,9 +1572,20 @@ describe('visual evidence channel: files and conventions', () => {
 
   it('refuses to write a package when the WebView2 runtime version cannot be read', () => {
     // 空串不该被写进 manifest 再由校验器含糊拒绝；采集器要当场说清缺的是宿主版本。
+    //
+    // 版本来源本轮**从 UA 改成 DevTools /json/version**：WebView2 的 UA 里 Edg/ 段是**简化版本**
+    // （run 36565255218 实测 UA = "…Edg/153.0.0.0"，而同一进程的 /json/version 给的是
+    // "Edg/153.0.4234.48"）。用 UA 去比对 workflow 钉住的 msedgedriver，会把一个真实匹配
+    // 误报成"宿主版本对不上"——那正是本轮托管运行的失败原因。因此断言跟着改到新来源，
+    // 并要求 DevTools 读不到时**当场失败**（不许把没读到版本的包当有效证据）。
     const collector = readFileSync(collectorScript, 'utf8')
-    expect(collector).toMatch(/Could not read the WebView2 runtime version from the app user agent/)
+    expect(collector, 'the runtime version must come from the DevTools endpoint').toContain('Get-WebView2RuntimeVersion')
+    expect(collector, 'the DevTools version must be parsed from the Browser field').toContain("'Edg/([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)'")
+    expect(collector).toMatch(/Could not read the WebView2 runtime version from the DevTools/)
     expect(collector).toMatch(/more than one WebView2 runtime version/)
+    // UA 只作为交叉参考，且必须留痕——否则以后没人能判断两处版本是否一致。
+    expect(collector, 'the UA Edg token must be recorded as a cross-check, not used for binding').toContain("Add-Fact ('userAgentEdgVersion.' + $plan.mode)")
+    expect(collector, 'the UA token must NOT be the binding source any more').not.toContain('$runtimeVersions += $uaMatch.Groups[1].Value')
   })
 
   it('keeps every contract id addressable exactly once in the coverage contract', () => {

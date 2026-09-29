@@ -904,6 +904,33 @@ function Get-DriverDebugPort([string]$BrowserArgs) {
   }
   return '9222'
 }
+# 应用运行的 WebView2 版本**只能**从 DevTools 的 /json/version 取，不能从 UA 取：
+# WebView2 的 UA 里 Edg/ 段是**简化版本**（实测宿主上 UA = "…Edg/153.0.0.0"），
+# 而 /json/version 的 Browser 段是**完整版本**（同一次运行实测 "Edg/153.0.4234.48"），
+# 后者才与钉住的 msedgedriver 同源、可直接比对。用 UA 比对会把一个真实差异误报成
+# "宿主版本对不上"（本轮 run 36565255218 就是这么红的）。
+# 返回 $null（而不是空串或猜一个值）时由调用方决定怎么办：拿不到就必须显式失败，
+# 绝不能把一个没读到版本的包当成有效证据。
+function Get-WebView2RuntimeVersion([int]$Port) {
+  $url = 'http://127.0.0.1:' + $Port + '/json/version'
+  $deadline = (Get-Date).AddSeconds(20)
+  while ((Get-Date) -lt $deadline) {
+    try {
+      $response = Invoke-RestMethod -Uri $url -TimeoutSec 3 -ErrorAction Stop
+      $browser = [string]$response.Browser
+      $match = [regex]::Match($browser, 'Edg/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)')
+      if ($match.Success) { return $match.Groups[1].Value }
+      if (-not [string]::IsNullOrWhiteSpace($browser)) {
+        # 端点通了但 Browser 段不是预期的 Edg/<x.y.z.w>：如实报出原文，不要静默继续。
+        Add-Fact 'devToolsBrowserUnexpected' $browser
+        return $null
+      }
+    } catch {
+      Start-Sleep -Milliseconds 500
+    }
+  }
+  return $null
+}
 function Stop-VisualEvidenceDriver {
   if ($script:driverProcess -and -not $script:driverProcess.HasExited) {
     Stop-Process -Id $script:driverProcess.Id -Force -ErrorAction SilentlyContinue
@@ -1238,10 +1265,17 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
     $phase = 'session-' + $plan.mode
     $sessionId = New-WebDriverSession $appBinary
     Wait-WebDriverCondition $sessionId 'the video list page' "return Boolean(document.querySelector('[data-testid=""video-list-page""]'));"
-    # 宿主 WebView2 版本：从 UA 的 Edg/<version> 取，并与 workflow 钉住的 msedgedriver 版本核对。
+    # 宿主 WebView2 版本：**以 DevTools 的 /json/version 为准**，并与 workflow 钉住的
+    # msedgedriver 版本核对。UA 只作为交叉参考（它的 Edg/ 段是简化版本，不能用来比对），
+    # 记进 facts 便于事后核对两处是否一致。
     $userAgent = [string](Invoke-WebDriverScript $sessionId 'return navigator.userAgent;')
     $uaMatch = [regex]::Match($userAgent, 'Edg/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)')
-    if ($uaMatch.Success) { $runtimeVersions += $uaMatch.Groups[1].Value }
+    if ($uaMatch.Success) { Add-Fact ('userAgentEdgVersion.' + $plan.mode) $uaMatch.Groups[1].Value }
+    $runtimeVersionThisMode = Get-WebView2RuntimeVersion ([int]$script:driverDebugPort)
+    if ([string]::IsNullOrWhiteSpace($runtimeVersionThisMode)) {
+      throw ('Could not read the WebView2 runtime version from the DevTools endpoint at http://127.0.0.1:' + $script:driverDebugPort + '/json/version (expected a Browser field of the form Edg/<x.y.z.w>); the evidence package must bind to a real host version (§3.4 item 1). UA Edg token: ' + $(if ($uaMatch.Success) { $uaMatch.Groups[1].Value } else { '(none)' }))
+    }
+    $runtimeVersions += $runtimeVersionThisMode
 
     if ($plan.steps -contains 'list') {
       $phase = 'probe-list'
@@ -1359,10 +1393,10 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   $devicePixelRatios = @($viewports | ForEach-Object { [double]$_.devicePixelRatio } | Sort-Object -Unique)
   $runtimeVersionValues = @($runtimeVersions | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
   $expectedDriverVersion = $env:RAIN_E2E_WEBVIEW2_VERSION
-  # 宿主版本必须**真的有值**：UA 里匹配不到 Edg/<x.y.z.w> 时不许把空串写进 manifest
+  # 宿主版本必须**真的有值**：读不到 DevTools 的 Browser 段时不许把空串写进 manifest
   # 再让校验器在最后一步用一句含糊的话拒绝（t2 复核指出的现实风险）。这里当场说清缺什么。
   if ($runtimeVersionValues.Count -eq 0) {
-    throw ('Could not read the WebView2 runtime version from the app user agent (expected an Edg/<x.y.z.w> token); the evidence package must bind to a real host version (§3.4 item 1). Observed UA: ' + ($runtimeVersions -join ' | '))
+    throw 'Could not read the WebView2 runtime version from the DevTools /json/version endpoint (expected a Browser field of the form Edg/<x.y.z.w>); the evidence package must bind to a real host version (§3.4 item 1).'
   }
   if ($runtimeVersionValues.Count -ne 1) {
     throw ('The app reported more than one WebView2 runtime version in this run (' + ($runtimeVersionValues -join ', ') + '); refusing to bind the package to an ambiguous host version.')
@@ -1372,7 +1406,7 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   if (-not [string]::IsNullOrWhiteSpace($expectedDriverVersion)) {
     $driverVersionForManifest = $expectedDriverVersion
     if ($expectedDriverVersion -ne $runtimeVersion) {
-      throw ("WebView2 runtime reported by the app ($runtimeVersion) does not match the pinned msedgedriver ($expectedDriverVersion); the host version would not explain this measurement.")
+      throw ("WebView2 runtime reported by DevTools /json/version ($runtimeVersion) does not match the pinned msedgedriver ($expectedDriverVersion); the host version would not explain this measurement.")
     }
   }
   if ($viewportWidths.Count -ne 1 -or $viewportHeights.Count -ne 1 -or $devicePixelRatios.Count -ne 1) {
