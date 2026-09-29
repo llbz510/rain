@@ -1117,7 +1117,12 @@ describe('controlled release artifact generator', () => {
       installRoot,
       outputRoot: join(root, 'candidate-output'),
     })).rejects.toThrow(expectedError)
-  })
+    // 显式时限来自托管实测：本用例（其中 'a Windows user-profile path' 变体）在 master 的
+    // run 36544735506 以 “Test timed out in 5000ms” 失败（同一 run 中本文件 94089ms）。原因是每个变体
+    // 都必须驱动一次真实的生产生成器（PowerShell 启动 + 生产模块导入 + 真实 PE 校验），属不可避免的重活：
+    // 本机实测各变体约 616ms，而该托管 run 实测 5037ms，负载系数约 8.2×。
+    // 断言语义未变，只把上限标定为 20s（约 4×余量），与 PR #68 的既有处置同一形状。
+  }, 20_000)
 
   it.each([
     ['an environment variant', '.env.production', 'SAFE_FIXTURE=true', /secret/i],
