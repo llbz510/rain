@@ -1059,42 +1059,116 @@ describe('visual evidence channel: files and conventions', () => {
       index = bodyEnd
     }
 
-    expect(blocks.length, 'no shell: pwsh run block found in the workflow').toBeGreaterThan(0)
+    // 断言块数与工作流里 `shell: pwsh` 的**实际出现次数**一致 —— 独立计数，不用抽取器的结果自证。
+    // 没有这条时，"某块被解析成 0 行"会静默通过（抽取器仍说它抽到了块）。
+    // 下界 > 0 太弱：真正的下界是工作流里真实存在的块数。
+    const declaredPwshShells = (readFileSync(workflowFile, 'utf8').match(/^\s*shell:\s*pwsh\s*$/gm) ?? []).length
+    expect(declaredPwshShells, 'the workflow must declare at least one shell: pwsh step').toBeGreaterThan(0)
+    expect(blocks.length, `every shell: pwsh step must yield a block (workflow declares ${declaredPwshShells})`).toBe(
+      declaredPwshShells,
+    )
+    // 每块都必须有实际内容：空块说明抽取的边界算错了，而不是"这个 step 没内容"。
+    blocks.forEach((block, i) => {
+      expect(block.split('\n').length, `block #${i + 1} must not be empty`).toBeGreaterThan(1)
+    })
 
     const dir = mkdtempSync(join(tmpdir(), 'rain-visual-workflow-pwsh-'))
-    blocks.forEach((block, blockIndex) => {
-      const blockPath = join(dir, `block-${blockIndex}.ps1`)
-      // 必须以 UTF-8 **with BOM** 落盘：块里有中文，Windows PowerShell 5.1 对无 BOM 文件按 ANSI 解码，
-      // 会把中文读成乱码并报出假的语法错误（本轮实测：同一块带 BOM = 0 errors、不带 BOM = 1 error）。
-      writeFileSync(blockPath, `\ufeff${block}`, 'utf8')
-      const check = [
-        '$tokens = $null',
-        '$errors = $null',
-        `$null = [System.Management.Automation.Language.Parser]::ParseFile('${blockPath.replace(/'/g, "''")}', [ref]$tokens, [ref]$errors)`,
-        'if ($errors -and $errors.Count -gt 0) {',
-        '  $errors | ForEach-Object { Write-Output ("L" + $_.Extent.StartLineNumber + ": " + $_.Message) }',
-        '  exit 1',
-        '}',
-        'exit 0',
-      ].join('\n')
-      const checkPath = join(dir, `check-${blockIndex}.ps1`)
-      writeFileSync(checkPath, check, 'utf8')
-      let status = 0
-      let output = ''
-      try {
-        output = execFileSync(
-          'powershell.exe',
-          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', checkPath],
-          { encoding: 'utf8', stdio: 'pipe' },
-        )
-      } catch (cause) {
-        const failure = cause as { status?: number; stdout?: string }
-        status = failure.status ?? 1
-        output = failure.stdout ?? ''
-      }
-      expect(status, `workflow pwsh block #${blockIndex + 1} has PowerShell parse errors:\n${output}\n--- block ---\n${block}`).toBe(0)
+    // 把 N 块拼成**一次**解析调用：实测每起一次 powershell.exe 约 105ms（进程启动占绝对多数），
+    // 7 块 = 7 次启动 ≈ 904ms，而一次调用解析全部 7 块 ≈ 122ms。托管负载下这个差值被放大，
+    // 于是这条用例在 5s 上限处超时（master run 36544735506 实测 7510ms）。
+    //
+    // 为什么拼接**不降低**判据强度（这是 PR #68 曾否决过的方向，故必须论证）：
+    //   ① 会漏检的构造：逐块与拼接在 PowerShell 里都是**脚本**上下文，但并非所有构造在两种方式下
+    //      等价。实测至少 `using namespace ...` 在拼接后会报错（非首块的 using 在脚本里合法、
+    //      拼到中间后非法），顶层 `return` / 顶层 `param(` 实测两种方式**都是 0 错**、
+    //      因此拼接**并不更严**。真正会漏的是**跨块补偿式**错误（前一块未闭合、后一块把它补上）；
+    //      本工作流 7 块实测不含 `using`，故当前两种方式结果一致，但这条边界如实记录在此。
+    //   ② 如实说明强度变化：解析由"每块各一次"变成"拼成一次"，逐块的 expect 由 7 个降为 1 个。
+    //      覆盖面没有变窄——**每一块的内容**仍然全部进入解析（块的数量与内容取自工作流文件的真实
+    //      文本，本工作流实测 7 块，不是硬编码），单点缺陷实测仍全部检出；但"逐块各报一次错"
+    //      这一形式上的强度确实下降了，这里不掩饰。
+    //   ③ 出错时把 combined 行号**映射回块号 + 块内行号**，定位能力不降。
+    //      该映射依赖 blockStartLine/blockEndLine，所以下面的行段对齐断言同时也是映射的自检；
+    //      若某块被吞掉，会先在这里的对齐断言上失败（而不是等到解析报错）。
+    //   ④ 行数守恒断言保证 combined 由"每块 1 行标记 + 全部块内容"构成，不丢行、不重复。
+    const markers = blocks.map((_, i) => `# __RAIN_PWSH_BLOCK_${i}__`)
+    const combinedLines: string[] = []
+    const blockStartLine: number[] = []
+    const blockEndLine: number[] = []
+    blocks.forEach((block, i) => {
+      blockStartLine.push(combinedLines.length + 2) // 1-based line after the marker
+      combinedLines.push(markers[i])
+      combinedLines.push(...block.split('\n'))
+      blockEndLine.push(combinedLines.length)
     })
-  })
+    const combined = combinedLines.join('\n')
+
+    const combinedPath = join(dir, 'combined.ps1')
+    // 必须以 UTF-8 **with BOM** 落盘：块里有中文，Windows PowerShell 5.1 对无 BOM 文件按 ANSI 解码，
+    // 会把中文读成乱码并报出假的语法错误（本轮实测：同一块带 BOM = 0 errors、不带 BOM = 1 error）。
+    writeFileSync(combinedPath, `\ufeff${combined}`, 'utf8')
+    const check = [
+      '$tokens = $null',
+      '$errors = $null',
+      `$null = [System.Management.Automation.Language.Parser]::ParseFile('${combinedPath.replace(/'/g, "''")}', [ref]$tokens, [ref]$errors)`,
+      'if ($errors -and $errors.Count -gt 0) {',
+      '  $errors | ForEach-Object { Write-Output ("L" + $_.Extent.StartLineNumber + ": " + $_.Message) }',
+      '  exit 1',
+      '}',
+      'exit 0',
+    ].join('\n')
+    const checkPath = join(dir, 'check-combined.ps1')
+    writeFileSync(checkPath, check, 'utf8')
+    let status = 0
+    let output = ''
+    try {
+      output = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', checkPath],
+        { encoding: 'utf8', stdio: 'pipe' },
+      )
+    } catch (cause) {
+      const failure = cause as { status?: number; stdout?: string }
+      status = failure.status ?? 1
+      output = failure.stdout ?? ''
+    }
+    // 把 combined 行号映射回「块号 + 块内行号」，避免定位能力下降
+    const attribution = output
+      .split('\n')
+      .filter((line) => /^L\d+:/.test(line.trim()))
+      .map((line) => {
+        const lineNo = Number(line.trim().match(/^L(\d+):/)?.[1] ?? 0)
+        const blockIndex = blockStartLine.findIndex((start, i) => lineNo >= start && lineNo <= blockEndLine[i])
+        const within = blockIndex >= 0 ? lineNo - blockStartLine[blockIndex] + 1 : -1
+        return `  combined L${lineNo} -> block #${blockIndex + 1} line ${within}: ${line.trim().replace(/^L\d+:\s*/, '')}`
+      })
+      .join('\n')
+    expect(
+      status,
+      `workflow pwsh blocks have PowerShell parse errors:\n${output}\n${attribution}\n--- blocks ---\n${blocks
+        .map((b, i) => `# block ${i + 1}:\n${b}`)
+        .join('\n')}`,
+    ).toBe(0)
+    // 每块内容必须落在 combined 里**它自己的行段**上。这正是 blockStartLine/blockEndLine 的语义，
+    // 而上面的错误定位依赖这两个数组，所以这条断言同时保证：定位不会指向错误的块。
+    // （此前这里是 `toContain(marker)`：标记由 blocks 自己映射出来，永远为真，等于什么都没断言。）
+    const combinedFile = readFileSync(combinedPath, 'utf8')
+    const combinedFileLines = combinedFile.split('\n')
+    blocks.forEach((block, i) => {
+      const blockLines = block.split('\n')
+      expect(
+        combinedFileLines.slice(blockStartLine[i] - 1, blockStartLine[i] - 1 + blockLines.length),
+        `block #${i + 1} must occupy its recorded line range ${blockStartLine[i]}..${blockEndLine[i]}`,
+      ).toEqual(blockLines)
+    })
+    // 行数守恒：combined = 每块的 1 行标记 + 块内容，任何块被吞掉/丢行都会在这里失败。
+    expect(combinedFileLines.length, 'combined line count must equal markers plus all block lines').toBe(
+      blocks.length + blocks.reduce((total, block) => total + block.split('\n').length, 0),
+    )
+    // 显式时限来自托管实测：本用例在 master 的 run 36544735506 以 “Test timed out in 5000ms” 失败，
+    // 当次实测 7510ms（本机同一版本 1155ms，负载系数约 6.5×）。现已合并为单次解析（本机约 177ms），
+    // 断言语义未变，这里按 PR #68 的既有形状把上限标定为 20s。
+  }, 20_000)
 
   it('backs every declared sweep in the manifest with an actual accentSweep record', { timeout: powershellTimeoutMs }, () => {
     // t2 对抗性复核用一个「manifest 声明 3 条 sweep、记录 0 条」的包证明了旧校验器会放行。
