@@ -119,15 +119,37 @@ function formatDuration(seconds: number): string {
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
-function formatLastStudied(timestamp: number): string {
+const DAY_MS = 1000 * 60 * 60 * 24
+
+/**
+ * 距今超过一年时改用**具体日期**（本地时区，`YYYY-MM-DD`），不再报「N 天前」。
+ *
+ * 用户 2026-09-29 批准。起因是一次真实事故：「N 天前」没有上界，卡片渲染出「20725 天前」，
+ * 而锁定 Harness 的 U52 用例当时用 `getByText(/25/)` 这类宽松匹配，两个元素同时命中，
+ * 用例随日期发作变红（每逢天数含 "25" 都会复发）。
+ * 取本地时区分量而非 UTC：显示给用户看的是本地日期，跨时区的机器上也不会差一天。
+ */
+function formatLocalDate(timestamp: number): string {
+  const date = new Date(timestamp)
+  const year = String(date.getFullYear()).padStart(4, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export function formatLastStudied(timestamp: number): string {
   if (timestamp === 0) return '未学习'
   const now = Date.now()
   const diff = now - timestamp
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+  // 判据与显示用**同一个**向下取整的"已满天数"：
+  // 否则 365.5 天会被判为"未超过 365"、显示却写成「366 天前」，自相矛盾。
+  // 向下取整意味着"满 365 天不满 366 天"仍显示「365 天前」，满 366 天才换日期。
+  const completedDays = Math.floor(diff / DAY_MS)
   const hours = Math.floor(diff / (1000 * 60 * 60))
   const minutes = Math.floor(diff / (1000 * 60))
 
-  if (days > 0) return `${days} 天前`
+  if (completedDays > 365) return formatLocalDate(timestamp)
+  if (completedDays > 0) return `${completedDays} 天前`
   if (hours > 0) return `${hours} 小时前`
   if (minutes > 0) return `${minutes} 分钟前`
   return '刚刚'
