@@ -1314,7 +1314,10 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
       $cardDeadline = (Get-Date).AddSeconds([Math]::Min(30, $MaxSeconds))
       $cardCount = 0
       do {
-        $cardCount = [int](Invoke-WebDriverScript $sessionId 'return document.querySelectorAll("' + '[data-testid^="card-"] button' + '").length;')
+        # 注入脚本里凡是"JS 字符串里再嵌 CSS 属性选择器的双引号"都必须转义：直接用双引号包
+        # `[data-testid^="card-"]` 会让 JS 字符串提前闭合（托管运行实测：probe-study 阶段报
+        # `Invalid or unexpected token`）。这里用 JS 单引号包选择器，避免嵌套同种引号。
+        $cardCount = [int](Invoke-WebDriverScript $sessionId 'return document.querySelectorAll(''[data-testid^="card-"] button'').length;')
         if ($cardCount -ge 1) { break }
         Start-Sleep -Milliseconds 500
       } while ((Get-Date) -lt $cardDeadline)
