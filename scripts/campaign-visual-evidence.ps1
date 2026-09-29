@@ -1190,6 +1190,16 @@ try {
         Add-Fact 'preflightDevToolsEndpoint' ('no response from ' + $devToolsUrl + ' within 30s')
       } else {
         Add-Fact 'preflightDevToolsEndpoint' $devToolsBody
+        # 这个预检是**直接**拉起应用（不经 tauri-driver），因此能读到调试端口。实测发现
+        # tauri-driver 拉起的应用**不开**这个端口（同一 env、同一二进制：run 36570207817 里
+        # 预检读到 Edg/153.0.4234.48，而真正采集时 video-list 会话期间 9222 无响应）。
+        # 于是把它作为"同主机同二进制"的兜底测量保存下来，并在 manifest 里如实标注来源；
+        # 绝不用 UA 那个简化版本（它永远对不上钉住的驱动，见 run 36565255218 的教训）。
+        $preflightMatch = [regex]::Match($devToolsBody, 'Edg/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)')
+        if ($preflightMatch.Success) {
+          $script:preflightRuntimeVersion = $preflightMatch.Groups[1].Value
+          Add-Fact 'preflightWebView2RuntimeVersion' $preflightMatch.Groups[1].Value
+        }
       }
     } catch {
       Add-Fact 'preflightProbeResult' ('probe threw: ' + $_.Exception.Message)
@@ -1215,6 +1225,8 @@ try {
   $allMissing = @()
   $viewports = @()
   $runtimeVersions = @()
+  # 每个模式的读数取自哪里（devtools / preflight-devtools）。写进 manifest，让"版本从哪来"可复核。
+  $runtimeVersionSources = @()
 
   # study-catalog 模式**必须**有非空的 RAIN_E2E_VIDEO_PATH：src-tauri/src/e2e_config.rs 对该 mode 调用
   # required_env("RAIN_E2E_VIDEO_PATH")，空串直接返回 Err（"RAIN_E2E_VIDEO_PATH is required for Rain
@@ -1272,9 +1284,19 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
     $uaMatch = [regex]::Match($userAgent, 'Edg/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)')
     if ($uaMatch.Success) { Add-Fact ('userAgentEdgVersion.' + $plan.mode) $uaMatch.Groups[1].Value }
     $runtimeVersionThisMode = Get-WebView2RuntimeVersion ([int]$script:driverDebugPort)
-    if ([string]::IsNullOrWhiteSpace($runtimeVersionThisMode)) {
-      throw ('Could not read the WebView2 runtime version from the DevTools endpoint at http://127.0.0.1:' + $script:driverDebugPort + '/json/version (expected a Browser field of the form Edg/<x.y.z.w>); the evidence package must bind to a real host version (§3.4 item 1). UA Edg token: ' + $(if ($uaMatch.Success) { $uaMatch.Groups[1].Value } else { '(none)' }))
+    $runtimeVersionSource = 'devtools'
+    if ([string]::IsNullOrWhiteSpace($runtimeVersionThisMode) -and -not [string]::IsNullOrWhiteSpace([string]$script:preflightRuntimeVersion)) {
+      # tauri-driver 拉起的应用不开调试端口时走这里：用预检那次**同主机同二进制**的 DevTools 读数。
+      # 这不是猜：预检就是同一个 rain.exe、同一份 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 下的
+      # 真实测量，只是那个进程不是驱动拉起来的。来源会如实写进 manifest 的 host 段。
+      $runtimeVersionThisMode = [string]$script:preflightRuntimeVersion
+      $runtimeVersionSource = 'preflight-devtools'
+      Add-Fact ('runtimeVersionSource.' + $plan.mode) 'preflight-devtools (the app launched by tauri-driver did not expose the debug port)'
     }
+    if ([string]::IsNullOrWhiteSpace($runtimeVersionThisMode)) {
+      throw ('Could not read the WebView2 runtime version from the DevTools endpoint at http://127.0.0.1:' + $script:driverDebugPort + '/json/version (expected a Browser field of the form Edg/<x.y.z.w>) and the preflight measurement is unavailable too; the evidence package must bind to a real host version (§3.4 item 1). UA Edg token: ' + $(if ($uaMatch.Success) { $uaMatch.Groups[1].Value } else { '(none)' }))
+    }
+    if ($runtimeVersionSources -notcontains $runtimeVersionSource) { $runtimeVersionSources += $runtimeVersionSource }
     $runtimeVersions += $runtimeVersionThisMode
 
     if ($plan.steps -contains 'list') {
@@ -1439,7 +1461,7 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
     }
     host = [ordered]@{
       os = [ordered]@{ caption = [string]$osInfo.Caption; version = [string]$osInfo.Version; build = [string]$osInfo.BuildNumber }
-      webview2 = [ordered]@{ runtimeVersion = $runtimeVersion; driverVersion = $driverVersionForManifest }
+      webview2 = [ordered]@{ runtimeVersion = $runtimeVersion; driverVersion = $driverVersionForManifest; runtimeVersionSource = ($runtimeVersionSources -join ',') }
       app = [ordered]@{ productName = [string]$tauriConfig.productName; productVersion = [string]$tauriConfig.version; binaryPath = 'src-tauri/target/debug/rain.exe' }
       driver = [ordered]@{ tauriDriver = $tauriDriverVersion }
     }
