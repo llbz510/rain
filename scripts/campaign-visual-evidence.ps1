@@ -39,7 +39,8 @@ param(
   [int]$DriverPort = 4460,
   [int]$NativeDriverPort = 4461,
   [int]$MaxSeconds = 90,
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$SkipPreflightProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,8 +49,13 @@ $repoRoot = (Get-Item -LiteralPath (Split-Path -Parent $PSScriptRoot)).FullName
 $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $runRoot = Join-Path $temporaryRoot ("rain-visual-evidence-run-" + [Guid]::NewGuid().ToString('N'))
 $runRoot = (New-Item -ItemType Directory -Path $runRoot).FullName
+# 驱动日志**按模式分文件**。Start-Process 的重定向会覆盖目标文件，三个模式共用同一个名字时
+# 只有最后一个模式的日志尾巴能进 failure.json —— 而这套采集器的全部意义就是留下可诊断的失败现场。
+# 这两个变量是"缺省值"，会被 Start-VisualEvidenceDriver 按模式覆盖成
+# tauri-driver.<mode>[.err].log（文件落在 $runRoot，不在证据包内；失败时按模式取 tail 写进 failure.json）。
 $driverLog = Join-Path $runRoot 'tauri-driver.log'
 $driverErrorLog = Join-Path $runRoot 'tauri-driver.err.log'
+$driverLogDirectory = $runRoot
 $webDriverRequestSeconds = [Math]::Max(30, $MaxSeconds)
 $elementKey = 'element-6066-11e4-a52e-4f735466cecf'
 $probeInterface = 'window.__RAIN_VISUAL_PROBE__'
@@ -488,6 +494,20 @@ function Test-Property($Object, [string]$Name) {
   return ($null -ne $Object.PSObject.Properties[$Name])
 }
 
+function Add-Fact([string]$Name, $Value) {
+  # 关键阶段的实测事实（成功/失败都写进证据包或诊断），避免只能靠残缺日志猜。
+  $script:facts[$Name] = $Value
+}
+
+function Get-DiagnosticTail([string]$Path, [int]$Lines = 60) {
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return '(no log file)' }
+  try {
+    return ((Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction Stop) -join [Environment]::NewLine)
+  } catch {
+    return ('(could not read ' + $Path + ': ' + $_.Exception.Message + ')')
+  }
+}
+
 function Require-Command([string]$Name, [string]$InstallHint) {
   $command = Get-Command $Name -ErrorAction SilentlyContinue
   if (-not $command) { throw "$Name is required for the visual evidence collector. $InstallHint" }
@@ -516,8 +536,24 @@ function Invoke-WebDriver([string]$Method, [string]$Path, $Body = $null) {
 }
 
 function New-WebDriverSession([string]$ApplicationPath) {
-  $response = Invoke-WebDriver 'Post' '/session' @{
+  $body = @{
     capabilities = @{ alwaysMatch = @{ browserName = 'wry'; 'tauri:options' = @{ application = $ApplicationPath } } }
+  }
+  try {
+    $response = Invoke-WebDriver 'Post' '/session' $body
+  } catch {
+    # 把驱动的**完整响应体**留下来：msedgedriver 的真实原因在响应 JSON 里，而 PowerShell 默认只报
+    # "The remote server returned an error: (500) Internal Server Error"。前两次托管运行正是因为
+    # 丢了这段，只能靠猜。
+    $detail = $_.Exception.Message
+    try {
+      if ($_.Exception.Response) {
+        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+        $detail = $reader.ReadToEnd()
+        $reader.Close()
+      }
+    } catch { }
+    throw ('WebDriver session creation failed for ' + $ApplicationPath + ' | response: ' + $detail)
   }
   if ($response.value.sessionId) { return [string]$response.value.sessionId }
   if ($response.sessionId) { return [string]$response.sessionId }
@@ -763,6 +799,154 @@ function Get-StudySpecs {
 
 # VC-03①「不存在品牌强调色」是**全称否定**：单元素颜色测不出来，必须跨元素扫描。
 # 每个入口页面各扫一次（root token 记录另附，见 manifest 的 accentSweeps）。
+# ---- 驱动生命周期（与上面 20 个函数同处**脚本顶层**，绝不能放进主 try 体内）
+# 这是一次真实回归的修复：把这两个函数定义在 try 体内时，$ErrorActionPreference = 'Stop'
+# 会让"定义之前"的任何早期失败（TargetSha 校验 / Require-Command / npm build / tauri build /
+# 二进制检查 / 版本探测）把 finally 里的 Stop-VisualEvidenceDriver 变成终止性的
+# CommandNotFoundException —— finally 被中断，failure.json 不写，真正的首个错误被掩盖。
+# 第六次运行之所以能拿到决定性现场，全靠 failure.json；所以这条必须守住。
+function Start-VisualEvidenceDriver([string]$Mode, [int]$Port, [int]$NativePort, [switch]$ModeRestart) {
+  # $Mode 是 run mode 本身（video-list / study-catalog），不再是拼出来的 phase 串：
+  # 早先版本用 $Phase.Replace('driver-start-','') 反推模式，那让"自证"变得近乎恒真。
+  # 注意：**不**在这里设 $phase —— 函数内的是局部变量，finally 读的是脚本级的那个，
+  # 早先那行赋值是死代码，只会让人误以为失败阶段被它记录了。
+  # 每模式一个端口：Invoke-WebDriver 读的是**脚本级** $DriverPort，所以必须用 $script: 显式回写
+  # （直接写 $DriverPort = $Port 只会建一个局部变量：实测 inside=4461 / after=4460，
+  #  而 Invoke-WebDriver 全程仍打 4460）。
+  $script:DriverPort = $Port
+  # 重启前必须先停掉上一个驱动。否则句柄被覆盖、旧驱动成为孤儿，下一个模式的会话会落到
+  # **仍在运行的第一个驱动**上（带着上一个模式的环境）——正是本 slice 要修的故障的静默形态。
+  # 注意：仅对**第 2 个及以后**的模式生效（$ModeRestart 由调用方按 index>0 传入），第一个模式没有"上一个"。
+  if ($ModeRestart) {
+    Stop-VisualEvidenceDriver
+    Start-Sleep -Milliseconds 250
+  }
+  # 自证式前置条件：必须在 Start-Process **之前**。早先版本放在 Wait-WebDriver 之后，
+  # 那时应用已经被拉起来了，检查再严也拦不住一次错误启动。
+  if ([string]$env:RAIN_E2E_MODE -ne '1') {
+    throw ('RAIN_E2E_MODE must be 1 before the driver starts; the app would not open a debug port. actual=' + [string]$env:RAIN_E2E_MODE)
+  }
+  if ([string]$env:RAIN_E2E_RUN_MODE -ne $Mode) {
+    throw ('RAIN_E2E_RUN_MODE must equal the mode being collected before the driver starts: expected=' + $Mode + ' actual=' + [string]$env:RAIN_E2E_RUN_MODE)
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS)) {
+    throw 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS is empty; the app would not open a debug port and the session could not be created.'
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$env:RAIN_E2E_DB_PATH)) {
+    throw ('RAIN_E2E_DB_PATH must be set before the driver starts. mode=' + $Mode)
+  }
+  # 每模式一份驱动日志，避免 Start-Process 覆盖导致只有最后一个模式有日志可看。
+  $driverLog = Join-Path $driverLogDirectory ('tauri-driver.' + $Mode + '.log')
+  $driverErrorLog = Join-Path $driverLogDirectory ('tauri-driver.' + $Mode + '.err.log')
+  $script:driverLog = $driverLog
+  $script:driverErrorLog = $driverErrorLog
+  # tauri-driver 要求 --port 与 --native-port **必须不同**（本仓五个既有 E2E 全部成对错开：
+  # 4444/4445、4454/4455、4456/4457、4458/4459、4474/4475，可作旁证）。
+  # 早先版本按模式只用 +index 调 --port，于是第 2 个模式拿到 --port 4461 而 --native-port 恒为 4461
+  # —— 两个端口撞成同一个值。
+  # 【实测旁证】第 7 次托管运行正是在这一步失败：phase=driver-start-study-catalog、
+  #   error="tauri-driver did not become ready on time."，而 mode 1（video-list，4460）成功建成会话并
+  #   写出 33 条记录。也就是"两个端口相同 ⇒ 驱动起不来"已有一次真实观测。
+  # 【仍未验证】tauri-driver 对 port == native-port 的**具体**反应（报错文本）本仓无实测，不作断言。
+  # 这里在启动前硬断言，避免这个错误再次以"静默"的形式回来。
+  if ($Port -eq $NativePort) {
+    throw ('tauri-driver requires --port and --native-port to differ, but both are ' + [string]$Port + ' (mode=' + $Mode + ')')
+  }
+  $driverProcess = Start-Process -FilePath $tauriDriver -ArgumentList @(
+    '--port', [string]$Port,
+    '--native-port', [string]$NativePort,
+    '--native-driver', $edgeDriver
+  ) -RedirectStandardOutput $driverLog -RedirectStandardError $driverErrorLog -WindowStyle Hidden -PassThru
+  $script:driverProcess = $driverProcess
+  # 记下本次启动用的 --port，供兜底收尸按端口精确匹配（绝不按镜像名误杀并发 E2E）。
+  if ($script:driverPorts -notcontains $Port) { $script:driverPorts += $Port }
+  # 调试端口来自实际下发的 browser args，而不是某个硬编码常量：解析出来并记成事实，
+  # 让"失败时探测哪个端口"与"实际下发的参数"同源（改端口时不会静默失效）。
+  $driverDebugPort = Get-DriverDebugPort ([string]$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS)
+  $script:driverDebugPort = $driverDebugPort
+  Add-Fact 'driverDebugPort' $driverDebugPort
+  Wait-WebDriver $Port
+  if ($driverProcess.HasExited) {
+    throw ('tauri-driver exited during startup with code ' + $driverProcess.ExitCode + '; see the driver log tail in this package')
+  }
+  # 这几个环境变量就是"驱动为什么拉不起会话"的第一现场：应用只有同时看到
+  # RAIN_E2E_MODE=1 / RAIN_E2E_RUN_MODE 属于三个桌面模式 / browser args 非空，才会把参数交给
+  # WebView2（src-tauri/src/e2e_config.rs:127-143）。第六次运行失败时 rainE2eRunModeEnv 读出空串。
+  Add-Fact 'driverPhase' $phase
+  Add-Fact 'driverRunMode' $Mode
+  Add-Fact 'driverPort' $Port
+  $script:driverLogFileByMode[$Mode] = $driverLog
+  $script:driverLogTails[$Mode] = (Get-DiagnosticTail $driverLog)
+  $script:driverErrorLogTails[$Mode] = (Get-DiagnosticTail $driverErrorLog)
+  # 两种**已实际观测到**的会话失败形态必须能区分，否则下一次失败又要靠猜：
+  #   (a) 第 1 次运行（run 36428443410）："session not created: DevToolsActivePort file doesn't exist"
+  #       —— 当时驱动阶段的参数**带** --remote-debugging-port=9222。
+  #   (b) 第 6 次运行（run 36513639206）：响应体为空、60s 无响应
+  #       —— 当时驱动阶段的参数**不带**端口（本次修复已恢复为带端口）。
+  # 这里把"应用侧到底有没有真的把调试端口开起来"变成一条独立可读的事实：会话失败时探测
+  # 127.0.0.1:9222 的 /json/version。读到 → 端口是开的，故障在驱动/会话层；读不到 → 端口没开。
+  # 注意：这只在会话失败路径上探测，正常路径不引入额外假设。
+  Add-Fact 'driverProcessId' $driverProcess.Id
+  Add-Fact 'driverAliveAfterReady' (-not $driverProcess.HasExited)
+  Add-Fact 'webviewArgsEnv' ([string]$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS)
+  Add-Fact 'rainE2eModeEnv' ([string]$env:RAIN_E2E_MODE)
+  Add-Fact 'rainE2eRunModeEnv' ([string]$env:RAIN_E2E_RUN_MODE)
+  Add-Fact 'rainE2eDbPathEnv' ([string]$env:RAIN_E2E_DB_PATH)
+  Add-Fact 'rainE2eVideoPathEnv' ([string]$env:RAIN_E2E_VIDEO_PATH)
+}
+# 从 driver 阶段的 browser args 里取 --remote-debugging-port；取不到就退回 9222。
+# 注意下面那个反斜杠是必需的（(\d+) 而不是 (d+)）：少一个反斜杠会让它匹配不到任何数字、
+# 于是**永远**返回 9222，"从实际下发参数解析端口"这个性质就完全没实现。本仓实测踩过这个错。
+function Get-DriverDebugPort([string]$BrowserArgs) {
+  if (-not [string]::IsNullOrWhiteSpace($BrowserArgs)) {
+    $match = [regex]::Match($BrowserArgs, '--remote-debugging-port=(\d+)')
+    if ($match.Success) { return $match.Groups[1].Value }
+  }
+  return '9222'
+}
+function Stop-VisualEvidenceDriver {
+  if ($script:driverProcess -and -not $script:driverProcess.HasExited) {
+    Stop-Process -Id $script:driverProcess.Id -Force -ErrorAction SilentlyContinue
+    # WaitForExit 的返回值不能丢：超时意味着进程仍在，句柄一旦置空就再也收不回来（静默泄漏）。
+    $exited = $script:driverProcess.WaitForExit(5000)
+    if (-not $exited) { Add-Fact 'driverStopTimeout' 'tauri-driver did not exit within 5s after Stop-Process' }
+  }
+  $script:driverProcess = $null
+  # 兜底：若驱动在句柄被记录**之前**就异常退出（例如 Start-Process 之后立刻失败），上面的分支
+  # 覆盖不到它，那个进程会一直活着并占着端口。
+  #
+  # 收尸**只针对本次运行自己分配的那些端口**（按 Win32_Process 的命令行匹配 --port）。
+  # 早先这里按**进程映像名**一概清理（而不是按端口匹配）：那会杀掉**同机并发**的兄弟 E2E 的驱动
+  # （video-list / study-catalog / runtime-settings 都启动 tauri-driver），而本脚本开头恰恰声明
+  # 端口与既有 E2E 错开就是为了便于并行——语义自相矛盾。按端口匹配才不越界。
+  # 注意：msedgedriver 由 tauri-driver 管理，本兜底不单独处理它。
+  try {
+    $ownedPorts = @($script:driverPorts)
+    if ($ownedPorts.Count -eq 0) {
+      Add-Fact 'driverLeftoverReaped' 'skipped: this run allocated no driver port'
+    } else {
+      $leftover = @(Get-CimInstance Win32_Process -Filter "Name = 'tauri-driver.exe'" -ErrorAction SilentlyContinue | Where-Object {
+        $commandLine = [string]$_.CommandLine
+        $hit = $false
+        foreach ($ownedPort in $ownedPorts) {
+                    # 词边界是必需的：兄弟进程命令行里的 '--native-port 4460' **包含**子串 '--port 4460'，
+          # 没有边界就会把别人的驱动误判成自己的并杀掉。
+          if ($commandLine -match ('(?<![\w-])--port\s+' + [string]$ownedPort + '(?=\s|$)')) { $hit = $true; break }
+        }
+        $hit
+      })
+      if ($leftover.Count -gt 0) {
+        Add-Fact 'driverLeftoverReaped' ($leftover.Count.ToString() + ' tauri-driver process(es) on this run''s ports were still alive and got reaped')
+        $leftover | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      } else {
+        Add-Fact 'driverLeftoverReaped' 'none'
+      }
+    }
+  } catch {
+    Add-Fact 'driverLeftoverReapError' $_.Exception.Message
+  }
+}
+
 function Get-AccentSweeps {
   return @(
     @{ id = 'VC-03-list-accent-sweep'; vc = 'VC-03'; criterion = 'noBrandAccentAnywhere'; page = 'video-list'; selectorScope = '[data-testid="video-list-page"]'; accentToken = '#4a9eff'; description = 'VC-03① 视频列表页全页扫描：任何被渲染的底色/边框/轮廓/文字都不得等于 #4a9eff（±1/通道）' },
@@ -773,11 +957,23 @@ function Get-AccentSweeps {
 
 # ---------------------------------------------------------------- 主流程
 $tauriDriver = $null
-$driverProcess = $null
+$script:driverProcess = $null
+$script:driverLog = $null
+$script:driverErrorLog = $null
+# 本次运行自己分配的驱动端口（每模式一个），以及从 browser args 解析出的调试端口。
+$script:driverPorts = @()
+$script:driverDebugPort = '9222'
+# 每模式驱动日志的 tail，failure.json 会按模式全部带上（早先只留最后一个模式）。
+$script:driverLogTails = [ordered]@{}
+$script:driverErrorLogTails = [ordered]@{}
+$script:driverLogFileByMode = [ordered]@{}
 $sessionId = $null
 $phase = 'bootstrap'
 $primaryError = $null
 $packageRoot = $null
+$appBinary = $null
+$evidenceId = $null
+$script:facts = [ordered]@{}
 
 try {
   if ([string]::IsNullOrWhiteSpace($TargetSha)) {
@@ -803,10 +999,23 @@ try {
   $edgeDriver = Require-Command 'msedgedriver' 'Install a Microsoft Edge driver matching the local WebView2 runtime.'
   $npmCmd = Require-Command 'npm.cmd' 'Install Node.js 18 or newer.'
 
+  # RAIN_E2E_MODE 必须在**启动 tauri-driver 之前**设置：tauri-driver 会把它自己的环境传给被拉起的
+  # rain.exe，而应用只有同时看到 RAIN_E2E_MODE=1 + RAIN_E2E_RUN_MODE∈{三个桌面模式} +
+  # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 才会给真实窗口加上远程调试参数
+  # （src-tauri/src/e2e_config.rs:127-143 read_runtime_settings_webview_args_from_env）。
+  # 首次托管运行（run 36428443410）就是因为在 Start-Process 之后才设这个变量。
+  # 【注意不要过度解读】该次运行报的是 "session not created: DevToolsActivePort file doesn't exist"，
+  # 但**不能**据此断言"变量顺序 ⇒ 端口打不开"：同一次运行驱动阶段的参数**是带 9222 的**，
+  # 而第 5 次运行在 RUN_MODE 同样为空的情况下，预检照样读到了 9222（详见下面 driver-start 处的更正）。
+  # 顺序是必修项（应用靠它决定模式与 DB 路径），但它**不是**端口开关。
+  # 既有 run-study-catalog-e2e.ps1 是在 try 开头就设好这个变量，这里对齐它。
+  $env:RAIN_E2E_MODE = '1'
+  $env:RAIN_E2E_BUILD = '1'
+  if ($env:RAIN_E2E_MODE -ne '1') { throw 'RAIN_E2E_MODE was not set to 1 before launching the app.' }
+
   $appBinary = Join-Path $repoRoot 'src-tauri\target\debug\rain.exe'
   if (-not $SkipBuild) {
     $phase = 'build'
-    $env:RAIN_E2E_BUILD = '1'
     & $npmCmd run build
     if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
     $env:LIBCLANG_PATH = if ($env:LIBCLANG_PATH) { $env:LIBCLANG_PATH } else { 'C:\Program Files\LLVM\bin' }
@@ -816,22 +1025,164 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Tauri debug build failed.' }
   }
   if (-not (Test-Path -LiteralPath $appBinary)) { throw "Rain debug binary not found: $appBinary" }
+  # 二进制事实只记一次（早先放在按模式启动的 helper 里，每个模式重复 Get-Item 并覆盖同名事实）。
+  Add-Fact 'appBinary' $appBinary
+  Add-Fact 'appBinaryBytes' (Get-Item -LiteralPath $appBinary).Length
 
   # 宿主信息（§3.4 第 1 项）。
   $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
   $tauriConfig = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $repoRoot 'src-tauri\tauri.conf.json'), [System.Text.UTF8Encoding]::new($false)))
+  # tauri-driver 2.0.6 只接受 --port/--native-port/--native-host/--native-driver，**没有 --version**
+  # （首次托管运行实测：报 "Error: unused arguments left: [--version]"）。所以版本从 cargo 的安装清单读。
   $tauriDriverVersion = 'unavailable'
-  try { $tauriDriverVersion = ((& $tauriDriver --version | Out-String).Trim()) } catch { }
+  try {
+    $installList = (& cargo install --list | Out-String)
+    $match = [regex]::Match($installList, '(?m)^tauri-driver v([0-9][^\s:]*):')
+    if ($match.Success) { $tauriDriverVersion = 'tauri-driver ' + $match.Groups[1].Value }
+  } catch { }
+  if ($tauriDriverVersion -eq 'unavailable') { Write-Warning 'could not determine the tauri-driver version from cargo install --list' }
 
   $phase = 'driver-start'
-  $driverProcess = Start-Process -FilePath $tauriDriver -ArgumentList @(
-    '--port', [string]$DriverPort,
-    '--native-port', [string]$NativeDriverPort,
-    '--native-driver', $edgeDriver
-  ) -RedirectStandardOutput $driverLog -RedirectStandardError $driverErrorLog -WindowStyle Hidden -PassThru
-  Wait-WebDriver $DriverPort
+  # ---- 为什么驱动要"每模式各自启动"，以及本文件此前两处结论的更正
+  #
+  # 【仍然成立・必修】驱动进程只在**启动那一刻**快照继承环境，再原样传给被拉起的 rain.exe。
+  # 而 RAIN_E2E_RUN_MODE / RAIN_E2E_DB_PATH / RAIN_E2E_VIDEO_PATH 原先写在**每模式循环内部**，
+  # 即在 Start-Process **之后**才赋值，于是应用看到的 RUN_MODE 是空串
+  # （第六次运行 run 36513639206 的 failure.json 实测：observed.rainE2eRunModeEnv = ""）。
+  # 应用侧 src-tauri/src/e2e_config.rs:131-138 要求**同时**满足三个条件才把 browser args 交给 WebView2：
+  #   RAIN_E2E_MODE == "1"
+  #   && RAIN_E2E_RUN_MODE ∈ {"runtime-settings","video-list","study-catalog"}
+  #   && WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 非空
+  # RUN_MODE 为空时该函数直接返回 None，lib.rs:35 便不改写 window.additional_browser_args。
+  #
+  # 【未验证】该分支**之后**应用会怎样（进哪个模式、DB 路径取什么、界面是否可渲染）本脚本没有实测
+  # 证据，因此**不得**据此断言"这本身就足以让采集失败"——那只是推断，不是结论。
+  # 已确证的只有两件：① 应用确实收不到 RUN_MODE（第六次运行 failure.json 实测为空串）；
+  # ② 应用需要它来决定模式与 DB 路径（源码 e2e_config.rs 可读）。
+  # 修法：遍历模式时先把环境赋好，再按模式启动驱动。
+  #
+  # 【已撤回】此前这里写着"RUN_MODE 为空 ⇒ WebView2 不开调试端口 ⇒ DevToolsActivePort 不存在"。
+  # 那是**过度解读**，现予撤回。依据如下：
+  #   (a) 出错的那一次（第六次 run 36513639206）的错误**不是** DevToolsActivePort，而是响应体为空、
+  #       60s 无响应（该 run 的 job log 实测：DevToolsActivePort 与 session not created 各出现 0 次）。
+  #       用第 1 次运行的 DevToolsActivePort 去解释第 6 次的失败，属于张冠李戴，已删除该引用。
+  #   (b) 机理上不成立：WebView2 **自己**读 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS，不经过应用的
+  #       lib.rs:35；lib.rs:35 只是在 RUN_MODE 合法时**改写** additional_browser_args，
+  #       缺 RUN_MODE 时保持 tauri.conf 缺省，并不阻断 WebView2 读该环境变量
+  #       （WebView2 独立读取该变量属其既有行为）。
+  # 【上一个版本在这里引用了第五次运行的预检作为反证，那是**混淆进程**的假证据，已更正】
+  #   第五次运行的预检**自己显式设了** RAIN_E2E_RUN_MODE='video-list'（见下面预检段的 $probeEnv），
+  #   它是该次运行里唯一 RUN_MODE 非空的进程，因此**不能**用它证明"RUN_MODE 为空时端口照样开"。
+  # 结论不变：RUN_MODE 顺序是必修项（模式与 DB 路径），但**不是**端口开关。
+  #
+  # 【已推翻】第五次运行据此把驱动阶段参数改成"不带固定端口"的版本，那个结论是错的：
+  # 去掉 --remote-debugging-port 后，应用拿到的是 "--enable-features=... --disable-gpu ..."，
+  # 其中没有任何东西会打开调试端口（应用自己从不添加端口），会话同样拉不起来。
+  # 端口选择权不在驱动手里：应用侧怎么配，WebView2 就怎么开，msedgedriver 按该端口接入。
+  # 驱动阶段因此沿用 workflow 级的值（与三个已通过的桌面 E2E 同源，见 video-list-desktop-e2e.yml:38 /
+  # study-catalog:43 / runtime:23），只在缺失时退回同一份带端口缺省值。
+  #
+  # 【仍未解释・不得声称已解决】第一次运行 run 36428443410 用的**正是**这份带端口配置，而它失败了
+  # （"session not created: DevToolsActivePort file doesn't exist"，见 job log 原文）。
+  # "同样的配置这次为何能过"目前无法解释，因此本文件**不声称**恢复端口必然能通过。
+  # 可做的只有把失败形态变成可判定的：会话失败时探测 127.0.0.1:9222/json/version，
+  # 结果写进 failure.json 的 failureTimeDevToolsEndpoint（见下面 finally）。
+  $driverPhaseWebViewArgs = [string]$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+  if ([string]::IsNullOrWhiteSpace($driverPhaseWebViewArgs)) {
+    $driverPhaseWebViewArgs = '--remote-debugging-port=9222 --enable-features=msEdgeDevToolsWdpRemoteDebugging --disable-gpu --no-sandbox --disable-dev-shm-usage'
+    Write-Warning 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS was empty; falling back to the value used by the passing desktop E2E suites.'
+    $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $driverPhaseWebViewArgs
+  }
+  Add-Fact 'driverPhaseWebViewArgs' $driverPhaseWebViewArgs
+  Write-Output ('driver phase WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=' + $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS)
+  # 驱动**不在这里**启动：每个 run mode 需要各自的 RAIN_E2E_RUN_MODE / DB_PATH / VIDEO_PATH，
+  # 而驱动只在启动那一刻继承环境。见下面遍历 $runPlan 处的 Start-VisualEvidenceDriver。
 
-  $env:RAIN_E2E_MODE = '1'
+  # 预检：用**与 WebDriver 启动应用时相同的环境**直接拉起一次 rain.exe，确认它自己会照 e2e_config.rs
+  # 的规则给 WebView2 传远程调试参数（也就是会生成 DevToolsActivePort）。
+  # 这一步把"应用没进 E2E 模式"与"驱动/会话层的问题"分开——前两次托管运行正是因为没做这一步，
+  # 只能在 60s 超时后看到一句 DevToolsActivePort，无从判断是哪一侧的错。
+  if (-not $SkipPreflightProbe) {
+    $phase = 'preflight-app-debug-port'
+    $probeProcess = $null
+    $savedEnv = @{}
+    try {
+      # 关键：**不设置 WEBVIEW2_USER_DATA_FOLDER** —— 那会让这次启动与 WebDriver 的启动方式不可比
+      # （WebView2 会在全新目录里工作，DevToolsActivePort 落在别处）。这里改为在 PATH 前面放一个
+      # "影子 msedgedriver"：WebView2 只要真的收到 --remote-debugging-port，就会尝试启动名为
+      # msedgedriver 的浏览器驱动；那份包装脚本会把收到的参数记下来，从而证明"应用有没有真的把
+      # 调试参数传给 WebView2"，同时不启动真实驱动。
+      $shadowDir = Join-Path $runRoot 'preflight-shadow'
+      New-Item -ItemType Directory -Path $shadowDir -Force | Out-Null
+      $capturePath = Join-Path $runRoot 'preflight-webview2-args.txt'
+      $shadowCmd = Join-Path $shadowDir 'msedgedriver.cmd'
+      $shadowBody = '@echo off' + [Environment]::NewLine + 'echo %* > "' + $capturePath + '"' + [Environment]::NewLine
+      [System.IO.File]::WriteAllText($shadowCmd, $shadowBody, [System.Text.ASCIIEncoding]::new())
+      $probeEnv = @{
+        RAIN_E2E_MODE = '1'
+        RAIN_E2E_RUN_MODE = 'video-list'
+        RAIN_E2E_DB_PATH = (Join-Path $runRoot 'preflight.db')
+        WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = [string]$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+        PATH = $shadowDir + [System.IO.Path]::PathSeparator + $env:PATH
+      }
+      foreach ($key in $probeEnv.Keys) {
+        $savedEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+        [Environment]::SetEnvironmentVariable($key, $probeEnv[$key], 'Process')
+      }
+      $probeProcess = Start-Process -FilePath $appBinary -PassThru -WindowStyle Hidden
+      $deadline = (Get-Date).AddSeconds(45)
+      while (-not (Test-Path -LiteralPath $capturePath) -and (Get-Date) -lt $deadline -and -not $probeProcess.HasExited) {
+        Start-Sleep -Milliseconds 250
+      }
+      if (-not $probeProcess.HasExited) {
+        Add-Fact 'preflightProbeResult' 'app still running after 45s'
+      } else {
+        Add-Fact 'preflightProbeResult' ('app exited early with code ' + $probeProcess.ExitCode)
+      }
+      if (Test-Path -LiteralPath $capturePath) {
+        Add-Fact 'preflightWebView2ArgsSeenByDriver' ((Get-Content -LiteralPath $capturePath -Raw).Trim())
+      } else {
+        Add-Fact 'preflightWebView2ArgsSeenByDriver' '(no msedgedriver launch observed within 45s — 该项依赖"影子驱动"能否被找到，不足为凭)'
+      }
+      Add-Fact 'preflightWebView2ArgsExpected' $probeEnv['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS']
+      # 最直接的判据（不依赖任何"影子驱动"假设）：应用若真的按 e2e_config.rs 的规则把
+      # --remote-debugging-port=9222 交给了 WebView2，那么这个端口的 /json/version 应当可读。
+      # 读到 → 应用侧接线是通的，故障在驱动/会话层；读不到 → 应用没把参数交到 WebView2。
+      $devToolsUrl = 'http://127.0.0.1:9222/json/version'
+      $devToolsBody = ''
+      $devToolsDeadline = (Get-Date).AddSeconds(30)
+      while ((Get-Date) -lt $devToolsDeadline) {
+        try {
+          $devToolsBody = [string](Invoke-RestMethod -Uri $devToolsUrl -TimeoutSec 3 -ErrorAction Stop | ConvertTo-Json -Compress)
+          break
+        } catch {
+          Start-Sleep -Milliseconds 500
+        }
+      }
+      if ([string]::IsNullOrWhiteSpace($devToolsBody)) {
+        Add-Fact 'preflightDevToolsEndpoint' ('no response from ' + $devToolsUrl + ' within 30s')
+      } else {
+        Add-Fact 'preflightDevToolsEndpoint' $devToolsBody
+      }
+    } catch {
+      Add-Fact 'preflightProbeResult' ('probe threw: ' + $_.Exception.Message)
+    } finally {
+      if ($probeProcess -and -not $probeProcess.HasExited) {
+        Stop-Process -Id $probeProcess.Id -Force -ErrorAction SilentlyContinue
+        $probeProcess.WaitForExit(5000) | Out-Null
+      }
+      foreach ($key in $savedEnv.Keys) {
+        [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process')
+      }
+      # 预检把 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 换成了带端口的那份，上面按 $savedEnv 快照恢复即可。
+      # （早先这里还有一句显式重设，与 $savedEnv 恢复重复：$probeEnv 取的就是同一个值。）
+    }
+    Write-Output ('preflight: result=' + $script:facts['preflightProbeResult'])
+    Write-Output ('preflight: webview2 args seen by driver=' + $script:facts['preflightWebView2ArgsSeenByDriver'])
+  }
+
+  # 注意：RAIN_E2E_MODE 已在上面设好；而 RAIN_E2E_RUN_MODE / RAIN_E2E_DB_PATH / RAIN_E2E_VIDEO_PATH
+  # 是**每模式不同**的，必须在遍历里、每次启动驱动**之前**赋值（见下面 foreach），不能在这里设死。
   $screenshotNames = @()
   $allRecords = @()
   $allMissing = @()
@@ -866,16 +1217,25 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   )
 
   foreach ($plan in $runPlan) {
-    $phase = 'session-' + $plan.mode
+    $phase = 'driver-start-' + $plan.mode
     $databasePath = Join-Path $runRoot ('rain-visual-' + $plan.mode + '.db')
-    $env:RAIN_E2E_RUN_MODE = $plan.mode
-    $env:RAIN_E2E_DB_PATH = $databasePath
+    # 顺序至关重要：这三行必须在 Start-VisualEvidenceDriver **之前**。驱动只在启动那一刻继承环境，
+    # 再原样传给被拉起的 rain.exe；写在 Start-Process 之后，应用看到的就是空 RUN_MODE（第六次运行实测）。
     # 只有 study-catalog 需要真实（合成）媒体路径；video-list 模式不读该变量，置空以免误用。
     if ($plan.mode -eq 'study-catalog') {
       $env:RAIN_E2E_VIDEO_PATH = $studyMediaPath
     } else {
       $env:RAIN_E2E_VIDEO_PATH = ''
     }
+    # 每模式一对**互不相同**的端口：--port 与 --native-port 必须不同（tauri-driver 的硬要求），
+    # 且不同模式之间也各自独立，避免停掉上一个驱动后复用同端口撞上 TIME_WAIT。
+    $runModeIndex = [array]::IndexOf($runPlan, $plan)
+    $modeDriverPort = $DriverPort + $runModeIndex
+    $modeNativeDriverPort = $NativeDriverPort + $runModeIndex
+    $env:RAIN_E2E_RUN_MODE = $plan.mode
+    $env:RAIN_E2E_DB_PATH = $databasePath
+    Start-VisualEvidenceDriver -Mode $plan.mode -Port $modeDriverPort -NativePort $modeNativeDriverPort -ModeRestart:($runModeIndex -gt 0)
+    $phase = 'session-' + $plan.mode
     $sessionId = New-WebDriverSession $appBinary
     Wait-WebDriverCondition $sessionId 'the video list page' "return Boolean(document.querySelector('[data-testid=""video-list-page""]'));"
     # 宿主 WebView2 版本：从 UA 的 Edg/<version> 取，并与 workflow 钉住的 msedgedriver 版本核对。
@@ -995,15 +1355,25 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   $viewportHeights = @($viewports | ForEach-Object { [double]$_.height } | Sort-Object -Unique)
   $devicePixelRatios = @($viewports | ForEach-Object { [double]$_.devicePixelRatio } | Sort-Object -Unique)
   $runtimeVersionValues = @($runtimeVersions | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-  $runtimeVersion = if ($runtimeVersionValues.Count -eq 1) { [string]$runtimeVersionValues[0] } else { ($runtimeVersionValues -join ',') }
   $expectedDriverVersion = $env:RAIN_E2E_WEBVIEW2_VERSION
-  $driverVersionForManifest = $runtimeVersion
-  if (-not [string]::IsNullOrWhiteSpace($expectedDriverVersion)) { $driverVersionForManifest = $expectedDriverVersion }
-  if ($runtimeVersionValues.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace($expectedDriverVersion) -and $expectedDriverVersion -ne $runtimeVersion) {
-    throw ("WebView2 runtime reported by the app ($runtimeVersion) does not match the pinned msedgedriver ($expectedDriverVersion); the host version would not explain this measurement.")
+  # 宿主版本必须**真的有值**：UA 里匹配不到 Edg/<x.y.z.w> 时不许把空串写进 manifest
+  # 再让校验器在最后一步用一句含糊的话拒绝（t2 复核指出的现实风险）。这里当场说清缺什么。
+  if ($runtimeVersionValues.Count -eq 0) {
+    throw ('Could not read the WebView2 runtime version from the app user agent (expected an Edg/<x.y.z.w> token); the evidence package must bind to a real host version (§3.4 item 1). Observed UA: ' + ($runtimeVersions -join ' | '))
   }
-  if ($viewportWidths.Count -ne 1 -or $viewportHeights.Count -ne 1) {
-    throw ("Sampled viewports are not identical within this run (widths=$($viewportWidths -join ',') heights=$($viewportHeights -join ',')); the evidence package must bind to one viewport per §3.4.")
+  if ($runtimeVersionValues.Count -ne 1) {
+    throw ('The app reported more than one WebView2 runtime version in this run (' + ($runtimeVersionValues -join ', ') + '); refusing to bind the package to an ambiguous host version.')
+  }
+  $runtimeVersion = [string]$runtimeVersionValues[0]
+  $driverVersionForManifest = $runtimeVersion
+  if (-not [string]::IsNullOrWhiteSpace($expectedDriverVersion)) {
+    $driverVersionForManifest = $expectedDriverVersion
+    if ($expectedDriverVersion -ne $runtimeVersion) {
+      throw ("WebView2 runtime reported by the app ($runtimeVersion) does not match the pinned msedgedriver ($expectedDriverVersion); the host version would not explain this measurement.")
+    }
+  }
+  if ($viewportWidths.Count -ne 1 -or $viewportHeights.Count -ne 1 -or $devicePixelRatios.Count -ne 1) {
+    throw ("Sampled viewports are not identical within this run (widths=$($viewportWidths -join ',') heights=$($viewportHeights -join ',') dpr=$($devicePixelRatios -join ',')); the evidence package must bind to one viewport per §3.4.")
   }
 
   $phase = 'manifest'
@@ -1078,13 +1448,79 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
 } catch {
   $primaryError = $_
 } finally {
-  Close-WebDriverSession $sessionId
-  if ($driverProcess -and -not $driverProcess.HasExited) {
-    Stop-Process -Id $driverProcess.Id -Force -ErrorAction SilentlyContinue
-    $driverProcess.WaitForExit(5000) | Out-Null
+  # 会话失败时补一条独立判据：应用有没有真的把调试端口开起来。这是把"响应体为空"与
+  # "DevToolsActivePort 不存在"两种形态区分开的唯一现成手段（两者在失败日志里长得不一样，
+  # 但只有这一条能说明端口到底开没开）。
+  if ($primaryError) {
+    try {
+      # 端口取自实际下发的 browser args（见 Start-VisualEvidenceDriver 里的 Get-DriverDebugPort），
+      # 不硬编码：否则改端口后这条判据会静默变成恒假。
+      $dtPort = [string]$script:driverDebugPort
+      $dtUrl = 'http://127.0.0.1:' + $dtPort + '/json/version'
+      $dtProbe = [string](Invoke-RestMethod -Uri $dtUrl -TimeoutSec 3 -ErrorAction Stop | ConvertTo-Json -Compress)
+      Add-Fact 'failureTimeDevToolsEndpoint' $dtProbe
+    } catch {
+      Add-Fact 'failureTimeDevToolsEndpoint' ('no DevTools endpoint on 127.0.0.1:' + [string]$script:driverDebugPort + ' at failure time')
+    }
   }
+  Close-WebDriverSession $sessionId
+  Stop-VisualEvidenceDriver
   if ($primaryError) {
     Write-Warning ("visual evidence collection failed in phase '" + $phase + "': " + $primaryError.Exception.Message)
+    # 失败诊断必须写进**证据包目录**：只有那里会被 workflow 上传，远端才能看到失败现场。
+    # 前两次托管运行都因为没有这一步，只能靠 job 日志里残缺的行来猜（本函数是那次教训的产物）。
+    try {
+      if ($null -ne $packageRoot -and (Test-Path -LiteralPath $packageRoot)) {
+        # 每个模式一个日志文件（见 Start-VisualEvidenceDriver），所以可以逐模式取回 tail。
+        # 文件不存在时 Get-DiagnosticTail 会返回 '<no log file>'，不假装有内容。
+        $perModeLogTails = [ordered]@{}
+        $perModeErrorLogTails = [ordered]@{}
+        foreach ($modeName in @($script:driverLogFileByMode.Keys)) {
+          $perModeLogTails[$modeName] = (Get-DiagnosticTail ([string]$script:driverLogFileByMode[$modeName]))
+          $perModeErrorLogTails[$modeName] = (Get-DiagnosticTail ([string]$script:driverLogFileByMode[$modeName]).Replace('.log', '.err.log'))
+        }
+        $diagnostics = [ordered]@{
+          status = 'failed'
+          phase = $phase
+          error = [string]$primaryError.Exception.Message
+          errorPosition = [string]$primaryError.InvocationInfo.PositionMessage
+          targetSha = $TargetSha
+          evidenceId = $evidenceId
+          createdAt = [DateTimeOffset]::Now.ToString('o')
+          packageRoot = $packageRoot
+          runRoot = $runRoot
+          appBinary = $appBinary
+          commands = [ordered]@{ collector = 'scripts/campaign-visual-evidence.ps1' }
+          environmentFacts = [ordered]@{
+            RAIN_E2E_MODE = [string]$env:RAIN_E2E_MODE
+            RAIN_E2E_RUN_MODE = [string]$env:RAIN_E2E_RUN_MODE
+            RAIN_E2E_DB_PATH = [string]$env:RAIN_E2E_DB_PATH
+            RAIN_E2E_VIDEO_PATH = [string]$env:RAIN_E2E_VIDEO_PATH
+            WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = [string]$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+            RAIN_E2E_WEBVIEW2_VERSION = [string]$env:RAIN_E2E_WEBVIEW2_VERSION
+            GITHUB_SHA = [string]$env:GITHUB_SHA
+          }
+          observed = $script:facts
+          appBinaryExists = (Test-Path -LiteralPath $appBinary)
+          # 逐模式读回各自的日志尾。早先这里只读脚本级标量 $driverLog —— 那是**最后一个**模式的
+          # 日志，而按模式收集的三个集合被写进脚本级变量后全仓库没有任何读者，等于"每模式日志"
+          # 这个修复没有落地（第三个模式之前就失败时看到的仍是最后一个模式）。现在真的写进 JSON。
+          driverLogTail = (Get-DiagnosticTail $driverLog)
+          driverErrorLogTail = (Get-DiagnosticTail $driverErrorLog)
+          driverLogTails = $perModeLogTails
+          driverErrorLogTails = $perModeErrorLogTails
+          driverLogFiles = $script:driverLogFileByMode
+        }
+        [System.IO.File]::WriteAllText(
+          (Join-Path $packageRoot 'failure.json'),
+          (ConvertTo-Json -InputObject $diagnostics -Depth 12),
+          [System.Text.UTF8Encoding]::new($false)
+        )
+        Write-Warning ('failure diagnostics written to ' + (Join-Path $packageRoot 'failure.json'))
+      }
+    } catch {
+      Write-Warning ("could not write failure diagnostics: " + $_.Exception.Message)
+    }
   }
   if (Test-Path -LiteralPath $runRoot) {
     $resolvedRunRoot = [System.IO.Path]::GetFullPath($runRoot)
@@ -1092,19 +1528,11 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
     if (-not $resolvedRunRoot.StartsWith($safePrefix, [StringComparison]::OrdinalIgnoreCase)) {
       throw "Refusing to remove unexpected visual evidence run directory: $resolvedRunRoot"
     }
-    if ($primaryError) {
-      # 失败时**保留**临时目录（含 tauri-driver 日志与隔离数据库），供首次托管运行排障——
-      # 与既有 E2E 脚本"失败留脱敏诊断"的做法一致。本通道不读取任何 API key/用户数据，
-      # 该目录只含驱动日志与隔离库；它不会被自动上传，清理由 runner 回收。
-      Write-Warning ("visual evidence run directory retained for diagnosis: " + $resolvedRunRoot)
-    } else {
+    if (-not $primaryError) {
       Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
   }
 }
 if ($primaryError) {
-  if ($null -ne $packageRoot -and (Test-Path -LiteralPath $packageRoot)) {
-    Write-Warning ("partial package left in place for diagnosis: " + $packageRoot)
-  }
   throw $primaryError
 }

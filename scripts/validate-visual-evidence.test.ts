@@ -23,6 +23,11 @@ const validatorScript = join(repoRoot, 'scripts', 'validate-visual-evidence.ps1'
 const collectorScript = join(repoRoot, 'scripts', 'campaign-visual-evidence.ps1')
 const workflowFile = join(repoRoot, '.github', 'workflows', 'visual-evidence.yml')
 const powershellTimeoutMs = 60_000
+
+// 传给 PowerShell 的路径必须用正斜杠：把反斜杠"转义"成双反斜杠（D:\\dir\\file）会让
+// Windows PowerShell 找不到文件，于是 AST 里一个 IfStatement 都没有、断言以"找不到端口守卫"
+// 的形式失败——那是在**测量空气**。正斜杠在 Windows 上同样可用，且不需要任何转义。
+const collectorScriptPathForPowerShell = collectorScript.replace(/\\/g, '/')
 const pngBytes = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/eylmE8AAAAASUVORK5CYII=',
   'base64',
@@ -61,6 +66,25 @@ function runMathVectors(vectors: unknown[]): { status: number; stdout: string; s
   const path = join(dir, 'vectors.json')
   writeJson(path, vectors)
   return runValidator(['-VerifyMathFile', path])
+}
+
+/**
+ * 跑一段 PowerShell 脚本体并把它的 JSON 输出解析回对象。
+ *
+ * 脚本体先落盘成文件再执行，不走命令行传参：Windows 的参数解析会把内联脚本与 JSON 里的引号
+ * 吃掉（本仓已经踩过一次，见上面 runMathVectors 的说明）。
+ */
+function runPowerShellJson(script: string): Record<string, unknown> {
+  const dir = mkdtempSync(join(tmpdir(), 'rain-visual-ps-'))
+  const path = join(dir, 'probe.ps1')
+  // BOM 是必需的：无 BOM 时 Windows PowerShell 5.1 会按 ANSI 解码含中文的脚本，直接语法错乱。
+  writeFileSync(path, `\uFEFF${script}`, 'utf8')
+  const stdout = execFileSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path],
+    { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' },
+  )
+  return JSON.parse(stdout) as Record<string, unknown>
 }
 
 /* ------------------------------------------------------------------ *
@@ -1207,6 +1231,276 @@ describe('visual evidence channel: files and conventions', () => {
     // workflow_dispatch 必须真的可手动触发（inputs 允许，但至少要有该键）。
     expect(workflow).toMatch(/^ {2}workflow_dispatch:/m)
     expect(workflow).toMatch(/^ {2}pull_request:/m)
+  })
+
+  it('keeps both driver helpers at script top level, outside the main try (an in-try definition kills failure.json)', () => {
+    // 真实回归（Standards 轴审查 blocker ①，本机已复现）：这两个函数曾被放进主 try 体内，
+    // 而本脚本 :46 是 $ErrorActionPreference = 'Stop'。于是任何发生在定义**之前**的早期失败
+    // （TargetSha 校验 / Require-Command / npm build / tauri build / 二进制检查 / 版本探测）
+    // 都会让 finally 里的 Stop-VisualEvidenceDriver 变成**终止性**的 CommandNotFoundException，
+    // finally 被中断 → failure.json 不写 → 真正的首个错误被掩盖。
+    // 实测对比（同一段 finally，只改函数定义位置）：
+    //   定义在 try 内 → 只输出 phase=build，无 DIAGNOSTICS-WRITTEN；
+    //   定义在顶层   → STOP-CALLED / DIAGNOSTICS-WRITTEN / FINALLY-COMPLETED 都输出。
+    // 第六次托管运行能拿到决定性现场全靠 failure.json，所以这条必须被机器守住。
+    const collector = readFileSync(collectorScript, 'utf8')
+    const linesAll = collector.split(/\r?\n/)
+
+    // 主 try 体的行范围。
+    // 用**字符串相等**而不是正则：正则里的大括号转义很容易写错（本项目已踩过一次），
+    // 而这里要判的就是『整行恰好是这些字符』。
+    // 锚点取列 0 的 `} finally {`，再往前找最近的列 0 `try {`；
+    // 不能对 `try {` 直接取 findIndex——`} catch {` 的行尾也是 `try {` 形态，会被误命中。
+    const finallyLine = linesAll.findIndex((line) => line === '} finally {')
+    expect(finallyLine, 'the main try must have a column-0 finally').toBeGreaterThan(-1)
+    let tryLine = -1
+    for (let i = finallyLine - 1; i >= 0; i--) {
+      if (linesAll[i] === 'try {') { tryLine = i; break }
+    }
+    expect(tryLine, 'the main try must start at column 0 before its finally').toBeGreaterThan(-1)
+    expect(tryLine, 'the main try must close before the finally').toBeLessThan(finallyLine)
+
+    // ① 两个驱动函数必须在 try 之外定义（与其余 20 个函数同处脚本顶层）。
+    for (const name of ['Start-VisualEvidenceDriver', 'Stop-VisualEvidenceDriver']) {
+      // 两种合法写法都要认：带参数表的 `function Name(...)`，以及无参数的 `function Name {`。
+      const defLine = linesAll.findIndex((line) => line === 'function ' + name + ' {' || line.startsWith('function ' + name + '('))
+      expect(defLine, 'function ' + name + ' must be defined at column 0').toBeGreaterThan(-1)
+      expect(
+        defLine < tryLine,
+        name + ' is defined INSIDE the main try body; with $ErrorActionPreference = Stop the finally-block call would throw CommandNotFound and skip failure.json',
+      ).toBe(true)
+    }
+
+    // ② finally 必须调用 Stop-VisualEvidenceDriver（否则驱动泄漏）。
+    //    判定 finally 的**真实行范围**（到列 0 的收尾 `}` 为止），而不是取固定 N 行窗口——
+    //    固定窗口是 magic number，且 finally 内容一改就会误判。
+    let finallyEnd = -1
+    for (let i = finallyLine + 1; i < linesAll.length; i++) {
+      if (linesAll[i] === '}') { finallyEnd = i; break }
+    }
+    expect(finallyEnd, 'the finally body must close at column 0').toBeGreaterThan(finallyLine)
+    const finallyBody = linesAll.slice(finallyLine, finallyEnd + 1).join('\n')
+    expect(finallyBody, 'the finally must stop the driver').toContain('Stop-VisualEvidenceDriver')
+
+    // ③ 驱动必须在唯一一处启动，且启动前已完成环境自证。
+    const helperStart = collector.indexOf('function Start-VisualEvidenceDriver(')
+    const helperEnd = collector.indexOf('function Stop-VisualEvidenceDriver {', helperStart)
+    expect(helperEnd, 'the stop helper must follow the start helper').toBeGreaterThan(helperStart)
+    const helperBody = collector.slice(helperStart, helperEnd)
+    expect(collector.split('-FilePath $tauriDriver').length - 1, 'tauri-driver must be spawned in exactly one place').toBe(1)
+
+    // 每个 helper 必须**只定义一次**。这是上一轮审查实测出的盲区：在 try 体内再写一个同名函数时，
+    // 运行时后定义者胜、会把顶层那个遮蔽掉（原始 blocker 的新形态），而"列 0 判定"只看第一个匹配，
+    // 于是守卫仍然全绿。计数断言才是能拦住它的那条。
+    expect(
+      collector.split('function Start-VisualEvidenceDriver(').length - 1,
+      'Start-VisualEvidenceDriver must be defined exactly once; a second definition inside the try body would shadow the top-level one at runtime',
+    ).toBe(1)
+    expect(
+      collector.split('function Stop-VisualEvidenceDriver {').length - 1,
+      'Stop-VisualEvidenceDriver must be defined exactly once',
+    ).toBe(1)
+
+    // tauri-driver 要求 --port 与 --native-port **必须不同**。上一轮实测：按模式只给 --port 加 index 时，
+    // 第 2 个模式拿到 --port 4461 而 --native-port 恒为 4461 —— 两个端口撞在一起，会话必然起不来。
+    // 端口不等这条守卫必须用**结构断言**，不能用文本 grep：上一轮审查实测，把整块 if 删掉只留注释
+    // 里的字样、或把条件取反成 -ne，两种改法都能骗过文本 grep（57 passed 全绿）。
+    // 这里用真正的 PowerShell 解析器问 AST：那个 IfStatement 的条件运算符是不是 -eq、
+    // 条件左值是不是 $Port、右值是不是 $NativePort，以及 body 第一条语句是不是 throw。
+    const portGuard = runPowerShellJson(`
+ $errors = $null
+ if (-not (Test-Path -LiteralPath '${collectorScriptPathForPowerShell}')) {
+   throw ('collector not found at ' + '${collectorScriptPathForPowerShell}')
+ }
+ $ast = [System.Management.Automation.Language.Parser]::ParseFile('${collectorScriptPathForPowerShell}', [ref]$null, [ref]$errors)
+ $guards = @()
+ foreach ($if in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
+   $cond = $if.Clauses[0].Item1
+   $body = @($if.Clauses[0].Item2.Statements)
+   # 每一个值都先算成普通变量再放进哈希。PowerShell 5.1 的 ConvertTo-Json 在哈希字面量里
+   # 直接写内联 if 表达式时**不引键名**，会输出 {guards:[{condition:...} 这种非法 JSON
+   # （本仓实测），因此这里绝不把 if 留在字面量里面。
+   $conditionText = ''
+   $operatorText = ''
+   $leftText = ''
+   $rightText = ''
+   $firstStatementText = ''
+   $conditionText = [string]$cond.Extent.Text
+   if ($body.Count -gt 0) { $firstStatementText = [string]$body[0].GetType().Name }
+   # if ($a -eq $b) 的条件是 PipelineAst 套 CommandExpressionAst，真正的 BinaryExpressionAst
+   # 在 .Expression 里。不脱这一层，operator/left/right 会全是空串——断言就会以"找不到守卫"
+   # 的形式失败，而那其实是在**测量空气**（本仓实测）。
+   $expr = $cond
+   if ($cond -is [System.Management.Automation.Language.PipelineAst]) {
+     $elements = @($cond.PipelineElements)
+     if ($elements.Count -eq 1 -and $elements[0] -is [System.Management.Automation.Language.CommandExpressionAst]) {
+       $expr = $elements[0].Expression
+     }
+   }
+   if ($expr -is [System.Management.Automation.Language.BinaryExpressionAst]) {
+     $operatorText = [string]$expr.Operator.ToString()
+     $leftText = [string]$expr.Left.Extent.Text
+     $rightText = [string]$expr.Right.Extent.Text
+   }
+   $guards += [ordered]@{
+     condition = $conditionText
+     operator = $operatorText
+     left = $leftText
+     right = $rightText
+     firstStatement = $firstStatementText
+   }
+ }
+ $errorCount = @($errors).Count
+ $payload = [ordered]@{ parseErrors = $errorCount; guards = $guards }
+ ConvertTo-Json -InputObject $payload -Depth 8 -Compress
+`)
+    const guards = portGuard.guards
+    expect(portGuard.parseErrors, 'the collector must parse with zero errors').toBe(0)
+    expect(
+      (guards as unknown[]).length,
+      'the probe must actually see the collector\'s conditionals; an empty guard list means it measured nothing',
+    ).toBeGreaterThan(30)
+    const equalPortGuard = guards.find(
+      (g) => g.left === '$Port' && g.right === '$NativePort',
+    )
+    expect(equalPortGuard, 'a guard comparing $Port with $NativePort must exist').toBeTruthy()
+    expect(
+      equalPortGuard.operator,
+      "the guard must use -eq; inverting it to -ne quietly disables the protection while looking similar",
+    ).toBe('Ieq')
+    expect(
+      equalPortGuard.firstStatement,
+      'the guard body must throw when the two ports are equal',
+    ).toBe('ThrowStatementAst')
+    expect(collector, 'the per-mode native port must be derived alongside the driver port').toContain('$modeNativeDriverPort = $NativeDriverPort + $runModeIndex')
+    expect(collector, 'the per-mode call must pass both ports').toContain('-Port $modeDriverPort -NativePort $modeNativeDriverPort')
+    expect(helperBody, 'the spawn must live inside the helper').toContain('-FilePath $tauriDriver')
+    expect(helperBody, 'the helper must wait for the driver port before returning').toContain('Wait-WebDriver $Port')
+    expect(helperBody, 'a driver that dies during startup must not be reported as ready').toContain('HasExited')
+    const assertIdx = helperBody.indexOf('RAIN_E2E_RUN_MODE must equal the mode being collected')
+    const spawnIdx = helperBody.indexOf('-FilePath $tauriDriver')
+    expect(assertIdx, 'the helper must self-check the run-mode env').toBeGreaterThan(-1)
+    expect(
+      assertIdx < spawnIdx,
+      'the self-check must run BEFORE the spawn; running it after Wait-WebDriver cannot prevent a bad launch',
+    ).toBe(true)
+
+    // ④ 每模式的驱动端口必须写回**脚本级** $DriverPort —— Invoke-WebDriver(:524) 读的是脚本作用域。
+    //    写成 `$DriverPort = $Port` 只会建一个局部变量（实测 inside=4461 / after=4460），
+    //    于是所有 WebDriver 请求仍打旧端口，而新驱动在另一个端口上监听。
+    expect(
+      helperBody,
+      'the helper must assign $script:DriverPort; a bare assignment is local-only and Invoke-WebDriver would keep using the old port',
+    ).toContain('$script:DriverPort = $Port')
+    // 用**整行相等**判定，比后顾断言直白且可靠：不得存在未加 $script: 的端口赋值行。
+    // （后顾断言在这里帮不上忙——`$script:DriverPort = $Port` 本身就以 `$DriverPort = $Port` 结尾。）
+    const barePortAssign = helperBody
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line === '$DriverPort = $Port')
+    expect(barePortAssign, 'a bare $DriverPort assignment is function-local and would leave Invoke-WebDriver on the old port').toEqual([])
+
+    // ⑤ 重启驱动前必须先停掉上一个，否则句柄被覆盖、旧驱动成为孤儿，
+    //    下一个模式的会话会落到**仍在运行的第一个驱动**上（带着上一个模式的环境）。
+    expect(helperBody, 'the helper must stop the previous driver before restarting').toContain('Stop-VisualEvidenceDriver')
+    expect(helperBody, 'the restart must be opt-in via a switch').toMatch(/\[switch\]\$ModeRestart/)
+
+    // ⑥ 每个模式：环境三件套先赋值，再启动驱动，最后才开会话。
+    const loopStart = collector.indexOf('foreach ($plan in $runPlan)')
+    const loopEnd = collector.indexOf("Write-Output 'VISUAL_EVIDENCE_COLLECTED'", loopStart)
+    expect(loopStart, 'the per-mode loop must exist').toBeGreaterThan(-1)
+    expect(loopEnd, 'the collection body must end with the collected marker').toBeGreaterThan(loopStart)
+    const loopBody = collector.slice(loopStart, loopEnd)
+
+    const envIdx = loopBody.indexOf('$env:RAIN_E2E_RUN_MODE = $plan.mode')
+    const dbIdx = loopBody.indexOf('$env:RAIN_E2E_DB_PATH = $databasePath')
+    const callIdx = loopBody.indexOf('Start-VisualEvidenceDriver -Mode')
+    const sessionIdx = loopBody.indexOf('$sessionId = New-WebDriverSession $appBinary')
+    expect(envIdx, 'RAIN_E2E_RUN_MODE must be assigned inside the per-mode loop').toBeGreaterThan(-1)
+    expect(dbIdx, 'RAIN_E2E_DB_PATH must be assigned inside the per-mode loop').toBeGreaterThan(-1)
+    expect(callIdx, 'the per-mode loop must start the driver itself').toBeGreaterThan(-1)
+    expect(sessionIdx, 'the per-mode loop must open a session').toBeGreaterThan(-1)
+    expect(envIdx, 'RAIN_E2E_RUN_MODE must be set BEFORE the driver is spawned for that mode').toBeLessThan(callIdx)
+    expect(dbIdx, 'RAIN_E2E_DB_PATH must be set BEFORE the driver is spawned for that mode').toBeLessThan(callIdx)
+    expect(callIdx, 'the driver must be spawned BEFORE the session is created').toBeLessThan(sessionIdx)
+    expect(loopBody.split('Start-VisualEvidenceDriver -Mode').length - 1, 'each run mode needs its own driver start').toBe(1)
+    expect(loopBody, 'the second and later modes must restart (stop-then-start) the driver').toContain('$modeDriverPort')
+
+    // ⑦ 驱动阶段必须沿用能打开调试端口的那份 browser args。
+    //    第五次运行的"去掉 --remote-debugging-port"结论是错的：应用自己从不添加端口。
+    const argsIdx = collector.indexOf('$driverPhaseWebViewArgs =')
+    expect(argsIdx, 'the driver-phase browser args must be derived explicitly').toBeGreaterThan(-1)
+    // 用**语句边界**而不是 magic 400 字符窗口：窗口一改换行就会谎报"没取到 env"。
+    const argsStmtEnd = collector.indexOf('\n', collector.indexOf('$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', argsIdx))
+    expect(argsStmtEnd, 'the driver-phase args must be taken from the workflow env').toBeGreaterThan(argsIdx)
+    expect(
+      collector.slice(argsIdx, argsStmtEnd),
+      'the driver-phase args must be taken from the workflow env',
+    ).toContain('$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS')
+    expect(collector, 'the debug port must survive in the fallback used by the passing E2E suites').toContain('--remote-debugging-port=9222')
+
+    // ⑧ RAIN_E2E_MODE=1：只设一次，且必须在**驱动真正被 spawn 的那个点**之前。
+    //    上一轮审查指出：返工时把比较对象从 spawn 点换成了循环起点，比它替换掉的旧断言更弱
+    //    （循环起点在 spawn 点之前，等于放宽）。这里恢复为与 helper 体内的 spawn 点比较。
+    //    这里比较的是**调用点**而不是 helper 体内的 spawn 文本位置：helper 定义在脚本顶层
+    //    （在所有主流程语句之前），拿它的字面位置做比较会得出"环境变量在 spawn 之后"的错误结论。
+    //    真正决定继承环境的时刻是驱动被**调用**的那一刻。
+    expect(collector.split("$env:RAIN_E2E_MODE = '1'").length - 1, 'RAIN_E2E_MODE must be set exactly once').toBe(1)
+    const modeEnvAbs = collector.indexOf("$env:RAIN_E2E_MODE = '1'")
+    const firstDriverCallAbs = collector.indexOf('Start-VisualEvidenceDriver -Mode')
+    expect(firstDriverCallAbs, 'the driver must be started from the per-mode loop').toBeGreaterThan(-1)
+    expect(modeEnvAbs, 'RAIN_E2E_MODE must be set BEFORE the driver is started; the process inherits the environment at spawn time or the app never learns its mode').toBeLessThan(firstDriverCallAbs)
+
+    // ⑨ 不带端口的旧调用形态不得回归（没有端口就无从判断请求该打哪里）。
+    expect(collector, 'the driver must never be started without an explicit port').not.toMatch(/Start-VisualEvidenceDriver \$phase\s*\r?$/m)
+
+    // ⑩ 每模式的端口必须来自显式公式，且 native 端口同步偏移。
+    expect(collector, 'the per-mode driver port must be derived explicitly').toContain('$modeDriverPort = $DriverPort + $runModeIndex')
+
+    // ⑪ 空 browser args 时必须拒绝启动（否则应用不会开端口，会话必然失败）。
+    expect(helperBody, 'the helper must refuse to start with empty browser args').toContain('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS is empty')
+
+    // ⑨ 失败现场证据：这几个值就是"驱动为什么拉不起会话"的第一现场，必须被记录。
+    for (const fact of ['rainE2eRunModeEnv', 'rainE2eDbPathEnv', 'rainE2eVideoPathEnv', 'webviewArgsEnv', 'driverRunMode']) {
+      expect(collector, 'failure diagnostics must record ' + fact).toContain("Add-Fact '" + fact + "'")
+    }
+
+    // ⑫ 本提交新增的四条失败现场判据都必须真的存在——它们正是这次返工宣称的价值所在，
+    //    上一轮审查用注入法实测"删掉它们守卫仍然全绿"，这里逐条补上覆盖。
+    //    (a) 每模式独立驱动日志（否则 Start-Process 覆盖后只剩最后一个模式的日志尾巴）
+    expect(collector, 'per-mode driver log file names must be derived').toContain("'tauri-driver.' + $Mode + '.log'")
+    expect(collector, 'per-mode driver log tails must be collected').toContain('$script:driverLogTails[$Mode]')
+    //    (b) 停止驱动超时必须被记录（否则静默泄漏）
+    expect(collector, 'a stop timeout must be recorded as a fact').toContain("Add-Fact 'driverStopTimeout'")
+    //    (c) 兜底收尸必须记录，且必须按本次运行的端口而不是镜像名
+    expect(collector, 'leftover reaping must be recorded').toContain("Add-Fact 'driverLeftoverReaped'")
+    expect(collector, 'leftover reaping must NOT match by image name (that would kill a sibling E2E on the same host)').not.toContain("Get-Process -Name 'tauri-driver'")
+    expect(collector, 'leftover reaping must match this run\'s own ports').toContain('$script:driverPorts')
+    //    (d) 会话失败时的 DevTools 端口判据，且端口必须取自实际下发的参数（不能硬编码）
+    expect(collector, 'the failure-time DevTools probe must be recorded').toContain("Add-Fact 'failureTimeDevToolsEndpoint'")
+    //    这里的反斜杠是必需的：写成 (d+) 会匹配不到任何数字、函数**永远**返回 9222，
+    //    "从实际参数解析端口"这个性质就完全没实现（上一轮审查实测到的错，本仓真的犯过）。
+    expect(collector, 'the debug-port digit class must be escaped').toContain('--remote-debugging-port=(' + String.fromCharCode(92) + 'd+)')
+    expect(collector, 'the debug-port fallback must be documented as a fallback').toContain('永远**返回 9222')
+    //    (e) 收尸失败必须留下痕迹（上一轮审查指出它零覆盖：删掉仍全绿）
+    expect(collector, 'a reaping failure must be recorded').toContain("Add-Fact 'driverLeftoverReapError'")
+    expect(collector, 'the probe port must be derived from the browser args').toContain('function Get-DriverDebugPort')
+    expect(collector, 'the probe must use the derived port, not a literal').toContain("'http://127.0.0.1:' + $dtPort + '/json/version'")
+  })
+
+  it('never probes the tauri-driver version with a flag it does not support', () => {
+    // 首次托管运行的第二个真实失败：tauri-driver 2.0.6 没有 --version，调用它会打印
+    // "Error: unused arguments left: [--version]"（`cargo install --list` 才是读版本的正当途径）。
+    const collector = readFileSync(collectorScript, 'utf8')
+    expect(collector).not.toMatch(/&?\s*\$tauriDriver\s+--version/)
+    expect(collector).toContain('cargo install --list')
+  })
+
+  it('refuses to write a package when the WebView2 runtime version cannot be read', () => {
+    // 空串不该被写进 manifest 再由校验器含糊拒绝；采集器要当场说清缺的是宿主版本。
+    const collector = readFileSync(collectorScript, 'utf8')
+    expect(collector).toMatch(/Could not read the WebView2 runtime version from the app user agent/)
+    expect(collector).toMatch(/more than one WebView2 runtime version/)
   })
 
   it('keeps every contract id addressable exactly once in the coverage contract', () => {
