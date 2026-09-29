@@ -50,10 +50,22 @@ interface CollectedPayloads {
   scriptCalls: number
   /** Real call sites that pass no script argument at all; must be zero, else something went missing. */
   noScriptArgCalls: number
-  /** Call sites whose script argument could not be resolved here, keyed by `L<line>` with the raw text. */
+  /** Every call site, with the payload it produced or the reason it could not. */
+  sites: CollectedSite[]
+  /** Call sites that yielded no payload, keyed by the same stable site key. */
   skippedCallSites: Record<string, string>
   /** Line the collector defines each bound constant on, so staleness can be asserted. */
   boundLines: Record<string, number>
+}
+
+interface CollectedSite {
+  /** Stable identity: `<command>#<ordinal>`. Deliberately NOT a line number. */
+  key: string
+  command: string
+  line: number
+  text: string
+  payload: string
+  reason: string
 }
 
 /**
@@ -183,6 +195,12 @@ function collectPayloads(): CollectedPayloads {
     // bytes and still pass every assertion. Add a name here only together with an explicit binding above.
     '$allowed = @("probeInterface", "probeScript", "tolerance", "toleranceBasis")',
     '$payloadFunctions = @{ "Invoke-WebDriverScript" = 1; "Wait-WebDriverCondition" = 2 }',
+    // Call sites are identified by `<command>#<ordinal>` and NOT by line number. Line numbers looked like a
+    // stable key and are not: adding a few lines to the collector silently re-pointed every key (and the
+    // guard then failed for a reason that had nothing to do with injected JavaScript). The ordinal only
+    // moves if a call site is inserted before another one, which is a change worth reviewing anyway.
+    '$siteOrdinals = @{}',
+    '$sites = [ordered]@{}',
     '$calls = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)',
     'foreach ($call in $calls) {',
     '  $elements = @($call.CommandElements)',
@@ -191,18 +209,25 @@ function collectPayloads(): CollectedPayloads {
     '  if (-not $payloadFunctions.ContainsKey($commandName)) { continue }',
     '  $params = @($elements | Select-Object -Skip 1)',
     '  $scriptIndex = $payloadFunctions[$commandName]',
-    // Every matching CommandAst is counted here, including one that would pass too few arguments. The
-    // counters below must partition this number exactly: verification showed that a call site skipping out
-    // through a bare `continue` was invisible to every assertion.
     '  $scriptCalls++',
-    '  if ($params.Count -le $scriptIndex) { $noScriptArgCalls++; continue }',
+    // A call site that cannot even carry the script argument is counted and catalogued, never skipped in
+    // silence -- verification showed a bare `continue` here was invisible to every assertion.
+    '  if ($params.Count -le $scriptIndex) {',
+    '    $noScriptArgCalls++',
+    '    $tooFew = $scriptCalls',
+    '    $sites[$commandName + "#" + $tooFew] = [ordered]@{ command = $commandName; line = $call.Extent.StartLineNumber; text = ""; reason = "[too few arguments to carry a script]" }',
+    '    continue',
+    '  }',
+    '  $ordinal = if ($siteOrdinals.ContainsKey($commandName)) { $siteOrdinals[$commandName] + 1 } else { 1 }',
+    '  $siteOrdinals[$commandName] = $ordinal',
+    '  $key = $commandName + "#" + $ordinal',
     '  $arg = $params[$scriptIndex]',
     '  $line = $call.Extent.StartLineNumber',
-    '  $hadValue = $false',
+    '  $record = [ordered]@{ command = $commandName; line = $line; text = $arg.Extent.Text; payload = ""; reason = "" }',
     // Whether a site can be evaluated is decided by its ARGUMENT, not by where it lives: the collector's
     // top-level constants are bound above, so an argument that merely references them is evaluated for
     // real. Only genuinely local values ($configJson) and parameters ($Script/$script/$Desc) stay
-    // unevaluated -- and those are catalogued below rather than dropped.
+    // unevaluated -- and those are catalogued rather than dropped.
     '  $vars = @($arg.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) | ForEach-Object { $_.VariablePath.UserPath })',
     '  $unbound = @($vars | Where-Object { $allowed -notcontains $_ })',
     '  if ($unbound.Count -eq 0) {',
@@ -211,20 +236,20 @@ function collectPayloads(): CollectedPayloads {
     // that would mean a variable survived into the text and the payload is not the real bytes. Treating it
     // as a payload would be a false green. A bare `$` is fine -- the real payloads contain JS template
     // literals like `${...}`.
-    `    if ($value -is [string] -and $value.Length -ge 8 -and $value -notmatch '\$[\w({]') { $out["inline_L" + $line] = $value; $hadValue = $true }`,
+    `    if ($value -is [string] -and $value.Length -ge 8 -and $value -notmatch '\$[\w({]') { $record["payload"] = $value }`,
     '  }',
-    // Anything that did NOT yield a payload is recorded, never silently dropped.
-    '  if (-not $hadValue) {',
+    '  if (-not $record["payload"]) {',
     '    $owner = $funcs | Where-Object { $_.Extent.StartOffset -le $call.Extent.StartOffset -and $_.Extent.EndOffset -ge $call.Extent.EndOffset } | Select-Object -First 1',
     '    $where = if ($owner) { "[in function " + $owner.Name + "] " } else { "" }',
     '    $why = if ($unbound.Count -gt 0) { "[unbound: " + ($unbound -join ",") + "] " } else { "[did not evaluate to a string] " }',
-    '    $skipped["L" + $line] = $where + $why + $arg.Extent.Text',
+    '    $record["reason"] = $where + $why',
     '  }',
+    '  $sites[$key] = $record',
     '}',
     '$out["_scriptCalls"] = [string]$scriptCalls',
     '$out["_noScriptArgCalls"] = [string]$noScriptArgCalls',
     '$out["_boundLines"] = $boundLines',
-    '$out["_skipped"] = $skipped',
+    '$out["_sites"] = $sites',
     'ConvertTo-Json -InputObject $out -Depth 4 -Compress | Set-Content -LiteralPath \'' + outForPs + '\' -Encoding UTF8',
   ].join('\n')
 
@@ -239,30 +264,60 @@ function collectPayloads(): CollectedPayloads {
   const payloads: Record<string, string> = {}
   const skippedCallSites: Record<string, string> = {}
   const boundLines: Record<string, number> = {}
+  const sites: CollectedSite[] = []
   for (const [key, value] of Object.entries(raw)) {
     if (key === '_scriptCalls') continue
     if (key === '_noScriptArgCalls') continue
-    if (key === '_skipped') {
-      for (const [line, text] of Object.entries(value as Record<string, string>)) skippedCallSites[line] = text
-      continue
-    }
     if (key === '_boundLines') {
       for (const [name, line] of Object.entries(value as Record<string, string>)) boundLines[name] = Number(line)
       continue
     }
+    if (key === '_sites') {
+      for (const [siteKey, site] of Object.entries(value as Record<string, Record<string, string>>)) {
+        sites.push({
+          key: siteKey,
+          command: String(site.command),
+          line: Number(site.line),
+          text: String(site.text ?? ''),
+          payload: String(site.payload ?? ''),
+          reason: String(site.reason ?? ''),
+        })
+      }
+      continue
+    }
     payloads[key] = String(value)
+  }
+  // Payloads are keyed by the site key, so the two views cannot drift apart.
+  for (const site of sites) {
+    if (site.payload) payloads[site.key] = site.payload
+    else skippedCallSites[site.key] = site.reason + site.text
   }
   return {
     payloads,
     scriptCalls: Number(raw._scriptCalls),
     noScriptArgCalls: Number(raw._noScriptArgCalls),
+    sites,
     skippedCallSites,
     boundLines,
   }
 }
 
 describe('injected browser scripts must parse before they are ever sent', () => {
-  const { payloads, scriptCalls, noScriptArgCalls, skippedCallSites, boundLines } = collectPayloads()
+  const { payloads, scriptCalls, noScriptArgCalls, sites, skippedCallSites, boundLines } = collectPayloads()
+
+  /** Find the site whose argument text contains `needle`; fails loudly rather than returning undefined. */
+  function siteWithArgument(needle: string): CollectedSite {
+    const matches = sites.filter((s) => s.text.includes(needle))
+    expect(matches.length, `expected exactly one call site whose argument contains ${needle}`).toBe(1)
+    return matches[0]
+  }
+
+  /** The raw argument text of one catalogued gap, so its reason can be asserted by content. */
+  function gapText(gaps: CollectedSite[], key: string): string {
+    const gap = gaps.find((g) => g.key === key)
+    expect(gap, `gap ${key} must exist`).toBeDefined()
+    return gap!.text
+  }
 
   it('collects the probe script, the arm statements and the inline scripts', () => {
     const names = Object.keys(payloads)
@@ -270,8 +325,7 @@ describe('injected browser scripts must parse before they are ever sent', () => 
     expect(names).toContain('arm_list')
     expect(names).toContain('arm_settings')
     expect(names).toContain('arm_study')
-    const inline = names.filter((n) => n.startsWith('inline_'))
-    expect(inline.length, 'inline scripts must be collected: ' + inline.join(', ')).toBeGreaterThan(0)
+    expect(sites.length, 'payload-bearing call sites must be collected').toBeGreaterThan(0)
   })
 
   it('accounts for every call site, including the ones it cannot evaluate', () => {
@@ -285,48 +339,50 @@ describe('injected browser scripts must parse before they are ever sent', () => 
     // `Wait-WebDriverCondition` -- real injected JavaScript -- entirely unchecked. Review planted syntax
     // errors in two of them and this file still went green.
     //
-    // Now every payload-bearing call site of BOTH functions is enumerated from the AST, and a site that
-    // cannot be evaluated is recorded with its reason. The two below are the only ones left, and both are
-    // function-internal plumbing rather than payload choices: every actual caller passes a payload and is
-    // covered by its own entry.
-    const inline = Object.keys(payloads).filter((n) => n.startsWith('inline_'))
-    expect(inline.length, 'inline payloads: ' + inline.join(', ')).toBe(14)
-    // The six condition scripts must be among them -- that is the second false-green above.
-    for (const line of ['L612', 'L1240', 'L1273', 'L1307', 'L1313', 'L1327']) {
-      expect(payloads['inline_' + line], `condition script ${line} must be collected`).toBeTypeOf('string')
-    }
-
-    // 16 payload-bearing call sites: 10 of Invoke-WebDriverScript (script = argument 1) and 6 of
-    // Wait-WebDriverCondition (script = argument 2). Neither function definition is counted: their script
-    // parameters are positionally absent, which is exactly why `$payloadFunctions` maps name -> index.
+    // Sites are keyed `<command>#<ordinal>`, never by line number: line numbers moved the moment the
+    // collector gained a few lines, silently re-pointing every key (this guard failed for exactly that
+    // reason while being extended).
+    expect(sites.length, 'sites: ' + sites.map((s) => `${s.key}@L${s.line}`).join(', ')).toBe(16)
     expect(scriptCalls, 'every payload-bearing call site must still be counted').toBe(16)
-    // The counters must PARTITION the total exactly: every call site either produced a payload or was
-    // catalogued. Without this a call site could leave through a bare `continue` and stay invisible to
-    // every assertion (verification flagged exactly that hole).
     expect(noScriptArgCalls, 'no call site may omit its script argument').toBe(0)
-    expect(
-      Object.keys(payloads).filter((n) => n.startsWith('inline_')).length + Object.keys(skippedCallSites).length,
-      'payloads + catalogued gaps must equal the call-site total',
-    ).toBe(scriptCalls)
 
-    const expected: Record<string, string> = {
-      L576: 'the helper forwards its own $Script parameter; its callers pass payloads and are covered',
-      L610: 'concatenates $configJson, computed locally by Invoke-VisualProbe',
+    // The two counters must PARTITION the site table exactly: each site either produced a payload or is
+    // catalogued with a reason. A site leaving through a bare `continue` would be invisible otherwise.
+    const evaluated = sites.filter((s) => s.payload)
+    const gaps = sites.filter((s) => !s.payload)
+    expect(evaluated.length + gaps.length, 'payloads + gaps must equal the site total').toBe(sites.length)
+    for (const gap of gaps) {
+      expect(gap.reason, `gap ${gap.key} must record WHY it could not be evaluated`).not.toBe('')
     }
-    expect(Object.keys(skippedCallSites).sort()).toEqual(Object.keys(expected).sort())
-    for (const [line, text] of Object.entries(skippedCallSites)) {
-      // The record must say WHY it could not be evaluated, so a new gap cannot look like these.
-      expect(text, `the record for ${line} must name the unbound variable`).toMatch(/\[unbound: \w+\]/)
-      if (line === 'L576') expect(text).toContain('$Script')
-      if (line === 'L610') expect(text, expected.L610).toContain('$configJson')
+    expect(evaluated.length, 'evaluated sites: ' + evaluated.map((s) => s.key).join(', ')).toBe(14)
+
+    // Both payload families are represented: the six condition scripts are the second false-green above.
+    expect(sites.filter((s) => s.command === 'Invoke-WebDriverScript').length).toBe(10)
+    expect(sites.filter((s) => s.command === 'Wait-WebDriverCondition').length).toBe(6)
+    for (const site of sites.filter((s) => s.command === 'Wait-WebDriverCondition')) {
+      expect(site.payload, `${site.key} (a condition script) must be evaluated`).not.toBe('')
     }
+
+    // The only call site that never yields real bytes out here is the forwarded parameter; the other gap is
+    // Invoke-VisualProbe's function-local config. Both are plumbing, and both must say so.
+    // (Ordinals follow document order, so the helper's own definition comes first.)
+    expect(
+      gaps.map((g) => g.key).sort(),
+      'gaps: ' + JSON.stringify(gaps.map((g) => ({ key: g.key, reason: g.reason, text: g.text.slice(0, 80) }))),
+    ).toEqual(['Invoke-WebDriverScript#1', 'Invoke-WebDriverScript#2'])
+    for (const gap of gaps) {
+      expect(gap.reason, `gap ${gap.key} must name the unbound variable`).toMatch(/\[unbound: \w+\]/)
+    }
+    expect(gapText(gaps, 'Invoke-WebDriverScript#1')).toContain('$Script')
+    expect(gapText(gaps, 'Invoke-WebDriverScript#2')).toContain('$configJson')
+
     // The defect that started all this is a real, evaluated call site -- not an exempted one.
-    expect(payloads.inline_L1320, 'the fixed call site must be evaluated, not exempted').toBeTypeOf('string')
-    expect(Object.keys(skippedCallSites), 'the fixed call site must not be exempted').not.toContain('L1320')
+    const fixedSite = siteWithArgument('[data-testid^="card-"] button')
+    expect(fixedSite.payload, 'the fixed call site must be evaluated, not exempted').not.toBe('')
+    expect(fixedSite.command).toBe('Invoke-WebDriverScript')
     // The sites the old regex dropped that ARE resolvable must now be evaluated.
-    for (const line of ['L611', 'L616', 'L1306']) {
-      expect(payloads['inline_' + line], `${line} must now be evaluated, not skipped`).toBeTypeOf('string')
-      expect(Object.keys(skippedCallSites)).not.toContain(line)
+    for (const needle of ['navigator.userAgent', 'JSON.stringify($probeInterface)', 'f.seed()']) {
+      expect(siteWithArgument(needle).payload, `${needle} must now be evaluated`).not.toBe('')
     }
 
     // The bound constants must be the assignments that actually feed the call sites. If the collector
@@ -335,10 +391,7 @@ describe('injected browser scripts must parse before they are ever sent', () => 
     // (The binding helper already picks the LAST assignment before the call sites; this asserts the
     // recorded position is genuinely upstream of every evaluated site.)
     expect(Object.keys(boundLines).sort()).toEqual(['probeInterface', 'probeScript', 'tolerance', 'toleranceBasis'])
-    const evaluatedLines = Object.keys(payloads)
-      .filter((n) => n.startsWith('inline_'))
-      .map((n) => Number(n.replace('inline_L', '')))
-    const firstUse = Math.min(...evaluatedLines)
+    const firstUse = Math.min(...evaluated.map((s) => s.line))
     for (const [name, line] of Object.entries(boundLines)) {
       expect(line, `${name} is defined at L${line}, which must precede every evaluated site (first L${firstUse})`).toBeLessThan(firstUse)
     }
