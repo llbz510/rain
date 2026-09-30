@@ -46,13 +46,26 @@ function cssRules(source: string): Array<{ selector: string; body: string }> {
 /** 规范化命令行上的 CSS 值：去空白、统一小写，便于比较 `4px` 与 `4 px`。 */
 const normalize = (value: string) => value.replace(/\s+/g, '').toLowerCase()
 
+/**
+ * 去掉 TS/TSX 源码里的注释，只留代码。
+ * 用途：有几条"源码里不得再出现 X"的守卫，而注释**必须**能提到 X 才能解释这条守卫本身
+ * （本文件就因此被自己的注释误判过一次）。
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+}
+
 describe('S8 缺陷①：学习页目录横条高度 = 合同冻结的 80px', () => {
   let indexCss: string
   let catalog: string
+  let study: string
 
   beforeAll(() => {
     indexCss = read('src/index.css')
     catalog = read('src/ui/components/catalog.tsx')
+    study = read('src/pages/StudyInterface.tsx')
   })
 
   it('`--height-catalog` 存在且等于 80px（决策 76「顶栏 40 / 控制栏 40 / 目录横条 80」）', () => {
@@ -66,20 +79,42 @@ describe('S8 缺陷①：学习页目录横条高度 = 合同冻结的 80px', ()
     expect(names).toEqual(['catalog', 'controlbar', 'topbar'])
   })
 
-  it('目录横条消费该令牌（高度改动自动生效，无硬编码的 80）', () => {
-    expect(catalog).toMatch(/height:\s*'var\(--height-catalog\)'/)
-    expect(catalog, '不得把 80 硬编码进组件（令牌才是唯一真相源）').not.toMatch(/height:\s*'80px'/)
-    expect(catalog, '不得残留 height: 80 这类数值写法').not.toMatch(/height:\s*80\b/)
+  it('高度由消费方容器给出、被测元素用 `height:100%` 撑满（无硬编码的 80）', () => {
+    expect(study, '消费方容器必须给出 80px 的高度令牌').toMatch(/height:\s*'var\(--height-catalog\)'/)
+    expect(study, '不得把 80 硬编码（令牌才是唯一真相源）').not.toMatch(/height:\s*'80px'/)
+    // 只在**代码**里找（注释里可以提到这个令牌的名字——它正是要解释的对象）。
+    const catalogCode = stripComments(catalog)
+    expect(catalogCode, '源头组件里不得再出现高度令牌的取值（只允许 height:100%）').not.toMatch(/--height-catalog/)
+    expect(catalogCode, '被测元素必须用 height:100% 撑满容器').toMatch(/height:\s*'100%'/)
+    expect(catalogCode, '不得硬编码 80px').not.toMatch(/'80px'/)
   })
 
   it('两条目录行各占一半：40 + 40 精确等于 80（容差 ±0.5）', () => {
-    const trackMatch = catalog.match(/gridTemplateRows:\s*'([^']+)'/)
-    expect(trackMatch, '目录横条必须把两条轨道显式写出来（高度不能再由内容决定）').not.toBeNull()
-    expect(trackMatch![1]).toBe('1fr 1fr')
-    const gapMatch = catalog.match(/gap:\s*(\d+|'(\d+)px')/)
-    expect(gapMatch, '两条轨道之间必须显式声明零间距（否则 40+40 不再等于 80）').not.toBeNull()
-    const gapValue = gapMatch![2] ?? gapMatch![1]
-    expect(Number(gapValue), '两条轨道之间的间距必须是 0').toBe(0)
+    // 80px 由容器给出，`CatalogBar` 用 `height:100%` 撑满；两行仍是原来的自然高度结构，
+    // 由本机 headless Edge 以同形 DOM 实测确认：容器 80 → 被测元素 80、「壳」各 40、行间 0。
+    const container = study.match(/catalogBar && \(([\s\S]{0,900}?)<CatalogBar/)
+    expect(container, '必须能定位到包住 CatalogBar 的容器').not.toBeNull()
+    expect(container![1], '容器高度必须是 80px 的令牌').toMatch(/height:\s*'var\(--height-catalog\)'/)
+    const catalogCode = stripComments(catalog)
+    expect(catalogCode, '被测元素必须撑满容器，否则它只有内容自然高度（47.59px，不是 80）').toMatch(/height:\s*'100%'/)
+  })
+
+  it('水平布局零改动：CatalogBar 仍保持原来的 shell > scroll row 结构（真回归的反例锚点）', () => {
+    // 这是**真回归**留下的锚点（据实登记）：本 Slice 一开始把高度做在 `CatalogBar` 的根元素上
+    // 并改成 `display:grid` + `gridTemplateRows:'1fr 1fr'`，结果把真实桌面判据
+    // 「长目录两行真实横向溢出」由绿改红——paragraph 行 extent=2499.09375 对 ownerWidth=2580
+    // （差 3.1%），而 master 基线 run 36665063145 为绿。
+    // 现在根元素只保留 `height: '100%'`（撑满消费方给的 80px），**没有**任何 grid/`1fr` 轨道
+    // 或其它会改变行内布局的写法。
+    const catalogCode = stripComments(catalog)
+    const rootLine = catalogCode.match(/data-testid="catalog-bar"[\s\S]{0,120}?>/)
+    expect(rootLine, '必须能定位到 CatalogBar 的根元素').not.toBeNull()
+    expect(rootLine![0], '根元素只允许 height:100%（不得再出现 grid 布局或 1fr 轨道）').not.toMatch(/display:\s*'grid'/)
+    expect(rootLine![0], '根元素不得出现 1fr 轨道').not.toMatch(/1fr/)
+    expect(catalogCode, '滚动行仍是 flex + nowrap + 横向 auto 溢出（水平布局不许动）').toMatch(/overflowX:\s*'auto'/)
+    expect(catalogCode, '滚动行仍不得换行').toMatch(/flexWrap:\s*'nowrap'/)
+    expect(catalogCode, '仍有两条目录行').toMatch(/level="structure"/)
+    expect(catalogCode).toMatch(/level="paragraph"/)
   })
 
   it('反例锚点：未修复形态（按内容自然高度渲染）必须被判红——冻结值是 80，不是 59.59375', () => {

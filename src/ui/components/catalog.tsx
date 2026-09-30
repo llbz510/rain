@@ -263,17 +263,17 @@ export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }:
   return <div data-testid="side-tree">{topLevel.map((node) => renderNode(node))}</div>
 }
 
-// 目录横条（决策 76 的「目录横条 80」）：两条轨道各占 40px，走与顶栏/控制栏同一套
-// `--height-*` 固定高度命名。此前这里没有高度，横条按内容自然高度渲染——真实桌面实测
-// **59.59375px**（= 2 × 23.796875 的行高计算值 + 2 × 6 的行内盒空白，即两条目录行各占一行），
-// 比冻结值 80 少 20.40625px（`VC-15`④）。行高来自 body 的 14px × 1.7，属正常排版，
-// 因此**不压缩行高**，改为给横条一个 80px 固定高度、把两条目录行各撑到 40px。
+// 目录横条（决策 76 的「目录横条 80」）：`data-testid="catalog-bar"` 是**被测的那个元素**
+// （`VC-15`④ 读它的 `getBoundingClientRect().height`），因此它必须自己撑满消费方给出的
+// 80px —— 用 `height: '100%'`，`display` 仍是默认的 `block`。
+// 本组件保持原有结构（两条目录行仍是 `shell > scroll row`），**水平布局零改动**。
+// 起因（据实登记，是真回归）：本 Slice 一开始把高度直接改成这个根元素的 `display:grid` +
+// `gridTemplateRows:'1fr 1fr'`，结果那条真实桌面判据
+// （`scripts/run-study-catalog-e2e.ps1` 的「长目录两行真实横向溢出」）由绿转红——
+// paragraph 行 `extent=2499.09375` 对 `ownerWidth=2580`（差 3.1%），而 master 基线
+// run `36665063145` 是绿的。改高度不该顺手改行内布局，故撤回结构改动、只保留高度对齐。
 const catalogBarStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateRows: '1fr 1fr',
-  // 两条轨道之间**没有**间距：40 + 40 必须精确等于 80（`VC-15`④ 的容差是 ±0.5）。
-  gap: 0,
-  height: 'var(--height-catalog)',
+  height: '100%',
 }
 
 export function CatalogBar({ onSeek }: CatalogProps) {
