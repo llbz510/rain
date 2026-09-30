@@ -263,6 +263,19 @@ export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }:
   return <div data-testid="side-tree">{topLevel.map((node) => renderNode(node))}</div>
 }
 
+// 目录横条（决策 76 的「目录横条 80」）：两条轨道各占 40px，走与顶栏/控制栏同一套
+// `--height-*` 固定高度命名。此前这里没有高度，横条按内容自然高度渲染——真实桌面实测
+// **59.59375px**（= 2 × 23.796875 的行高计算值 + 2 × 6 的行内盒空白，即两条目录行各占一行），
+// 比冻结值 80 少 20.40625px（`VC-15`④）。行高来自 body 的 14px × 1.7，属正常排版，
+// 因此**不压缩行高**，改为给横条一个 80px 固定高度、把两条目录行各撑到 40px。
+const catalogBarStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateRows: '1fr 1fr',
+  // 两条轨道之间**没有**间距：40 + 40 必须精确等于 80（`VC-15`④ 的容差是 ±0.5）。
+  gap: 0,
+  height: 'var(--height-catalog)',
+}
+
 export function CatalogBar({ onSeek }: CatalogProps) {
   const nodes = useRainStore((s) => s.nodeTree)
   const playPosition = useRainStore((s) => s.playPosition)
@@ -346,7 +359,7 @@ export function CatalogBar({ onSeek }: CatalogProps) {
   )
 
   return (
-    <div data-testid="catalog-bar">
+    <div data-testid="catalog-bar" style={catalogBarStyle}>
       <CatalogRow level="structure" nodes={structureNodes} currentNodeId={currentStructureNode?.id ?? null} currentNodeRef={currentStructureRef} structureSwitch={structureSwitch} renderNode={renderNode} />
       <CatalogRow level="paragraph" nodes={paragraphNodes} currentNodeId={currentParagraphNode?.id ?? null} currentNodeRef={currentParagraphRef} renderNode={renderNode} />
     </div>
