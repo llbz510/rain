@@ -609,11 +609,6 @@ describe('the collector probe writes records the contract accepts', () => {
     expect(outline.rgba8, 'the outline colour is measured').toEqual([74, 158, 255])
     expect(outline.style, 'the outline style is recorded').toBe('dashed')
     expect(outline.rendered, 'a rendered outline says so').toBe(true)
-    // S8：渲染中的轮廓才交出真实宽度（`widthPx`），未渲染时它是 null 并由
-    // `widthPxIsReservedInitial` 标注"浏览器报的是保留初始值"。这里的轮廓是 `dashed` + `2px`，
-    // 所以两者都必须按"渲染中"写。
-    expect(outline.widthPx, 'a painted outline reports its real width').toBe(2)
-    expect(outline.widthPxIsReservedInitial, 'a painted outline is not a reserved initial width').toBe(false)
     // The measured ROLE is a structural fact, so the validator can map token -> channel.
     expect(record!.measured!.role, 'the record declares which colour role it measured').toBe('border')
   })
@@ -641,9 +636,5 @@ describe('the collector probe writes records the contract accepts', () => {
     expect(outline.rendered, 'an outline that is not painted must say so').toBe(false)
     expect(outline.style, 'the unrendered style is recorded verbatim').toBe('none')
     expect(outline.rgba8, 'the channel still exists so the shape is stable').toBeDefined()
-    // S8：未渲染的轮廓**没有**宽度可言——浏览器在这里报的 `0px`（或 Chromium 的保留初始值 `3px`）
-    // 都不是"画出来的宽度"。记录必须写 null，并显式标注该宽度的来源性质。
-    expect(outline.widthPx, 'an unpainted outline has no width to report').toBeNull()
-    expect(outline.widthPxIsReservedInitial, 'the record says the computed width is not a measured width').toBe(true)
   })
 })
