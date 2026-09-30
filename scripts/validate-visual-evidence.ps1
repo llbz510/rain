@@ -770,6 +770,65 @@ function Assert-RecordContrast($Record, $Ratio, [string]$Where) {
         }
       }
     }
+    # S8 守卫：`widthPx` 在未渲染时**只是浏览器保留的初始值**，不得被当成实测宽度。
+    #
+    # 成因（本机 headless Edge 实测复现）：Chromium/WebView2 对**任何**没有轮廓的元素，
+    # `getComputedStyle().outlineWidth` 都报初始值 `medium` → 逐字 `3px`，而同一元素的
+    # `outlineStyle` 是 `none`；只有显式写 `outline-width: 0px` 才报 0。真实包
+    # visual-c2c75601-20260930-013637 的 36 条 outline 记录全是 `none`/`3px`，唯一源规则又是
+    # `:focus-visible { outline: 2px dashed var(--color-fg); outline-offset: 2px }`
+    # （src/index.css），于是"实测 3px vs 规则 2px"看起来像矛盾——其实 3px 是保留值，不是画出来的宽度。
+    #
+    # 形状要求（与边框通道同一风格的双向核对，fail-closed）：
+    #   ① `widthPxIsReservedInitial` 必填且为布尔；
+    #   ② 未渲染（rendered=false）⇒ 该标志必须是 **true**，且 `widthPx` 必须是 **null**：
+    #      浏览器在 `outline-style: none` 时把 outlineWidth 报成保留初始值 medium=3px，
+    #      任何非 null 的 widthPx 都不是"画出来的宽度"（写 3 是保留值，写 0 会被读成"画了但很细"）；
+    #   ③ 渲染中（rendered=true）⇒ 该标志必须是 **false**，且 `widthPx` 必须是**正数**并与同一条记录的
+    #      `computedStyle.outlineWidth` 一致（±0.5px）——被画出来的轮廓有真实宽度，不得报保留值。
+    # **反向断言（S8 自查时补的）**：只检查"渲染中必须是正数"是不够的——那样一条
+    # `rendered=false / widthPxIsReservedInitial=false / widthPx=3`（`3px` 恰好与 computed 一致）
+    # 的记录会被**放行**，即"把保留值当实测宽度"照样可以过门。所以 ② 与 ③ 必须都绑到 `rendered` 上。
+    if (-not (Test-JsonProperty $outline 'widthPxIsReservedInitial')) {
+      Add-Failure ($Where + '.measured.outline：缺少 widthPxIsReservedInitial（未渲染时 computed 报的是浏览器保留的初始值 medium=3px，' +
+        '必须显式标注，否则 3px 会被读成实测宽度）')
+    } else {
+      $reservedInitial = Get-JsonProperty $outline 'widthPxIsReservedInitial'
+      if ($reservedInitial -isnot [bool]) {
+        Add-Failure ($Where + '.measured.outline.widthPxIsReservedInitial 必须是布尔值')
+      } else {
+        $reservedFlag = [bool]$reservedInitial
+        $widthPx = Get-JsonProperty $outline 'widthPx'
+        if (-not $outlineRenderedFlag) {
+          if (-not $reservedFlag) {
+            Add-Failure ($Where + '.measured.outline.widthPxIsReservedInitial=false，但同一条记录声明该轮廓**未被绘制**' +
+              '（rendered=false）——没画出来的轮廓没有宽度可言；浏览器在 outline-style:none 时把 outlineWidth 报成保留初始值' +
+              ' medium=3px，把那个数当实测宽度写进来就是记录级缺陷 d')
+          }
+          if ($null -ne $widthPx) {
+            Add-Failure ($Where + '.measured.outline.widthPx 必须为 null（未渲染的轮廓没有宽度可言），实际 ' + ([string]$widthPx) +
+              '；浏览器在 outline-style:none 时把 outlineWidth 报成保留初始值 medium=3px，把它写进 widthPx 就是记录级缺陷 d')
+          }
+        } else {
+          if ($reservedFlag) {
+            Add-Failure ($Where + '.measured.outline.widthPxIsReservedInitial 声明该宽度是保留的初始值，但同一条记录声明该轮廓**已被绘制**——' +
+              '被画出来的轮廓有真实宽度，不得拿保留值当实测宽度')
+          }
+          $widthNumber = 0.0
+          $isNumber = ($null -ne $widthPx) -and (-not ($widthPx -is [string])) -and (-not ($widthPx -is [bool])) -and
+            [double]::TryParse([string]$widthPx, [ref]$widthNumber)
+          if (-not $isNumber) {
+            Add-Failure ($Where + '.measured.outline.widthPx 在轮廓被绘制时必须是数字（渲染中的轮廓有真实宽度），实际 ' + ([string]$widthPx))
+          } elseif ($widthNumber -le 0) {
+            Add-Failure ($Where + '.measured.outline.widthPx 在轮廓被绘制时必须是正数，实际 ' + $widthNumber)
+          } elseif ($null -ne $computedOutlineWidth -and $computedOutlineWidth -match '^([0-9]*\.?[0-9]+)px$' -and
+            ([Math]::Abs($widthNumber - [double]$Matches[1]) -gt $script:FrozenTolerance.fixedHeightPx)) {
+            Add-Failure ($Where + '.measured.outline.widthPx=' + $widthNumber + ' 与同一条记录的 computedStyle.outlineWidth=' +
+              $computedOutlineWidth + ' 相差超过 ±' + $script:FrozenTolerance.fixedHeightPx + 'px')
+          }
+        }
+      }
+    }
   }
 
   # ---------------------------------------------------------------- fg 的出处（与 declaredToken 无关，独立执行）
@@ -1091,6 +1150,60 @@ function Assert-RootTokenRecord($Record, $ScreenshotNames, [string]$EvidenceDir,
   Assert-SharedRecordFields $Record $ScreenshotNames $EvidenceDir $Where
 }
 
+function Assert-ElementRecordSpacing($Record, [string]$Where) {
+  # S8 守卫（§3.4 第 3 项）：`derived.spacing.gaps` 里**不得出现负的 gapPx**。
+  #
+  # 为什么这是一条硬门：gap 的语义是「同一包含块、同一坐标系里两个相邻兄弟之间的可见间距」。
+  # 两个矩形只有在同一坐标系里相减才可能得到间距；一旦跨包含块相减（或对越出正常流的兄弟相减），
+  # 差值会变成负的**坐标差**，而它既不是间距、也不是"间距违规"，却是最容易被下游当成实测值
+  # 采信的那种数。真实包 visual-c2c75601-20260930-013637 的 17 条记录就是这样：-1028 / -669 /
+  # -508 / -36 / -28 / -27 / -24 / -10，全部来自不同定位上下文的兄弟 rect 相减
+  # （例：`catalog-bar > div:nth-of-type(1) -> div:nth-of-type(2)` 量出 -508，而两者的真实
+  #  垂直间距是 40；`video-list-page > header > span -> input` 量出 -28，而两者同排、横向间距是 0）。
+  # 负值在正确口径下**结构上不可能出现**，所以一旦出现就说明口径又坏了 —— fail-closed。
+  #
+  # 只判"非负 + 是数"；**不判**off-ladder：不在阶梯上的**正**值（例如 6px、10px）是真实发现，
+  # 该由审查员读 `offLadderValues` 去判，不能在这里被当成形状错误吞掉。
+  # 字段缺失与空数组是两件事：缺失 = 这条记录没有交出间距抽样（失败）；空数组 = 抽样了但
+  # 没有一对"分离"的兄弟（合法，`gaps` 可为空）。
+  $derived = Get-JsonProperty $Record 'derived'
+  if ($null -eq $derived) {
+    Add-Failure ($Where + '：缺少 derived（§3.4 第 3 项的间距抽样藏在这里）')
+    return
+  }
+  $spacing = Get-JsonProperty $derived 'spacing'
+  if ($null -eq $spacing) {
+    Add-Failure ($Where + '.derived：缺少 spacing（element 记录必须交出间距阶梯抽样；缺字段不等于"没有间距"）')
+    return
+  }
+  if (-not (Test-JsonProperty $spacing 'gaps')) {
+    Add-Failure ($Where + '.derived.spacing：缺少 gaps（允许空数组，但不允许缺字段——缺字段会被当成"没测"）')
+    return
+  }
+  $gaps = @(Get-JsonProperty $spacing 'gaps')
+  foreach ($gap in $gaps) {
+    if ($null -eq $gap) {
+      Add-Failure ($Where + '.derived.spacing.gaps：存在空条目')
+      continue
+    }
+    $gapValue = Get-JsonProperty $gap 'gapPx'
+    if ($null -eq $gapValue -or $gapValue -is [string] -or $gapValue -is [bool]) {
+      Add-Failure ($Where + '.derived.spacing.gaps：gapPx 必须是数字，实际 ' + ([string]$gapValue))
+      continue
+    }
+    $numericGap = 0.0
+    if (-not [double]::TryParse([string]$gapValue, [ref]$numericGap)) {
+      Add-Failure ($Where + '.derived.spacing.gaps：gapPx 必须是数字，实际 ' + ([string]$gapValue))
+      continue
+    }
+    if ($numericGap -lt 0) {
+      Add-Failure ($Where + '.derived.spacing.gaps：出现**负** gapPx=' + $numericGap + '（' + ([string](Get-JsonProperty $gap 'between')) +
+        '）。间距是两个相邻兄弟在**同一包含块、同一坐标系**里的可见间隙，不可能为负；负值说明这条记录是把不同定位' +
+        '上下文的 rect 相减得来的（旧口径的缺陷），不得作为实测值采信。')
+    }
+  }
+}
+
 function Assert-Record($Record, $ScreenshotNames, [string]$EvidenceDir, [string]$Where) {
   Assert-NonEmptyString $Record 'recordId' $Where | Out-Null
   $vc = Assert-NonEmptyString $Record 'vc' $Where
@@ -1123,6 +1236,7 @@ function Assert-Record($Record, $ScreenshotNames, [string]$EvidenceDir, [string]
   }
 
   Assert-SharedRecordFields $Record $ScreenshotNames $EvidenceDir $Where
+  Assert-ElementRecordSpacing $Record $Where
 
   # §3.4 第 3 项：几何（getBoundingClientRect 的逻辑像素）。
   $rect = Get-JsonProperty $Record 'rect'

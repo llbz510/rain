@@ -434,6 +434,8 @@ export function StudyInterface() {
           />
         </div>
         {visibility.catalogBar && (
+          // 高度令牌由 `CatalogBar` 自己消费（挂在 `data-testid="catalog-bar"` 的那个元素上），
+          // 这里只保留「按内容不伸缩」的 flex 语义（VC-15④ 实测的就是这个元素的高度）。
           <div style={flexAutoStyle}>
             <CatalogBar onSeek={handleSeek} />
           </div>

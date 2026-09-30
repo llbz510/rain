@@ -299,16 +299,57 @@ function readSpacingLadder(element) {
     marginBottom: numeric(style.marginBottom),
     marginLeft: numeric(style.marginLeft),
   };
+  // 「可见子元素间隙」的**口径修正（S8 / 记录级缺陷 c）**：旧写法把任意相邻兄弟的
+  // getBoundingClientRect 直接相减，于是量出过 -1028 / -669 / -508 / -36 / -28 / -27 / -24 / -10
+  // 这类**负值**（真实包 visual-c2c75601-20260930-013637：17 条记录的 gaps 全为负，占 34 条
+  // element 记录的一半）。成因不是页面有问题，而是**把不同包含块的矩形放在一起减**：
+  //   ① 轴选错——flex 行里相邻兄弟共享同一 top，两个 rect 的垂直差必然为负
+  //     （`video-list-page > header > span -> input` 量出 -28，而这两个 flex 项之间真实的横向
+  //      间隙是 0；-28 是把两个同排元素当成上下相邻的产物）；
+  //   ② 越出正常流——`position:absolute` 的浮层/下拉兄弟被当成流内兄弟参与相减
+  //     （`catalog-bar > div:nth-of-type(1) -> div:nth-of-type(2)` 量出 -508，而两者垂直间隙
+  //      是 40；-508 来自 shell 的 508px 宽与其在 scroll row 里的实际起点之差）。
+  // 现在只对**正常流兄弟**、且**由同一父节点生成**的相邻对取间隙，并要求两个轴里恰有一个方向
+  // "分离、另一个方向重叠"；不满足的对记为跳过（不记录、也不冒充成 off-ladder 值）。
+  // 由此每条被记录的 gap 都**非负**，负值在结构上不可能出现——校验器另有守卫兜底。
+  const outOfFlow = (node) => {
+    const position = getComputedStyle(node).position;
+    return position === 'absolute' || position === 'fixed';
+  };
   const gaps = [];
+  let skippedOutOfFlowPairs = 0;
+  let skippedUnpairedPairs = 0;
   const children = Array.prototype.slice.call(element.children);
   for (let index = 1; index < children.length && gaps.length < 12; index += 1) {
-    const previous = children[index - 1].getBoundingClientRect();
-    const current = children[index].getBoundingClientRect();
-    const vertical = Math.round(current.top - previous.bottom);
-    const horizontal = Math.round(current.left - previous.right);
-    const between = selectorPath(children[index - 1]) + ' -> ' + selectorPath(children[index]);
-    if (vertical !== 0) gaps.push({ between: between, axis: 'vertical', gapPx: vertical });
-    else if (horizontal !== 0) gaps.push({ between: between, axis: 'horizontal', gapPx: horizontal });
+    const previousNode = children[index - 1];
+    const currentNode = children[index];
+    if (outOfFlow(previousNode) || outOfFlow(currentNode)) {
+      skippedOutOfFlowPairs += 1;
+      continue;
+    }
+    // 「同一包含块」的代理判据 = **生成这两个兄弟的就是同一个父节点**（循环本身已保证），
+    // 这里再挡掉"父节点不是被测元素"的情形。刻意**不读 offsetParent**：它在 jsdom 里恒为 null
+    // （本仓把真实探针放进 jsdom 跑形状裁判），拿它当门会退化成"一条都不测"。
+    if (previousNode.parentElement !== element || currentNode.parentElement !== element) {
+      skippedOutOfFlowPairs += 1;
+      continue;
+    }
+    const previous = previousNode.getBoundingClientRect();
+    const current = currentNode.getBoundingClientRect();
+    const horizontalDelta = current.left - previous.right;
+    const verticalDelta = current.top - previous.bottom;
+    const horizontalOverlap = Math.min(previous.right, current.right) - Math.max(previous.left, current.left) > 0;
+    const verticalOverlap = Math.min(previous.bottom, current.bottom) - Math.max(previous.top, current.top) > 0;
+    const between = selectorPath(previousNode) + ' -> ' + selectorPath(currentNode);
+    if (verticalOverlap && horizontalDelta > 0) {
+      gaps.push({ between: between, axis: 'horizontal', gapPx: Math.round(horizontalDelta) });
+    } else if (horizontalOverlap && verticalDelta > 0) {
+      gaps.push({ between: between, axis: 'vertical', gapPx: Math.round(verticalDelta) });
+    } else {
+      // 两个方向都重叠（叠在一起）或两个方向都分离（斜对角）：都没有唯一的"间隙"可言，
+      // 如实记为跳过，不编一个数出来。
+      skippedUnpairedPairs += 1;
+    }
   }
   const offLadderValues = [];
   for (const key of Object.keys(slots)) {
@@ -319,7 +360,16 @@ function readSpacingLadder(element) {
   for (const gap of gaps) {
     if (LADDER.indexOf(gap.gapPx) === -1) offLadderValues.push('gap(' + gap.axis + ')=' + gap.gapPx + 'px');
   }
-  return { ladder: LADDER, slots: slots, gaps: gaps, offLadderValues: offLadderValues };
+  return {
+    ladder: LADDER,
+    slots: slots,
+    gaps: gaps,
+    // 抽样口径随记录一起交出：有多少相邻对被跳过、为什么跳过，都可复核。
+    containerGap: { rowGap: numeric(style.rowGap), columnGap: numeric(style.columnGap) },
+    skippedOutOfFlowPairs: skippedOutOfFlowPairs,
+    skippedUnpairedPairs: skippedUnpairedPairs,
+    offLadderValues: offLadderValues,
+  };
 }
 
 function measure(spec) {
@@ -394,6 +444,18 @@ function measure(spec) {
     : null;
   // outline-style: none 时 outline-color 不参与渲染：仍记录，但显式标出"未渲染"，不假装测过。
   const outlineRendered = style.outlineStyle !== 'none';
+  // `outline-width` 的**取得时机修正（S8 / 记录级缺陷 d）**：浏览器对 `outline-width` 的**计算值**
+  // 在元素没有轮廓时也报出初始值 `medium` —— Chromium/WebView2 逐字给出 `3px`
+  // （本机 headless Edge 实测：普通 div 与未聚焦按钮都是 outlineStyle=none / outlineWidth=3px）；
+  // 只有显式写了 `outline-width: 0px` 才报 0。所以 `none` 元素上的 3px 是**保留的初始值**，
+  // 不是被画出来的宽度。真实包 visual-c2c75601-20260930-013637 的 36 条 outline 记录全是这个形态，
+  // 唯一源规则又是 `outline: 2px dashed` + `offset: 2px`，于是"实测 3px vs 规则 2px"看起来像矛盾。
+  // 现在把这件事写成结构事实：未渲染时 widthPx=null 并置 widthPxIsReservedInitial=true，
+  // 渲染时才交出真实宽度（聚焦态记录即 2px）。
+  const computedOutlineWidth = parseFloat(style.outlineWidth);
+  const outlineWidthPx = outlineRendered
+    ? (Number.isFinite(computedOutlineWidth) ? computedOutlineWidth : null)
+    : null;
   const fontSize = parseFloat(style.fontSize);
   const fontWeight = parseInt(style.fontWeight, 10) || 400;
   const lineHeightPx = parseFloat(style.lineHeight);
@@ -504,7 +566,13 @@ function measure(spec) {
         rgba8: outlineMeasured,
         declaredComputed: style.outlineColor,
         style: style.outlineStyle,
-        widthPx: parseFloat(style.outlineWidth) || 0,
+        // 未渲染时**没有**宽度可言（见上方取得时机的说明）。渲染时才交出真实宽度。
+        widthPx: outlineWidthPx,
+        // 未渲染时 computed 报的是**保留的初始值**（Chromium/WebView2 为 medium → 3px），
+        // 不是被画出来的宽度；这个标志让校验器能在结构上拒绝"拿保留值当实测宽度"。
+        widthPxIsReservedInitial: !outlineRendered,
+        // 原始计算值另存备查：3px 这个读数本身可追溯，不被"我们解释过了"抹掉。
+        widthComputed: style.outlineWidth,
         // outline-style 为 none 时该通道未参与渲染：如实标注，不用它冒充"测过"。
         rendered: outlineRendered,
       },
