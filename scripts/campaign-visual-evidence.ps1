@@ -342,10 +342,58 @@ function measure(spec) {
   for (const layer of layers) {
     resolved = { rgb: composite(parseToken(layer.declared), resolved), alpha: 1 };
   }
-  const foregroundToken = spec.nonText ? style.borderTopColor : style.color;
+  // nonText 判据（边框色）的「前景」必须是**真的被画出来的那一边**的颜色：
+  // 取 border-top-color 会踩到一个真实的坑——只有 border-bottom 的元素，其 top 边 style:none、
+  // 计算值等于 currentColor（文字色），于是记录里报出的对比度（14.64:1）与它要判的边框色
+  // （#6e7074 压面板 = 3.49:1）**毫无关系**，审查员若采信这个数就会得到相反结论。
+  // 顺序：第一条被画出的边 → 被画出的轮廓 → 都没有时退回 border-top-color（此时记录本就该失败）。
+  const sideNames = ['Top', 'Right', 'Bottom', 'Left'];
+  let foregroundToken = style.color;
+  let foregroundSource = 'getComputedStyle(color)';
+  if (spec.nonText) {
+    let picked = null;
+    for (const side of sideNames) {
+      if (style['border' + side + 'Style'] !== 'none' && (parseFloat(style['border' + side + 'Width']) || 0) > 0) {
+        picked = { token: style['border' + side + 'Color'], source: 'getComputedStyle(border-' + side.toLowerCase() + '-color) [first painted border side]' };
+        break;
+      }
+    }
+    if (!picked && style.outlineStyle !== 'none' && (parseFloat(style.outlineWidth) || 0) > 0) {
+      picked = { token: style.outlineColor, source: 'getComputedStyle(outline-color) [painted outline]' };
+    }
+    if (!picked) {
+      picked = { token: style.borderTopColor, source: 'getComputedStyle(border-top-color) [no painted border or outline]' };
+    }
+    foregroundToken = picked.token;
+    foregroundSource = picked.source;
+  }
   const foreground = parseToken(foregroundToken);
   const foregroundRgb = foreground ? (foreground.alpha < 1 ? composite(foreground, resolved) : foreground.rgb.slice()) : null;
   const ratio = foregroundRgb ? contrastRatio(foregroundRgb, resolved.rgb) : null;
+  // §3.2 的"按层合成到不透明底"口径对**每个颜色通道**都适用，不只是 fg/bg。
+  // 边框/轮廓色此前**完全没有通道**：声明 --color-border 之类令牌的记录，实测值只散落在
+  // computedStyle 文本里，校验器没有可校验的通道，于是被判"令牌解释不了实测值"
+  // （run 36574308748 的 VC-02-settings-topbar-border）。这里把四边 + outline 显式记录成通道。
+  const borderMeasured = {};
+  const borderDeclaredComputed = {};
+  for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+    const key = 'border' + side + 'Color';
+    const shortKey = 'border' + side.toLowerCase();
+    // 与 fg 同一口径：取元素自身声明值，半透明时合成到不透明底上，再作为可校验通道。
+    const parsed = parseToken(style[key]);
+    // 解析失败**不许**拿合成底色冒充实测值：那会写出一条与真测值在结构上无法区分的自造通道。
+    // 写 null（校验器会判"必须是 3 个通道"并当场失败），原始字符串仍留在 declaredComputed 供诊断。
+    borderMeasured[shortKey] = parsed
+      ? (parsed.alpha < 1 ? composite(parsed, resolved) : parsed.rgb.slice())
+      : null;
+    borderDeclaredComputed[shortKey] = style[key];
+  }
+  const outlineParsed = parseToken(style.outlineColor);
+  const outlineMeasured = outlineParsed
+    ? (outlineParsed.alpha < 1 ? composite(outlineParsed, resolved) : outlineParsed.rgb.slice())
+    : null;
+  // outline-style: none 时 outline-color 不参与渲染：仍记录，但显式标出"未渲染"，不假装测过。
+  const outlineRendered = style.outlineStyle !== 'none';
   const fontSize = parseFloat(style.fontSize);
   const fontWeight = parseInt(style.fontWeight, 10) || 400;
   const lineHeightPx = parseFloat(style.lineHeight);
@@ -373,6 +421,19 @@ function measure(spec) {
       borderTopWidth: style.borderTopWidth,
       borderTopStyle: style.borderTopStyle,
       borderTopColor: style.borderTopColor,
+      // 四边的 width/style 都要写进快照：`measured.border.rendered.<side>` 不能自证——
+      // 校验器用它**交叉核对**（rendered=true 的边必须 width>0 且 style≠none），
+      // 否则采集器一旦把 rendered 取自错误属性，整道门控会静默失效。
+      borderRightWidth: style.borderRightWidth,
+      borderRightStyle: style.borderRightStyle,
+      borderBottomWidth: style.borderBottomWidth,
+      borderBottomStyle: style.borderBottomStyle,
+      borderLeftWidth: style.borderLeftWidth,
+      borderLeftStyle: style.borderLeftStyle,
+      // 轮廓的 style/width 同样必填：measured.outline.rendered 也是自报字段，必须能交叉核对
+      // （与四边边框同一形态的旁路：声明"画了聚焦圈"却没有任何计算样式可对账）。
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
       borderRadius: style.borderTopLeftRadius,
       paddingTop: style.paddingTop,
       paddingRight: style.paddingRight,
@@ -398,8 +459,13 @@ function measure(spec) {
       spacing: readSpacingLadder(element),
     },
     measured: {
+      // 本条判据测的**是哪个颜色角色**：把"这个令牌该出现在哪个通道"变成可校验的结构事实，
+      // 而不是靠人读描述。校验器据此只在该角色的通道里找 declaredToken；角色与令牌通道不符即失败。
+      // text=文字色 / background=底色 / border=边框色 / graphic=图形色（非文字非边框的着色）。
+      role: spec.colorRole || (spec.nonText ? 'border' : 'text'),
       fg: {
-        source: spec.nonText ? 'getComputedStyle(border-top-color)' : 'getComputedStyle(color)',
+        // 来源如实写出（nonText 记录取的是**第一条被画出的边/轮廓**，不再是固定的 border-top-color）。
+        source: foregroundSource,
         declared: foregroundToken,
         rgba8: foregroundRgb,
         alpha: foreground ? foreground.alpha : null,
@@ -407,11 +473,40 @@ function measure(spec) {
       },
       bg: {
         source: 'composite(ancestor backgrounds over #ffffff; transparent layers skipped)',
-        declared: style.backgroundColor,
+        // §3.2：实测记录必须**先按层合成到不透明底色**再比较。校验器（Assert-DecomposedColour）
+        // 要求 declared 与 rgba8 **都是**不透明值、且逐通道相差 ≤ ±1。
+        // 早先 declared 放的是元素自己的 style.backgroundColor：元素背景透明时它就是 rgba(0, 0, 0, 0)，
+        // 于是合成做对了、declared 没跟上 —— 8 条记录在托管 self-validate 被判失败
+        // （run 36574308748：'底色声明 rgba(0, 0, 0, 0) 不是不透明值'）。
+        // 现在 declared 就是合成结果本身；元素自己的原始计算值另存 declaredComputed 以备追溯。
+        declared: 'rgb(' + resolved.rgb[0] + ', ' + resolved.rgb[1] + ', ' + resolved.rgb[2] + ')',
+        declaredComputed: style.backgroundColor,
         rgba8: resolved.rgb,
         alpha: 1,
         composited: true,
         layers: layers,
+      },
+      // 边框/轮廓：四边 + outline 各自一个**合成后**的通道，与 bg/fg 同一口径。
+      // 声明边框令牌的判据（VC-02 的 *-border-*、VC-03 的 *-border）靠这些通道才可校验。
+      border: {
+        source: 'composite(own border color over the composited backdrop; §3.2)',
+        rgba8: borderMeasured,
+        declaredComputed: borderDeclaredComputed,
+        rendered: {
+          top: style.borderTopStyle !== 'none',
+          right: style.borderRightStyle !== 'none',
+          bottom: style.borderBottomStyle !== 'none',
+          left: style.borderLeftStyle !== 'none',
+        },
+      },
+      outline: {
+        source: 'composite(own outline color over the composited backdrop; §3.2)',
+        rgba8: outlineMeasured,
+        declaredComputed: style.outlineColor,
+        style: style.outlineStyle,
+        widthPx: parseFloat(style.outlineWidth) || 0,
+        // outline-style 为 none 时该通道未参与渲染：如实标注，不用它冒充"测过"。
+        rendered: outlineRendered,
       },
       contrastRatio: {
         value: ratio === null ? null : Number(ratio.toFixed(6)),
@@ -497,6 +592,52 @@ function Test-Property($Object, [string]$Name) {
 function Add-Fact([string]$Name, $Value) {
   # 关键阶段的实测事实（成功/失败都写进证据包或诊断），避免只能靠残缺日志猜。
   $script:facts[$Name] = $Value
+}
+
+function Get-WebView2RuntimePremise([string]$AppBinary) {
+  # 「有前提的降级」的前提本体。**顶层函数**：finally 也会调用它，而放进主 try 会让
+  # $ErrorActionPreference = 'Stop' 下的调用变成终止性 CommandNotFoundException，
+  # 从而吞掉 failure.json —— 与两个驱动函数是同一个坑。
+  #
+  # 前提：WebView2 Evergreen 运行时是**机器级**属性，同一主机上所有用 Evergreen 的应用共用一份
+  # 运行时。因此"预检那次读数"与"采集会话的读数"在同一台机器上指的是同一个运行时版本。
+  # 推翻它的唯一情形是应用旁边带了**随包固定版本**的运行时（那时版本钉在某一份副本上，
+  # 与机器级安装无关）。两条同时成立，前提才成立；否则如实写"未成立"，不许当成等价替代。
+  # workflow 装 msedgedriver 时读的就是这里扫的同一个目录（见 visual-evidence.yml）。
+  $evergreenRoots = @()
+  if (${env:ProgramFiles(x86)}) { $evergreenRoots += (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\EdgeWebView\Application') }
+  if ($env:ProgramFiles) { $evergreenRoots += (Join-Path $env:ProgramFiles 'Microsoft\EdgeWebView\Application') }
+  $evergreenVersions = @()
+  foreach ($root in $evergreenRoots) {
+    if (Test-Path -LiteralPath $root) {
+      $evergreenVersions += @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+        ForEach-Object { $_.Name })
+    }
+  }
+  $evergreenVersions = @($evergreenVersions | Sort-Object -Unique)
+  $candidates = @($env:RAIN_E2E_FIXED_RUNTIME_DIR)
+  if (-not [string]::IsNullOrWhiteSpace($AppBinary)) { $candidates += (Split-Path -Parent $AppBinary) }
+  $fixedRuntimeNearby = @()
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+    $probe = Join-Path $candidate 'Microsoft.WebView2.FixedVersionRuntime'
+    if (Test-Path -LiteralPath $probe) { $fixedRuntimeNearby += $probe }
+  }
+  $machineLevelPresent = $evergreenVersions.Count -gt 0
+  $fixedPresent = $fixedRuntimeNearby.Count -gt 0
+  $established = ($machineLevelPresent -and -not $fixedPresent)
+  $statement = 'PREMISE NOT ESTABLISHED: cannot show that this host shares one Evergreen runtime; treat the runtime version binding as a declared downgrade only'
+  if ($established) {
+    $statement = 'machine-level Evergreen install present and no fixed-version runtime alongside the app: a same-host reading is the same runtime'
+  }
+  return [ordered]@{
+    machineLevelEvergreenPresent = $machineLevelPresent
+    fixedVersionRuntimePresent = $fixedPresent
+    evergreenRuntimeVersions = $(if ($machineLevelPresent) { $evergreenVersions -join ',' } else { '(none found on this host)' })
+    established = $established
+    statement = $statement
+  }
 }
 
 function Get-DiagnosticTail([string]$Path, [int]$Lines = 60) {
@@ -746,21 +887,21 @@ function Write-AccentSweepRecords($Probe, [string]$RecordsDir, $ScreenshotRefs, 
 # 每条 spec 只引用合同 §4 已写明的判据与 §5.5 已冻结的取值；不发明新语义、新颜色或新令牌。
 function Get-ListSpecs {
   return @(
-    @{ id = 'VC-01-list-body-bg'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'video-list'; selector = 'body'; description = 'VC-01② 实测背景类颜色的相对亮度'; scope = 'element' },
-    @{ id = 'VC-01-list-page-bg'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'video-list'; selector = '[data-testid="video-list-page"]'; description = 'VC-01② 页面根容器背景'; scope = 'element' },
-    @{ id = 'VC-01-list-topbar'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'video-list'; selector = '[data-testid="video-list-page"] header'; description = 'VC-01② 顶栏背景'; scope = 'element' },
-    @{ id = 'VC-02-list-bg-token'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'video-list'; selector = '[data-testid="video-list-page"]'; description = ('VC-02 深底套 --color-bg 实测值，冻结值 ' + $frozen.dark.bg); scope = 'element'; declaredToken = '--color-bg'; declaredTokenValue = $frozen.dark.bg },
-    @{ id = 'VC-02-list-topbar-surface'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'video-list'; selector = '[data-testid="video-list-page"] header'; description = ('VC-02 深底套 --color-surface 实测值，冻结值 ' + $frozen.dark.surface); scope = 'element'; declaredToken = '--color-surface'; declaredTokenValue = $frozen.dark.surface },
-    @{ id = 'VC-02-list-import-button'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = ('VC-02 主按钮取该套面板色（描边款；--color-surface 冻结值 ' + $frozen.dark.surface + '）'); scope = 'element'; declaredToken = '--color-surface'; declaredTokenValue = $frozen.dark.surface },
-    @{ id = 'VC-02-list-border-token'; vc = 'VC-02'; criterion = 'neutralScaleBorderToken'; page = 'video-list'; selector = '[data-testid="video-list-page"] header input[type="text"]'; description = ('VC-02 深底套 1px 边框令牌实测（--color-border 冻结值 ' + $frozen.dark.border + '）'); nonText = $true; scope = 'element'; declaredToken = '--color-border'; declaredTokenValue = $frozen.dark.border },
-    @{ id = 'VC-03-list-import-button'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedText'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = ('VC-03② 描边款文字 = --color-fg ' + $frozen.dark.fg + '（对底 12.32:1）'); scope = 'element'; declaredToken = '--color-fg'; declaredTokenValue = $frozen.dark.fg },
-    @{ id = 'VC-03-list-import-button-border'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedBorder'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = ('VC-03② 描边款边框 1px = --color-border ' + $frozen.dark.border + '（对底 4.80:1）'); nonText = $true; scope = 'element'; declaredToken = '--color-border'; declaredTokenValue = $frozen.dark.border },
-    @{ id = 'VC-03-list-import-button-focus-ring'; vc = 'VC-03'; criterion = 'focusRing2pxDashedFg'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = 'VC-03④ 聚焦圈：程序化 focus 后的实测 outline/border + 是否匹配 :focus-visible（键盘 Tab 路径属 V1b）'; focus = $true; scope = 'element' },
-    @{ id = 'VC-12-list-topbar-title'; vc = 'VC-12'; criterion = 'fontStackWeightSizeOnTopbarTitle'; page = 'video-list'; selector = '[data-testid="video-list-page"] header > span'; description = 'VC-12①②③ 顶栏标题的字体族/字重/字号 + 文本对比（仅该元素实测；全页面清点属 V1b）'; scope = 'element' },
-    @{ id = 'VC-15-list-topbar-height'; vc = 'VC-15'; criterion = 'keyHeightTopbar40'; page = 'video-list'; selector = '[data-testid="video-list-page"] header'; description = 'VC-15④ 顶栏高度 40'; scope = 'element' },
-    @{ id = 'VC-15-list-control-radius'; vc = 'VC-15'; criterion = 'radiusLadder'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = 'VC-15② 圆角必须取自冻结阶梯 0/4/8/12/胶囊'; scope = 'element' },
-    @{ id = 'VC-15-list-control-spacing'; vc = 'VC-15'; criterion = 'spacingLadder'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = 'VC-15① 间距只取 4/8/12/16/20/24/32/48（该元素的 padding/margin 与子元素间隙实测）'; scope = 'element' },
-    @{ id = 'VC-15-list-main-shadow'; vc = 'VC-15'; criterion = 'cardNoShadow'; page = 'video-list'; selector = '[data-testid="video-list-page"] main'; description = 'VC-15③ 卡片区不得有阴影（实测 box-shadow；卡片刻意不用阴影分层）'; scope = 'element' },
+    @{ id = 'VC-01-list-body-bg'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'video-list'; selector = 'body'; description = 'VC-01② 实测背景类颜色的相对亮度'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-01-list-page-bg'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'video-list'; selector = '[data-testid="video-list-page"]'; description = 'VC-01② 页面根容器背景'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-01-list-topbar'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'video-list'; selector = '[data-testid="video-list-page"] header'; description = 'VC-01② 顶栏背景'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-02-list-bg-token'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'video-list'; selector = '[data-testid="video-list-page"]'; description = ('VC-02 深底套 --color-bg 实测值，冻结值 ' + $frozen.dark.bg); scope = 'element'; declaredToken = '--color-bg'; declaredTokenValue = $frozen.dark.bg; colorRole = 'background' },
+    @{ id = 'VC-02-list-topbar-surface'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'video-list'; selector = '[data-testid="video-list-page"] header'; description = ('VC-02 深底套 --color-surface 实测值，冻结值 ' + $frozen.dark.surface); scope = 'element'; declaredToken = '--color-surface'; declaredTokenValue = $frozen.dark.surface; colorRole = 'background' },
+    @{ id = 'VC-02-list-import-button'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = ('VC-02 主按钮取该套面板色（描边款；--color-surface 冻结值 ' + $frozen.dark.surface + '）'); scope = 'element'; declaredToken = '--color-surface'; declaredTokenValue = $frozen.dark.surface; colorRole = 'background' },
+    @{ id = 'VC-02-list-border-token'; vc = 'VC-02'; criterion = 'neutralScaleBorderToken'; page = 'video-list'; selector = '[data-testid="video-list-page"] header input[type="text"]'; description = ('VC-02 深底套 1px 边框令牌实测（--color-border 冻结值 ' + $frozen.dark.border + '）'); nonText = $true; scope = 'element'; declaredToken = '--color-border'; declaredTokenValue = $frozen.dark.border; colorRole = 'border' },
+    @{ id = 'VC-03-list-import-button'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedText'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = ('VC-03② 描边款文字 = --color-fg ' + $frozen.dark.fg + '（对底 12.32:1）'); scope = 'element'; declaredToken = '--color-fg'; declaredTokenValue = $frozen.dark.fg; colorRole = 'text' },
+    @{ id = 'VC-03-list-import-button-border'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedBorder'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = ('VC-03② 描边款边框 1px = --color-border ' + $frozen.dark.border + '（对底 4.80:1）'); nonText = $true; scope = 'element'; declaredToken = '--color-border'; declaredTokenValue = $frozen.dark.border; colorRole = 'border' },
+    @{ id = 'VC-03-list-import-button-focus-ring'; vc = 'VC-03'; criterion = 'focusRing2pxDashedFg'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = 'VC-03④ 聚焦圈：程序化 focus 后的实测 outline/border + 是否匹配 :focus-visible（键盘 Tab 路径属 V1b）'; focus = $true; scope = 'element'; colorRole = 'graphic' },
+    @{ id = 'VC-12-list-topbar-title'; vc = 'VC-12'; criterion = 'fontStackWeightSizeOnTopbarTitle'; page = 'video-list'; selector = '[data-testid="video-list-page"] header > span'; description = 'VC-12①②③ 顶栏标题的字体族/字重/字号 + 文本对比（仅该元素实测；全页面清点属 V1b）'; scope = 'element'; colorRole = 'text' },
+    @{ id = 'VC-15-list-topbar-height'; vc = 'VC-15'; criterion = 'keyHeightTopbar40'; page = 'video-list'; selector = '[data-testid="video-list-page"] header'; description = 'VC-15④ 顶栏高度 40'; scope = 'element'; colorRole = 'nonColour' },
+    @{ id = 'VC-15-list-control-radius'; vc = 'VC-15'; criterion = 'radiusLadder'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = 'VC-15② 圆角必须取自冻结阶梯 0/4/8/12/胶囊'; scope = 'element'; colorRole = 'nonColour' },
+    @{ id = 'VC-15-list-control-spacing'; vc = 'VC-15'; criterion = 'spacingLadder'; page = 'video-list'; selector = '[data-testid="video-list-page"] header button'; description = 'VC-15① 间距只取 4/8/12/16/20/24/32/48（该元素的 padding/margin 与子元素间隙实测）'; scope = 'element'; colorRole = 'nonColour' },
+    @{ id = 'VC-15-list-main-shadow'; vc = 'VC-15'; criterion = 'cardNoShadow'; page = 'video-list'; selector = '[data-testid="video-list-page"] main'; description = 'VC-15③ 卡片区不得有阴影（实测 box-shadow；卡片刻意不用阴影分层）'; scope = 'element'; colorRole = 'nonColour' },
     @{ id = 'VC-15-list-spacing-ladder-tokens'; vc = 'VC-15'; criterion = 'spacingLadderTokens'; page = 'video-list'; selector = ':root'; description = 'VC-15① 间距阶梯令牌解析值必须是 4/8/12/16/20/24/32/48 且只有这 8 档'; scope = 'rootTokens' },
     @{ id = 'VC-15-list-radius-ladder-tokens'; vc = 'VC-15'; criterion = 'radiusLadderTokens'; page = 'video-list'; selector = ':root'; description = 'VC-15② 圆角阶梯令牌解析值必须是 0/4/8/12/胶囊 五档'; scope = 'rootTokens' },
     @{ id = 'VC-12-list-font-size-ladder-tokens'; vc = 'VC-12'; criterion = 'fontSizeLadderTokens'; page = 'video-list'; selector = ':root'; description = 'VC-12③ 字号阶梯令牌解析值必须只有 18/16/14/13/12 五档'; scope = 'rootTokens' }
@@ -769,31 +910,31 @@ function Get-ListSpecs {
 
 function Get-SettingsSpecs {
   return @(
-    @{ id = 'VC-01-settings-bg'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'settings'; selector = '[data-testid="settings-page"]'; description = 'VC-01② 设置页根背景'; scope = 'element' },
-    @{ id = 'VC-01-settings-topbar'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = 'VC-01② 设置页顶栏背景'; scope = 'element' },
-    @{ id = 'VC-02-settings-bg-token'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="settings-page"]'; description = ('VC-02 浅底套 bg 实测值，冻结值 ' + $frozen.light.bg); scope = 'element'; declaredToken = 'COLORS.bg'; declaredTokenValue = $frozen.light.bg },
-    @{ id = 'VC-02-settings-topbar-panel'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = ('VC-02 浅底套 panel 实测值，冻结值 ' + $frozen.light.panel); scope = 'element'; declaredToken = 'COLORS.panel'; declaredTokenValue = $frozen.light.panel },
-    @{ id = 'VC-02-settings-add-model'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="add-model"]'; description = 'VC-02 浅底套主按钮面板色（描边款）'; scope = 'element'; declaredToken = 'COLORS.panel'; declaredTokenValue = $frozen.light.panel },
-    @{ id = 'VC-02-settings-topbar-muted'; vc = 'VC-02'; criterion = 'neutralScaleMutedToken'; page = 'settings'; selector = '[data-testid="settings-page"] > div > span + span'; description = ('VC-02 浅底套次要文字实测（COLORS.muted 冻结值 ' + $frozen.light.muted + '）'); scope = 'element'; declaredToken = 'COLORS.muted'; declaredTokenValue = $frozen.light.muted },
-    @{ id = 'VC-02-settings-topbar-border'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = ('VC-02/VCGAP-20 浅底套 1px 边框令牌实测（COLORS.border 冻结值 ' + $frozen.light.border + '）'); nonText = $true; scope = 'element'; declaredToken = 'COLORS.border'; declaredTokenValue = $frozen.light.border },
-    @{ id = 'VC-03-settings-add-model'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedText'; page = 'settings'; selector = '[data-testid="add-model"]'; description = ('VC-03② 浅底套描边款文字 = COLORS.fg ' + $frozen.light.fg + '（对底 14.64:1）'); scope = 'element'; declaredToken = 'COLORS.fg'; declaredTokenValue = $frozen.light.fg },
-    @{ id = 'VC-03-settings-add-model-border'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedBorder'; page = 'settings'; selector = '[data-testid="add-model"]'; description = ('VC-03② 浅底套描边款边框 1px = COLORS.border ' + $frozen.light.border + '（对底 3.49:1）'); nonText = $true; scope = 'element'; declaredToken = 'COLORS.border'; declaredTokenValue = $frozen.light.border },
-    @{ id = 'VC-12-settings-topbar-title'; vc = 'VC-12'; criterion = 'fontStackWeightSizeOnTopbarTitle'; page = 'settings'; selector = '[data-testid="settings-page"] > div > span'; description = 'VC-12①②③ 顶栏标题的字体族/字重/字号 + 文本对比（仅该元素实测；全页面清点属 V1b）'; scope = 'element' },
-    @{ id = 'VC-15-settings-topbar-height'; vc = 'VC-15'; criterion = 'keyHeightTopbar40'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = 'VC-15④ 顶栏高度 40' },
-    @{ id = 'VC-15-settings-add-model-radius'; vc = 'VC-15'; criterion = 'radiusLadder'; page = 'settings'; selector = '[data-testid="add-model"]'; description = 'VC-15② 圆角必须取自冻结阶梯（S7 曾把阶梯外的 6 改回 8）' },
-    @{ id = 'VC-15-settings-add-model-spacing'; vc = 'VC-15'; criterion = 'spacingLadder'; page = 'settings'; selector = '[data-testid="add-model"]'; description = 'VC-15① 间距只取 4/8/12/16/20/24/32/48（该元素的 padding/margin 与子元素间隙实测）' }
+    @{ id = 'VC-01-settings-bg'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'settings'; selector = '[data-testid="settings-page"]'; description = 'VC-01② 设置页根背景'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-01-settings-topbar'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = 'VC-01② 设置页顶栏背景'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-02-settings-bg-token'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="settings-page"]'; description = ('VC-02 浅底套 bg 实测值，冻结值 ' + $frozen.light.bg); scope = 'element'; declaredToken = 'COLORS.bg'; declaredTokenValue = $frozen.light.bg; colorRole = 'background' },
+    @{ id = 'VC-02-settings-topbar-panel'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = ('VC-02 浅底套 panel 实测值，冻结值 ' + $frozen.light.panel); scope = 'element'; declaredToken = 'COLORS.panel'; declaredTokenValue = $frozen.light.panel; colorRole = 'background' },
+    @{ id = 'VC-02-settings-add-model'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="add-model"]'; description = 'VC-02 浅底套主按钮面板色（描边款）'; scope = 'element'; declaredToken = 'COLORS.panel'; declaredTokenValue = $frozen.light.panel; colorRole = 'background' },
+    @{ id = 'VC-02-settings-topbar-muted'; vc = 'VC-02'; criterion = 'neutralScaleMutedToken'; page = 'settings'; selector = '[data-testid="settings-page"] > div > span + span'; description = ('VC-02 浅底套次要文字实测（COLORS.muted 冻结值 ' + $frozen.light.muted + '）'); scope = 'element'; declaredToken = 'COLORS.muted'; declaredTokenValue = $frozen.light.muted; colorRole = 'text' },
+    @{ id = 'VC-02-settings-topbar-border'; vc = 'VC-02'; criterion = 'neutralScaleToken'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = ('VC-02/VCGAP-20 浅底套 1px 边框令牌实测（COLORS.border 冻结值 ' + $frozen.light.border + '）'); nonText = $true; scope = 'element'; declaredToken = 'COLORS.border'; declaredTokenValue = $frozen.light.border; colorRole = 'border' },
+    @{ id = 'VC-03-settings-add-model'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedText'; page = 'settings'; selector = '[data-testid="add-model"]'; description = ('VC-03② 浅底套描边款文字 = COLORS.fg ' + $frozen.light.fg + '（对底 14.64:1）'); scope = 'element'; declaredToken = 'COLORS.fg'; declaredTokenValue = $frozen.light.fg; colorRole = 'text' },
+    @{ id = 'VC-03-settings-add-model-border'; vc = 'VC-03'; criterion = 'primaryButtonOutlinedBorder'; page = 'settings'; selector = '[data-testid="add-model"]'; description = ('VC-03② 浅底套描边款边框 1px = COLORS.border ' + $frozen.light.border + '（对底 3.49:1）'); nonText = $true; scope = 'element'; declaredToken = 'COLORS.border'; declaredTokenValue = $frozen.light.border; colorRole = 'border' },
+    @{ id = 'VC-12-settings-topbar-title'; vc = 'VC-12'; criterion = 'fontStackWeightSizeOnTopbarTitle'; page = 'settings'; selector = '[data-testid="settings-page"] > div > span'; description = 'VC-12①②③ 顶栏标题的字体族/字重/字号 + 文本对比（仅该元素实测；全页面清点属 V1b）'; scope = 'element'; colorRole = 'text' },
+    @{ id = 'VC-15-settings-topbar-height'; vc = 'VC-15'; criterion = 'keyHeightTopbar40'; page = 'settings'; selector = '[data-testid="settings-page"] > div'; description = 'VC-15④ 顶栏高度 40'; scope = 'element'; colorRole = 'nonColour' },
+    @{ id = 'VC-15-settings-add-model-radius'; vc = 'VC-15'; criterion = 'radiusLadder'; page = 'settings'; selector = '[data-testid="add-model"]'; description = 'VC-15② 圆角必须取自冻结阶梯（S7 曾把阶梯外的 6 改回 8）'; scope = 'element'; colorRole = 'nonColour' },
+    @{ id = 'VC-15-settings-add-model-spacing'; vc = 'VC-15'; criterion = 'spacingLadder'; page = 'settings'; selector = '[data-testid="add-model"]'; description = 'VC-15① 间距只取 4/8/12/16/20/24/32/48（该元素的 padding/margin 与子元素间隙实测）'; scope = 'element'; colorRole = 'nonColour' }
   )
 }
 
 function Get-StudySpecs {
   return @(
-    @{ id = 'VC-01-study-root'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'study'; selector = '[data-testid="study-interface"]'; description = 'VC-01② 学习页根容器背景（实测合成后的不透明底色）'; scope = 'element' },
-    @{ id = 'VC-01-study-body'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'study'; selector = 'body'; description = 'VC-01② 学习页 body 背景（级联来源）'; scope = 'element' },
-    @{ id = 'VC-01-study-video-shell'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'study'; selector = '[data-testid="video-zone-shell"]'; description = 'VC-01② 学习页视频区容器背景（实测合成后的不透明底色）'; scope = 'element' },
-    @{ id = 'VC-03-study-rightpanel-tabbar'; vc = 'VC-03'; criterion = 'controlNoBrandAccent'; page = 'study'; selector = '[data-testid="study-interface"] > aside:last-of-type > div'; description = 'VC-03③ 右面板 Tab 条（aside:last-of-type = 右侧面板，不是左侧目录树）；本轮只测静态部分，激活态属 V1b'; scope = 'element' },
+    @{ id = 'VC-01-study-root'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'study'; selector = '[data-testid="study-interface"]'; description = 'VC-01② 学习页根容器背景（实测合成后的不透明底色）'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-01-study-body'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'study'; selector = 'body'; description = 'VC-01② 学习页 body 背景（级联来源）'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-01-study-video-shell'; vc = 'VC-01'; criterion = 'backgroundLuminanceBelow0.05'; page = 'study'; selector = '[data-testid="video-zone-shell"]'; description = 'VC-01② 学习页视频区容器背景（实测合成后的不透明底色）'; scope = 'element'; colorRole = 'background' },
+    @{ id = 'VC-03-study-rightpanel-tabbar'; vc = 'VC-03'; criterion = 'controlNoBrandAccent'; page = 'study'; selector = '[data-testid="study-interface"] > aside:last-of-type > div'; description = 'VC-03③ 右面板 Tab 条（aside:last-of-type = 右侧面板，不是左侧目录树）；本轮只测静态部分，激活态属 V1b'; scope = 'element'; colorRole = 'graphic' },
     @{ id = 'VC-04-study-paragraph-type-tokens'; vc = 'VC-04'; criterion = 'paragraphTypeToken'; page = 'study'; selector = ':root'; description = 'VC-04 段落类型彩字态**令牌解析值**（四个 --color-* 令牌；页面上的实际使用点与「第五种颜色」本轮不判，见 coverage scopeNote）'; scope = 'rootTokens' },
-    @{ id = 'VC-15-study-catalogbar-height'; vc = 'VC-15'; criterion = 'keyHeightCatalogBar80'; page = 'study'; selector = '[data-testid="catalog-bar"]'; description = 'VC-15④ 目录横条高度 80'; scope = 'element' },
-    @{ id = 'VC-15-study-root-spacing'; vc = 'VC-15'; criterion = 'spacingLadder'; page = 'study'; selector = '[data-testid="study-interface"]'; description = 'VC-15① 间距只取 4/8/12/16/20/24/32/48（该元素的 padding/margin 与子元素间隙实测）'; scope = 'element' }
+    @{ id = 'VC-15-study-catalogbar-height'; vc = 'VC-15'; criterion = 'keyHeightCatalogBar80'; page = 'study'; selector = '[data-testid="catalog-bar"]'; description = 'VC-15④ 目录横条高度 80'; scope = 'element'; colorRole = 'nonColour' },
+    @{ id = 'VC-15-study-root-spacing'; vc = 'VC-15'; criterion = 'spacingLadder'; page = 'study'; selector = '[data-testid="study-interface"]'; description = 'VC-15① 间距只取 4/8/12/16/20/24/32/48（该元素的 padding/margin 与子元素间隙实测）'; scope = 'element'; colorRole = 'nonColour' }
   )
 }
 
@@ -1440,6 +1581,9 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   $manifest = [ordered]@{
     schemaVersion = 1
     evidenceId = $evidenceId
+    # 包的**溯源**：这个包是真实采集产出的。把旧数据改写成新形状的"演练包"必须写 rehearsal，
+    # 校验器据此在结尾改用不同措辞（形状一样，含义完全不同）。
+    provenance = 'real-collector'
     generatedAt = [DateTimeOffset]::Now.ToString('o')
     generatedBy = 'scripts/campaign-visual-evidence.ps1'
     target = [ordered]@{
@@ -1487,6 +1631,12 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   foreach ($name in $screenshotNames) {
     $manifest.attachments.screenshotBytes[$name] = (Get-Item -LiteralPath (Join-Path $packageRoot $name)).Length
   }
+  # 版本来源含 preflight-devtools（**有前提的降级**）时，把前提本体一并写进**成功包**：
+  # 只在 failure.json 里留痕是不够的——正好在"包有效"这种最需要自证绑定强度的时候，包会缺掉前提。
+  # 校验器对此 fail-closed（缺 premise 或 established=false 都判失败）。
+  if ($runtimeVersionSources -contains 'preflight-devtools') {
+    $manifest.host.webview2.premise = Get-WebView2RuntimePremise $appBinary
+  }
   [System.IO.File]::WriteAllText(
     (Join-Path $packageRoot 'manifest.json'),
     (ConvertTo-Json -InputObject $manifest -Depth 12),
@@ -1507,6 +1657,21 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
 } catch {
   $primaryError = $_
 } finally {
+    # 版本**来源**的降级前提：WebView2 Evergreen 运行时是**机器级**属性 —— 同一主机上所有使用
+    # Evergreen 的应用共用同一份运行时。所以"预检那次读数"与"采集会话的读数"在同一台机器上指的是
+    # 同一个运行时版本；这不是等价替代，而是有前提的降级，前提本身必须被验证并留痕。
+    # 这里记录机器级 Evergreen 安装（workflow 装驱动时用的就是这个目录，见 visual-evidence.yml 的
+    # 'Install matching WebView2 driver'），并确认**没有**随包固定版本的运行时：
+    # 只有"机器级安装存在 + 应用目录里没有固定版本运行时"两条同时成立，该前提才成立。
+    try {
+      $premiseForFacts = Get-WebView2RuntimePremise $appBinary
+      Add-Fact 'evergreenRuntimeVersions' $premiseForFacts.evergreenRuntimeVersions
+      Add-Fact 'machineLevelEvergreenPresent' ([string]$premiseForFacts.machineLevelEvergreenPresent)
+      Add-Fact 'fixedVersionRuntimePresent' ([string]$premiseForFacts.fixedVersionRuntimePresent)
+      Add-Fact 'webview2VersionPremise' $premiseForFacts.statement
+    } catch {
+      Add-Fact 'webview2VersionPremise' ('could not inspect the WebView2 install: ' + $_.Exception.Message)
+    }
   # 会话失败时补一条独立判据：应用有没有真的把调试端口开起来。这是把"响应体为空"与
   # "DevToolsActivePort 不存在"两种形态区分开的唯一现成手段（两者在失败日志里长得不一样，
   # 但只有这一条能说明端口到底开没开）。

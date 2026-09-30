@@ -120,6 +120,11 @@ function rgb8ToHex([r, g, b]: [number, number, number]): string {
   return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`
 }
 
+/** The form getComputedStyle actually returns in Chromium/WebView2: `rgb(r, g, b)`. */
+function rgb8ToCss([r, g, b]: [number, number, number]): string {
+  return `rgb(${r}, ${g}, ${b})`
+}
+
 const DARK_FG: [number, number, number] = hexToRgb8('#e5e5e5')
 const DARK_SURFACE: [number, number, number] = hexToRgb8('#242424')
 const DARK_BG: [number, number, number] = hexToRgb8('#1a1a1a')
@@ -142,6 +147,33 @@ interface RecordOverrides {
   fgSource?: string
   bgSource?: string
   declared?: { fg?: string; bg?: string }
+  /** Which colour role the criterion measures; the validator maps the declared token onto this channel. */
+  role?: string
+  /** Composited border channels, one per side. */
+  border?: { top?: [number, number, number]; right?: [number, number, number]; bottom?: [number, number, number]; left?: [number, number, number] }
+  /** Which border sides are actually painted. Defaults to "all four" (the shape most records have). */
+  borderRendered?: { top?: boolean; right?: boolean; bottom?: boolean; left?: boolean }
+  /** Raw computed border colours written next to the composited channels (traceability field). */
+  borderDeclaredComputed?: { top?: string; right?: string; bottom?: string; left?: string }
+  /** Composited outline channel. */
+  outline?: [number, number, number]
+  /** Whether the outline is actually painted (defaults to false: most elements have none). */
+  outlineRendered?: boolean
+  /** Raw computed outline colour written next to the composited channel. */
+  outlineDeclaredComputed?: string
+  /** Per-side computed border width/style as they appear in computedStyle (used to cross-check `rendered`). */
+  computedBorder?: {
+    topWidth?: string
+    topStyle?: string
+    rightWidth?: string
+    rightStyle?: string
+    bottomWidth?: string
+    bottomStyle?: string
+    leftWidth?: string
+    leftStyle?: string
+    outlineStyle?: string
+    outlineWidth?: string
+  }
   fontSizePx?: number
   fontWeight?: number
   threshold?: number
@@ -194,9 +226,17 @@ function buildRecord(overrides: RecordOverrides) {
       fontWeight: String(fontWeight),
       fontVariantNumeric: 'normal',
       lineHeight: `${Math.round(fontSizePx * 1.538)}px`,
-      borderTopWidth: '1px',
-      borderTopStyle: 'solid',
+      borderTopWidth: overrides.computedBorder?.topWidth ?? '1px',
+      borderTopStyle: overrides.computedBorder?.topStyle ?? 'solid',
       borderTopColor: bgHex,
+      borderRightWidth: overrides.computedBorder?.rightWidth ?? '1px',
+      borderRightStyle: overrides.computedBorder?.rightStyle ?? 'solid',
+      borderBottomWidth: overrides.computedBorder?.bottomWidth ?? '1px',
+      borderBottomStyle: overrides.computedBorder?.bottomStyle ?? 'solid',
+      borderLeftWidth: overrides.computedBorder?.leftWidth ?? '1px',
+      borderLeftStyle: overrides.computedBorder?.leftStyle ?? 'solid',
+      outlineStyle: overrides.computedBorder?.outlineStyle ?? 'none',
+      outlineWidth: overrides.computedBorder?.outlineWidth ?? '0px',
       borderRadius: '8px',
       paddingTop: '4px',
       paddingRight: '8px',
@@ -209,6 +249,10 @@ function buildRecord(overrides: RecordOverrides) {
       boxShadow: 'none',
     },
     measured: {
+      // Every record declares which colour role its criterion measures, and carries a channel for every
+      // colour it could be talking about. The collector always emits all of these now, so the fixture
+      // mirrors the real shape -- otherwise these tests would assert against a record nothing produces.
+      role: overrides.role ?? 'text',
       fg: {
         source: overrides.fgSource ?? 'getComputedStyle(color)',
         declared: overrides.declared?.fg ?? fgHex,
@@ -221,8 +265,37 @@ function buildRecord(overrides: RecordOverrides) {
         declared: overrides.declared?.bg ?? bgHex,
         rgba8: bg,
         alpha: 1,
-        composited: false,
+        composited: true,
         layers: [{ selector: 'html', declared: bgHex, alpha: 1 }],
+      },
+      border: {
+        source: 'composite(own border color over the composited backdrop; §3.2)',
+        rgba8: {
+          bordertop: overrides.border?.top ?? bg,
+          borderright: overrides.border?.right ?? bg,
+          borderbottom: overrides.border?.bottom ?? bg,
+          borderleft: overrides.border?.left ?? bg,
+        },
+        declaredComputed: {
+          bordertop: overrides.borderDeclaredComputed?.top ?? rgb8ToCss(overrides.border?.top ?? bg),
+          borderright: overrides.borderDeclaredComputed?.right ?? rgb8ToCss(overrides.border?.right ?? bg),
+          borderbottom: overrides.borderDeclaredComputed?.bottom ?? rgb8ToCss(overrides.border?.bottom ?? bg),
+          borderleft: overrides.borderDeclaredComputed?.left ?? rgb8ToCss(overrides.border?.left ?? bg),
+        },
+        rendered: {
+          top: overrides.borderRendered?.top ?? true,
+          right: overrides.borderRendered?.right ?? true,
+          bottom: overrides.borderRendered?.bottom ?? true,
+          left: overrides.borderRendered?.left ?? true,
+        },
+      },
+      outline: {
+        source: 'composite(own outline color over the composited backdrop; §3.2)',
+        rgba8: overrides.outline ?? bg,
+        declaredComputed: overrides.outlineDeclaredComputed ?? rgb8ToCss(overrides.outline ?? bg),
+        style: (overrides.outlineRendered ?? false) ? 'dashed' : 'none',
+        widthPx: (overrides.outlineRendered ?? false) ? 2 : 0,
+        rendered: overrides.outlineRendered ?? false,
       },
       contrastRatio: {
         value: round6(ratio),
@@ -246,6 +319,10 @@ interface PackageOptions {
   screenshots?: string[]
   manifestOverrides?: Record<string, unknown>
   omitManifestKey?: string
+  /** Package provenance: only `real-collector` may be presented as evidence. */
+  provenance?: string
+  /** Extra keys merged into manifest.host.webview2 (used to exercise the declared downgrade premise). */
+  webview2?: Record<string, unknown>
 }
 
 function createPackage(options: PackageOptions = {}): string {
@@ -290,6 +367,9 @@ function createPackage(options: PackageOptions = {}): string {
   const manifest: Record<string, unknown> = {
     schemaVersion: 1,
     evidenceId,
+    // Provenance is mandatory: the same shape can come from a real collection or from reshaping old
+    // numbers by hand, and only this field tells the two apart.
+    provenance: options.provenance ?? 'real-collector',
     generatedAt: '2026-09-28T00:00:00.000Z',
     generatedBy: 'scripts/campaign-visual-evidence.ps1',
     target: {
@@ -306,7 +386,10 @@ function createPackage(options: PackageOptions = {}): string {
     },
     host: {
       os: { caption: 'Microsoft Windows Server 2025 Datacenter', version: '10.0.26100', build: '26100' },
-      webview2: { runtimeVersion: '141.0.3537.57', driverVersion: '141.0.3537.57' },
+      // runtimeVersionSource is mandatory: when the app tauri-driver launches exposes no debug port the
+      // version comes from the preflight reading on the same host+binary, which is a DECLARED downgrade.
+      // Omitting the source would hide how strong the binding is, so the validator refuses to guess one.
+      webview2: { runtimeVersion: '141.0.3537.57', driverVersion: '141.0.3537.57', runtimeVersionSource: 'devtools', ...(options.webview2 ?? {}) },
       app: { productName: 'Rain', productVersion: '0.1.0', binaryPath: 'src-tauri\\target\\debug\\rain.exe' },
       driver: { tauriDriver: '2.0.6' },
     },
@@ -831,6 +914,618 @@ describe('visual evidence validator: non-element measurement scopes', () => {
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/declaredToken|#242424/i)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑤b 颜色角色与通道：令牌必须落在它声明角色的通道里
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: colour role and channels', () => {
+  it('rejects a border-role token that no border channel can explain', { timeout: powershellTimeoutMs }, () => {
+    // 边框类判据测的是**边框颜色**。这条记录声明 role=border，但 border 通道里的颜色都不是
+    // --color-border 的 #6e7074 —— 令牌来源无法解释实测值，必须失败。
+    // （这正是托管 run 36574308748 里 VC-02-settings-topbar-border 的形状；当时记录根本没有
+    //  边框通道，因此校验器只能拿 fg/bg 去比、必然对不上。）
+    const record = buildRecord({
+      recordId: 'VC-02-border-role-mismatch',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header input[type="text"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      border: { top: [0x22, 0x22, 0x22], right: [0x22, 0x22, 0x22], bottom: [0x22, 0x22, 0x22], left: [0x22, 0x22, 0x22] },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#6e7074', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a token no channel can explain must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/role=border|#6e7074/i)
+  })
+
+  it('accepts a border-role token that the border channel does explain', { timeout: powershellTimeoutMs }, () => {
+    // 同一个令牌，只要边框通道里真有这个颜色就必须通过——证明上一条失败是因为对不上，不是因为
+    // 校验器一律拒绝 border 角色。
+    // 记录形状要与新契约自洽：四边都被画出来（computedStyle 也这么说），而 §3.4 第 3 项的对比度
+    // 必须取自**被画出来的那个颜色**，所以 fg 就是边框色本身（不再取未画边的 currentColor）。
+    const record = buildRecord({
+      recordId: 'VC-02-border-role-match',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header input[type="text"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      fg: [0x6e, 0x70, 0x74],
+      bg: DARK_SURFACE,
+      threshold: 3,
+      thresholdBasis: 'nonText',
+      border: { top: [0x6e, 0x70, 0x74], right: [0x6e, 0x70, 0x74], bottom: [0x6e, 0x70, 0x74], left: [0x6e, 0x70, 0x74] },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#6e7074', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, `expected pass, got: ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('rejects a record that does not declare which colour role it measured', { timeout: powershellTimeoutMs }, () => {
+    // 角色是把"这个令牌该出现在哪个通道"变成可校验结构事实的那一环；缺了它就只能靠人读描述。
+    const record = buildRecord({
+      recordId: 'VC-01-no-role',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    }) as Record<string, any>
+    delete record.measured.role
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a record without a declared colour role must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/role/i)
+  })
+
+  it('rejects a record that declares an unknown colour role', { timeout: powershellTimeoutMs }, () => {
+    // 新种类的测量必须登记成新角色，不得静默塞进已知角色里蒙混过关。
+    const record = buildRecord({
+      recordId: 'VC-01-unknown-role',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'shadow',
+    }) as Record<string, any>
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an unregistered colour role must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/known|已知|shadow/i)
+  })
+
+  it('rejects a package whose manifest omits the WebView2 version source', { timeout: powershellTimeoutMs }, () => {
+    // 版本可能是"驱动拉起的应用不开调试端口时取自预检"的降级读数。来源缺失就无法判断这条版本绑定
+    // 有多强，因此必须显式声明；校验器不许替它猜一个。
+    const record = buildRecord({
+      recordId: 'VC-01-version-source',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    delete manifest.host.webview2.runtimeVersionSource
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a missing runtimeVersionSource must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/runtimeVersionSource/i)
+  })
+
+  it('rejects a package whose manifest declares an unregistered version source', { timeout: powershellTimeoutMs }, () => {
+    const record = buildRecord({
+      recordId: 'VC-01-version-source-unknown',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    manifest.host.webview2.runtimeVersionSource = 'vibes'
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an unregistered version source must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/runtimeVersionSource|vibes/i)
+  })
+
+  it('accepts role=nonColour for a criterion that judges no colour at all', { timeout: powershellTimeoutMs }, () => {
+    // VC-15④ 的顶栏高度、VC-15② 的圆角、VC-15① 的间距、VC-15③ 的阴影都**不判颜色**。
+    // 这类记录没有颜色角色可声明：把它标成 text 等于把结构事实写假（文本色通道与"顶栏高度 40"无关）。
+    // 因此登记第五个角色 nonColour（不判颜色），它仍然必须显式写出、不许留空。
+    const record = buildRecord({
+      recordId: 'VC-15-list-topbar-height',
+      vc: 'VC-15',
+      criterion: 'keyHeightTopbar40',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'nonColour',
+    })
+    const dir = createPackage({ tested: ['VC-15'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, `a registered non-colour role must be accepted; ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('refuses a nonColour record that declares a colour token (a role with no channels cannot be checked)', { timeout: powershellTimeoutMs }, () => {
+    // nonColour 的角色通道集合是空的。如果放行，就等于给"声明了令牌却没有任何通道可对账"开了一条
+    // 静默通道——正是 fail-closed 要堵的那个洞。所以 nonColour + declaredToken 必须直接失败。
+    const record = buildRecord({
+      recordId: 'VC-15-list-topbar-height-token',
+      vc: 'VC-15',
+      criterion: 'keyHeightTopbar40',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'nonColour',
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-15'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a nonColour record must not carry a declared token').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/nonColour/)
+  })
+
+  it('refuses a token that only an UNPAINTED border side could explain', { timeout: powershellTimeoutMs }, () => {
+    // 未画的边不是证据：`border-top: none` 的元素，其 border-top-color 仍会算出 currentColor，
+    // 于是"某一个没画出来的边恰好等于某个令牌"就能让记录通过——那是假通过。
+    // 只有 rendered=true 的通道才允许参与令牌对账；四边都没画时该记录必须直接失败。
+    const record = buildRecord({
+      recordId: 'VC-02-unpainted-border',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      border: { top: DARK_BORDER, right: DARK_BORDER, bottom: DARK_BORDER, left: DARK_BORDER },
+      borderRendered: { top: false, right: false, bottom: false, left: false },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an unpainted border must not explain a border token').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/rendered|被绘制|未渲染/i)
+  })
+
+  it('accepts a border token explained by a PAINTED side even when the other three are not painted', { timeout: powershellTimeoutMs }, () => {
+    // 配对的正例，也就是设置页顶栏的真实形状：只有 border-bottom 被画出来（其余三边
+    // border-*-style: none、计算值等于 currentColor）。令牌出现在**被画出**的那条边上，必须通过；
+    // fg（进而对比度）也必须是那条被画边的颜色。
+    const record = buildRecord({
+      recordId: 'VC-02-painted-bottom-only',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'settings',
+      selector: '[data-testid="settings-page"] > div',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      fg: [110, 112, 116],
+      bg: [22, 27, 34],
+      threshold: 3,
+      thresholdBasis: 'nonText',
+      // three sides are currentColor (= the text colour), only the bottom carries COLORS.border
+      border: { top: [230, 237, 243], right: [230, 237, 243], bottom: [110, 112, 116], left: [230, 237, 243] },
+      borderRendered: { top: false, right: false, bottom: true, left: false },
+      computedBorder: {
+        topWidth: '0px',
+        topStyle: 'none',
+        rightWidth: '0px',
+        rightStyle: 'none',
+        bottomWidth: '1px',
+        bottomStyle: 'solid',
+        leftWidth: '0px',
+        leftStyle: 'none',
+      },
+    }) as Record<string, any>
+    record.declaredToken = { name: 'COLORS.border', value: '#6e7074', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, `a token on the one painted side must pass; ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('refuses a graphic token that only the TEXT channel could explain', { timeout: powershellTimeoutMs }, () => {
+    // 角色通道集合必须互不串味：role=graphic 的候选通道里曾包含 measured.fg（文字色），
+    // 于是"给一个图形判据声明文字色令牌"也能通过。去掉 fg 之后，这条必须失败。
+    const record = buildRecord({
+      recordId: 'VC-03-graphic-token-is-text-colour',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      // no graphic channel is painted at all: the only channel holding #e5e5e5 is the text colour
+      borderRendered: { top: false, right: false, bottom: false, left: false },
+      outlineRendered: false,
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-fg', value: '#e5e5e5', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a text colour must not explain a graphic-role token').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/graphic/)
+  })
+
+  it('refuses a channel whose declaredComputed cannot produce the recorded composited value', { timeout: powershellTimeoutMs }, () => {
+    // 复算出同一条通道的合成值（不透明值直接比，半透明值按 §3.2 合成到底色上再比）。
+    // 采集器在解析失败时曾用"合成底色"充当通道值——那种自造值与真测值在结构上无法区分，
+    // 而这条一致性断言会把它们分开：声明的原始值与实测通道对不上就是失败。
+    const record = buildRecord({
+      recordId: 'VC-02-fabricated-channel',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      border: { top: DARK_BORDER, right: DARK_BORDER, bottom: DARK_BORDER, left: DARK_BORDER },
+      borderRendered: { top: true, right: true, bottom: true, left: true },
+      // the raw computed colour is a different colour than the recorded channel
+      borderDeclaredComputed: { top: 'rgb(1, 2, 3)', right: 'rgb(1, 2, 3)', bottom: 'rgb(1, 2, 3)', left: 'rgb(1, 2, 3)' },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a channel that its own declaredComputed cannot produce must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/declaredComputed/)
+  })
+
+  it('refuses a self-declared rendered flag that contradicts the record own computedStyle', { timeout: powershellTimeoutMs }, () => {
+    // `rendered` 是**自报**字段：上一版只接受记录自己写的布尔值，从不与同一条记录里必填的
+    // computedStyle 交叉核对。于是只要采集器把 rendered 取自错误的属性（或某边 style 为 none /
+    // width:0），"未画的边不算证据"这道门控就会整体失效，而且没有任何测试会红。
+    // 现在：声明 rendered=true 的边，其 computedStyle 必须给出 style≠none 且 width>0（反之亦然）。
+    const record = buildRecord({
+      recordId: 'VC-02-rendered-contradicts-computed-style',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      border: { top: DARK_BORDER, right: DARK_BORDER, bottom: DARK_BORDER, left: DARK_BORDER },
+      borderRendered: { top: true, right: true, bottom: true, left: true },
+      // …but the very same record says every one of those sides is `none` / `0px`
+      computedBorder: {
+        topWidth: '0px',
+        topStyle: 'none',
+        rightWidth: '0px',
+        rightStyle: 'none',
+        bottomWidth: '0px',
+        bottomStyle: 'none',
+        leftWidth: '0px',
+        leftStyle: 'none',
+      },
+    }) as Record<string, any>
+    record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a rendered flag that the record own computedStyle contradicts must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/rendered/)
+  })
+
+  it('refuses a border record whose reported contrast comes from an UNPAINTED side', { timeout: powershellTimeoutMs }, () => {
+    // §3.4 第 3 项的对比度由 measured.fg/bg 算出。对边框判据，fg 必须是**被画出来的那个颜色**，
+    // 否则报出的比值与它要判的颜色无关：真实反例是只有 border-bottom 的元素，fg 曾取未画的
+    // top 边（= currentColor = 文字色）→ 报 14.64:1，而被画的那条边其实只有 3.49:1；
+    // 边框掉到 1.21:1 时这条记录报出的数字仍然不变，审查员照抄就会得到相反结论。
+    const record = buildRecord({
+      recordId: 'VC-02-contrast-from-unpainted-side',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'settings',
+      selector: '[data-testid="settings-page"] > div',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      // the fg (and therefore the contrast) is the text colour of an unpainted side
+      fg: [230, 237, 243],
+      bg: [22, 27, 34],
+      border: { top: [230, 237, 243], right: [230, 237, 243], bottom: [110, 112, 116], left: [230, 237, 243] },
+      borderRendered: { top: false, right: false, bottom: true, left: false },
+      computedBorder: {
+        topWidth: '0px',
+        topStyle: 'none',
+        rightWidth: '0px',
+        rightStyle: 'none',
+        bottomWidth: '1px',
+        bottomStyle: 'solid',
+        leftWidth: '0px',
+        leftStyle: 'none',
+      },
+    }) as Record<string, any>
+    record.declaredToken = { name: 'COLORS.border', value: '#6e7074', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a contrast taken from an unpainted side must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/fg/)
+  })
+
+  it('accepts a border record whose fg IS the painted side colour and whose rendered flags match computedStyle', { timeout: powershellTimeoutMs }, () => {
+    // fg 取的就是那条被画边的颜色（#6e7074 压面板 = 3.49:1），四边 rendered 与 computedStyle 一致。
+    const record = buildRecord({
+      recordId: 'VC-02-painted-fg',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'settings',
+      selector: '[data-testid="settings-page"] > div',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      fg: [110, 112, 116],
+      bg: [22, 27, 34],
+      border: { top: [230, 237, 243], right: [230, 237, 243], bottom: [110, 112, 116], left: [230, 237, 243] },
+      borderRendered: { top: false, right: false, bottom: true, left: false },
+      computedBorder: {
+        topWidth: '0px',
+        topStyle: 'none',
+        rightWidth: '0px',
+        rightStyle: 'none',
+        bottomWidth: '1px',
+        bottomStyle: 'solid',
+        leftWidth: '0px',
+        leftStyle: 'none',
+      },
+    }) as Record<string, any>
+    record.declaredToken = { name: 'COLORS.border', value: '#6e7074', source: 'visual-contract.md §5.5' }
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, `the honest painted-side shape must pass; ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('refuses a TOKEN-LESS border record whose fg comes from an unpainted side', { timeout: powershellTimeoutMs }, () => {
+    // 上一轮把"fg 必须是被画出边的颜色"这条检查写在了 declaredToken 分支里，于是**没有令牌**的
+    // border 记录整条绕过它。这条检查必须独立于 declaredToken 成立——记录有没有令牌，
+    // 它都会报出一个对比度，那个数字都必须与它要判的颜色有关。
+    const record = buildRecord({
+      recordId: 'VC-02-tokenless-border-fg-is-current-colour',
+      vc: 'VC-02',
+      criterion: 'neutralScaleBorderToken',
+      page: 'settings',
+      selector: '[data-testid="settings-page"] > div',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'border',
+      // fg (and the reported contrast) is the text colour; the only painted side is the bottom one
+      fg: [229, 229, 229],
+      bg: [22, 27, 34],
+      border: { top: [229, 229, 229], right: [229, 229, 229], bottom: [143, 143, 143], left: [229, 229, 229] },
+      borderRendered: { top: false, right: false, bottom: true, left: false },
+      computedBorder: {
+        topWidth: '0px',
+        topStyle: 'none',
+        rightWidth: '0px',
+        rightStyle: 'none',
+        bottomWidth: '1px',
+        bottomStyle: 'solid',
+        leftWidth: '0px',
+        leftStyle: 'none',
+      },
+    })
+    const dir = createPackage({ tested: ['VC-02'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a token-less border record must not report a contrast from an unpainted side').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/fg/)
+  })
+
+  it('refuses a text record whose measured fg contradicts its own computedStyle.color', { timeout: powershellTimeoutMs }, () => {
+    // measured.fg/bg 此前只与记录内部的 declared 自洽比较，从不与同一条记录的 computedStyle 交叉核对。
+    // 于是"computedStyle.color 与底色同色（真实对比度≈1:1），却自报 fg=#e5e5e5、对比度 14.64"也能通过。
+    const record = buildRecord({
+      recordId: 'VC-01-fg-contradicts-computed-style',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'text',
+      fg: [229, 229, 229],
+      bg: [26, 26, 26],
+    }) as Record<string, any>
+    // the record's own computed style says the text colour is the same as the background
+    record.computedStyle.color = 'rgb(26, 26, 26)'
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an fg that contradicts computedStyle.color must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/computedStyle\.color|fg/)
+  })
+
+  it('refuses a self-declared outline that no computed style backs', { timeout: powershellTimeoutMs }, () => {
+    // 与四边边框同一形态的旁路：`measured.outline.rendered` 也是自报字段，而 computedStyle 里
+    // 此前根本没有 outlineStyle/outlineWidth 可交叉核对——声明"画了聚焦圈"就能凭空成立。
+    const record = buildRecord({
+      recordId: 'VC-03-focus-ring-claims-unpainted-outline',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      // The focus ring is drawn with --color-fg, i.e. the element's own colour, so fg == outline here and
+      // the ONLY inconsistency left is the self-declared `rendered` against computedStyle.
+      fg: DARK_FG,
+      outline: DARK_FG,
+      outlineRendered: true,
+      computedBorder: { outlineStyle: 'none', outlineWidth: '0px' },
+    })
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an outline rendered flag that computedStyle contradicts must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/outline/i)
+  })
+
+  it('refuses a record that claims a composited value while its own metadata says otherwise', { timeout: powershellTimeoutMs }, () => {
+    // fg/bg 的 alpha 与 composited 是**自报**元数据（"这个值是不是按 §3.2 合成出来的"）。
+    // 此前它们从不与 declared 对账，于是一条记录可以自称"合成过了"，而 declared/rgba8 其实是原值。
+    const record = buildRecord({
+      recordId: 'VC-01-composited-claims',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    }) as Record<string, any>
+    // the declared foregound is opaque while the record claims alpha 0.42 / composited true
+    record.measured.fg.alpha = 0.42
+    record.measured.fg.composited = true
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'self-reported alpha/composited must be reconcilable with declared').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/alpha|composited/)
+  })
+
+  it('refuses a package that declares no provenance at all', { timeout: powershellTimeoutMs }, () => {
+    // 同一个形状既能由真实采集产出、也能由"把旧数据改写成新形状"的演练产出。没有包级溯源字段时，
+    // 「同一个包名 + 同一个 generatedBy + 校验器判 VALID」会被后来的人当成证据。
+    const record = buildRecord({
+      recordId: 'VC-01-no-provenance',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record], omitManifestKey: 'provenance' })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a package without provenance must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/provenance/)
+  })
+
+  it('accepts a rehearsal-shaped package but refuses to call it VISUAL_EVIDENCE_VALID', { timeout: powershellTimeoutMs }, () => {
+    // 演练包的形状可以完全合法，但措辞必须与真采集区分开：形状一样、含义完全不同。
+    const record = buildRecord({
+      recordId: 'VC-01-rehearsal',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record], provenance: 'rehearsal' })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a rehearsal package is shape-valid').toBe(0)
+    expect(result.stdout, 'a rehearsal package must not be reported as VISUAL_EVIDENCE_VALID').toMatch(/VISUAL_EVIDENCE_VALID_REHEARSAL/)
+    expect(result.stdout, 'a rehearsal package must say it is not evidence').toMatch(/不是真实采集证据|不得当证据/)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * ⑤c 宿主版本绑定的降级前提：有前提的降级必须把前提写进包里
+ * ------------------------------------------------------------------ */
+
+describe('visual evidence validator: host version binding premise', () => {
+  const preflightSource = { runtimeVersionSource: 'preflight-devtools' }
+
+  it('rejects a declared preflight downgrade that does not record the premise it rests on', { timeout: powershellTimeoutMs }, () => {
+    // 驱动拉起的应用不开调试端口时，版本取自**预检**（同一个 rain.exe、同一台机器）——这是**降级**，
+    // 只有当"机器级 Evergreen 安装存在且应用旁边没有固定版本运行时"这条前提成立时，同机读数才等价。
+    // 前提不写进包，包就无法自证这条绑定的强度，只能靠读日志猜——那正是本轮要堵的洞。
+    const record = buildRecord({
+      recordId: 'VC-01-premise-missing',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({ tested: ['VC-01'], records: [record], webview2: preflightSource })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a preflight downgrade without its premise must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/premise/i)
+  })
+
+  it('accepts a declared preflight downgrade whose premise is recorded and established', { timeout: powershellTimeoutMs }, () => {
+    // 配对的正例：同一个降级，只要前提被记录且成立，就必须通过——证明上一条失败是因为缺前提，
+    // 不是因为校验器一律拒绝 preflight-devtools。
+    const record = buildRecord({
+      recordId: 'VC-01-premise-established',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({
+      tested: ['VC-01'],
+      records: [record],
+      webview2: {
+        ...preflightSource,
+        premise: {
+          machineLevelEvergreenPresent: true,
+          fixedVersionRuntimePresent: false,
+          evergreenRuntimeVersions: '153.0.4234.48',
+          established: true,
+          statement: 'machine-level Evergreen install present and no fixed-version runtime alongside the app',
+        },
+      },
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, `an established premise must be accepted; ${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('rejects a declared preflight downgrade whose premise explicitly did NOT hold', { timeout: powershellTimeoutMs }, () => {
+    // 前提被记录、但记录的是"不成立"时，不能靠"字段存在"蒙混过关：降级就成了无依据的等价替代。
+    const record = buildRecord({
+      recordId: 'VC-01-premise-failed',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    })
+    const dir = createPackage({
+      tested: ['VC-01'],
+      records: [record],
+      webview2: {
+        ...preflightSource,
+        premise: {
+          machineLevelEvergreenPresent: false,
+          fixedVersionRuntimePresent: false,
+          evergreenRuntimeVersions: '(none found on this host)',
+          established: false,
+          statement: 'PREMISE NOT ESTABLISHED',
+        },
+      },
+    })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a premise recorded as not established must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/premise|前提/i)
   })
 })
 
@@ -1594,6 +2289,56 @@ describe('visual evidence channel: files and conventions', () => {
       expect(manifestModule).toContain(id)
     }
     expect(manifestModule).toContain('VC-18')
+  })
+
+  it('declares the colour role each element spec actually judges, and never leaves it to a guess', () => {
+    // 记录里的 measured.role 是**结构事实**：校验器只用它来决定 declaredToken 该在哪个通道里被找到。
+    // 因此 role 写假不会让包变红，却会让读到包的人（视觉审查员 V2）得出错误的结构结论。
+    // 之前 role 只有一个兜底式默认值（非 nonText 一律 text），结果 41 条真实记录里有 19 条把
+    // 「顶栏高度」「圆角」「间距」「阴影」「背景亮度」这类**不判颜色**的量标成了 text。
+    // 这条守卫直接读采集器的 spec 表：每条 element spec 必须显式声明 colorRole，
+    // 且该角色必须与它的 criterion 所判的维度一致——不许靠默认值蒙过去。
+    const collector = readFileSync(collectorScript, 'utf8')
+    const elementSpecs = collector
+      .split(/\r?\n/)
+      .map((line, index) => ({ line, number: index + 1 }))
+      .filter(({ line }) => /id = '[^']+'/.test(line) && line.includes("scope = 'element'"))
+      .map(({ line, number }) => ({
+        number,
+        id: /id = '([^']+)'/.exec(line)![1],
+        criterion: /criterion = '([^']+)'/.exec(line)?.[1] ?? '',
+        colorRole: /colorRole = '([^']+)'/.exec(line)?.[1] ?? null,
+        declaredToken: /declaredToken = '([^']+)'/.exec(line)?.[1] ?? null,
+      }))
+    expect(elementSpecs.length, 'the collector must still declare its element specs').toBeGreaterThan(20)
+
+    const knownRoles = ['text', 'background', 'border', 'graphic', 'nonColour']
+    const nonColourCriteria = [/^keyHeight/, /^radiusLadder$/, /^spacingLadder$/, /^cardNoShadow$/]
+    for (const spec of elementSpecs) {
+      const where = `${spec.id} (campaign-visual-evidence.ps1:${spec.number}, criterion=${spec.criterion})`
+      expect(spec.colorRole, `${where} must declare colorRole explicitly`).not.toBeNull()
+      expect(knownRoles, `${where} declares an unregistered colorRole`).toContain(spec.colorRole)
+
+      if (/^backgroundLuminance/.test(spec.criterion)) {
+        expect(spec.colorRole, `${where} judges the background colour`).toBe('background')
+      }
+      if (nonColourCriteria.some((pattern) => pattern.test(spec.criterion))) {
+        expect(spec.colorRole, `${where} judges no colour at all`).toBe('nonColour')
+      }
+      if (spec.criterion === 'focusRing2pxDashedFg') {
+        expect(spec.colorRole, `${where} judges the focus ring`).toBe('graphic')
+      }
+      if (['neutralScaleMutedToken', 'primaryButtonOutlinedText', 'fontStackWeightSizeOnTopbarTitle'].includes(spec.criterion)) {
+        expect(spec.colorRole, `${where} judges text colour`).toBe('text')
+      }
+      if (spec.declaredToken && /border/i.test(spec.declaredToken)) {
+        expect(spec.colorRole, `${where} declares a border token`).toBe('border')
+      }
+      // 不判颜色的角色没有可对账的通道，因此不得携带令牌（与校验器的 fail-closed 规则同向）。
+      if (spec.colorRole === 'nonColour') {
+        expect(spec.declaredToken, `${where} must not carry a colour token`).toBeNull()
+      }
+    }
   })
 })
 

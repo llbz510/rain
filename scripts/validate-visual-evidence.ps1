@@ -68,6 +68,10 @@ $script:FrozenTolerance = [ordered]@{
 $script:RequiredComputedStyleKeys = @(
   'color', 'backgroundColor', 'fontFamily', 'fontSize', 'fontWeight', 'fontVariantNumeric',
   'lineHeight', 'borderTopWidth', 'borderTopStyle', 'borderTopColor', 'borderRadius',
+  # 四边的 width/style 全部必填：`measured.border.rendered` 是**自报**字段，必须能由这些
+  # 真实计算样式交叉核对（否则采集器把 rendered 取自错误属性时整道门控会静默失效）。
+  'borderRightWidth', 'borderRightStyle', 'borderBottomWidth', 'borderBottomStyle',
+  'borderLeftWidth', 'borderLeftStyle', 'outlineStyle', 'outlineWidth',
   'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
   'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'boxShadow'
 )
@@ -77,6 +81,8 @@ $script:RequiredRectKeys = @('x', 'y', 'width', 'height', 'top', 'right', 'botto
 
 $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:CheckedPackages = 0
+# 声明 provenance≠real-collector 的包（演练/合成）单独计数：形状可以一样，但**不是证据**。
+$script:RehearsalPackages = 0
 
 function Add-Failure([string]$Message) {
   $script:Failures.Add($Message)
@@ -439,6 +445,44 @@ function Assert-DecomposedColour([string]$Declared, [double[]]$Measured, [string
   }
 }
 
+function Assert-ChannelReproducible([string]$DeclaredComputed, [double[]]$Measured, [double[]]$Backdrop, [string]$Label, [string]$Where) {
+  # 边框/轮廓通道的**可复算性**：元素自己的原始计算值（declaredComputed）必须能产生这条通道的
+  # 合成值——不透明值直接比；半透明值按 §3.2 先合成到本条记录的不透明底色（measured.bg.rgba8）上再比。
+  # 为什么必须有这一条：采集器在**解析失败**时曾拿"合成底色"充当通道值。那种自造值与真测值在
+  # JSON 里长得一模一样（都是 3 个通道），只有把 declaredComputed 拉进复算才能把它们分开。
+  if ([string]::IsNullOrWhiteSpace($DeclaredComputed)) {
+    Add-Failure ($Where + '.' + $Label + '：缺少 declaredComputed（元素自己的原始计算值）——没有它，这条通道的值无法与自造值区分')
+    return
+  }
+  try {
+    $parsed = ConvertTo-Rgb8 $DeclaredComputed
+  } catch {
+    Add-Failure ($Where + '.' + $Label + '：declaredComputed ''' + $DeclaredComputed + ''' 无法解析为颜色（' + $_.Exception.Message + '）')
+    return
+  }
+  $expected = [double[]]$parsed.rgb
+  if ([double]$parsed.alpha -lt 1.0) {
+    if ($null -eq $Backdrop -or $Backdrop.Count -ne 3) {
+      Add-Failure ($Where + '.' + $Label + '：declaredComputed 是半透明值，但本条记录没有可用的不透明底色（measured.bg.rgba8）来复算合成值')
+      return
+    }
+    $alpha = [double]$parsed.alpha
+    $expected = [double[]]@(
+      [Math]::Round($alpha * [double]$parsed.rgb[0] + (1 - $alpha) * [double]$Backdrop[0]),
+      [Math]::Round($alpha * [double]$parsed.rgb[1] + (1 - $alpha) * [double]$Backdrop[1]),
+      [Math]::Round($alpha * [double]$parsed.rgb[2] + (1 - $alpha) * [double]$Backdrop[2])
+    )
+  }
+  for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+    if ([Math]::Abs([double]$expected[$channelIndex] - $Measured[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) {
+      Add-Failure ($Where + '.' + $Label + '：declaredComputed ''' + $DeclaredComputed + ''' 复算出的通道 [' +
+        (($expected | ForEach-Object { [int]$_ }) -join ',') + '] 与实测 [' + (($Measured | ForEach-Object { [int]$_ }) -join ',') +
+        '] 相差超过 ±' + $script:FrozenTolerance.colorChannel + '/通道——这条通道值无法由它自己声明的原始值产生')
+      return
+    }
+  }
+}
+
 function Assert-ManifestCoverage($Manifest, $Records, [string]$Where) {
   $coverage = Assert-RequiredProperty $Manifest 'coverage' $Where
   if ($null -eq $coverage) { return }
@@ -547,8 +591,296 @@ function Assert-RecordContrast($Record, $Ratio, [string]$Where) {
     Assert-DecomposedColour ([string]$bgDeclared) $bgChannels '底色' 'measured.bg.rgba8' $Where
   }
 
+  # alpha / composited 是记录**自报**的元数据（"这个值是不是合成出来的"），必须与 declared 自洽：
+  # 否则一条记录可以自称"我合成过了"，而 declared/rgba8 其实是没合成的原值。
+  #  - alpha 必须等于 declared 的 alpha（§3.3 对 alpha 没有容差档位，按 1e-6 比较）；
+  #  - fg.composited 必须等于"declared 是否半透明"；bg 走逐层合成，composited 必须为 true。
+  foreach ($pair in @(
+    @{ name = 'measured.fg'; block = $fg; expectCompositedTrue = $false },
+    @{ name = 'measured.bg'; block = $bg; expectCompositedTrue = $true }
+  )) {
+    $declaredText = [string](Get-JsonProperty $pair.block 'declared')
+    $alphaValue = Get-JsonProperty $pair.block 'alpha'
+    $compositedValue = Get-JsonProperty $pair.block 'composited'
+    $alphaNumber = $null
+    if ($null -ne $alphaValue) {
+      $parsedAlpha = 0.0
+      if (-not [double]::TryParse([string]$alphaValue, [ref]$parsedAlpha)) {
+        Add-Failure ($Where + '.' + $pair.name + '.alpha 不是数字：' + [string]$alphaValue)
+      } elseif ($parsedAlpha -lt 0 -or $parsedAlpha -gt 1) {
+        Add-Failure ($Where + '.' + $pair.name + '.alpha 必须在 [0,1]：' + [string]$alphaValue)
+      } else {
+        $alphaNumber = $parsedAlpha
+      }
+    }
+    if ($null -ne $alphaNumber -and -not [string]::IsNullOrWhiteSpace($declaredText)) {
+      try {
+        $declaredParsedAlpha = ConvertTo-Rgb8 $declaredText
+        if ([Math]::Abs([double]$declaredParsedAlpha.alpha - $alphaNumber) -gt 1e-6) {
+          Add-Failure ($Where + '.' + $pair.name + '：alpha=' + $alphaNumber + ' 与 declared ' + $declaredText +
+            ' 的 alpha=' + ([double]$declaredParsedAlpha.alpha) + ' 不一致——自报的 alpha 无法由声明的实测值解释')
+        }
+      } catch {
+        # declared 本身无法解析时，上面的 Assert-DecomposedColour 已经报过失败，不重复。
+      }
+    }
+    if ($null -eq $compositedValue) {
+      Add-Failure ($Where + '.' + $pair.name + ' 缺少 composited（该值是否为按 §3.2 合成后的结果）')
+    } elseif ($compositedValue -isnot [bool]) {
+      Add-Failure ($Where + '.' + $pair.name + '.composited 必须是布尔值')
+    } elseif ($pair.expectCompositedTrue) {
+      if (-not [bool]$compositedValue) {
+        Add-Failure ($Where + '.' + $pair.name + '.composited 必须为 true：底色按 §3.2 是逐层合成到不透明底的结果')
+      }
+    } elseif ($null -ne $alphaNumber) {
+      $expectedComposited = ($alphaNumber -lt 1.0)
+      if ([bool]$compositedValue -ne $expectedComposited) {
+        Add-Failure ($Where + '.' + $pair.name + '.composited=' + [string]$compositedValue + ' 与 alpha=' + $alphaNumber +
+          ' 矛盾（半透明值必须先合成，不透明值不必标为已合成）')
+      }
+    }
+  }
+
+  # ---------------------------------------------------------------- 边框 / 轮廓通道
+  # 边框类判据测的就是**边框颜色**。此前记录里没有边框通道，令牌无处对账，于是
+  # 「declaredToken 解释不了实测值」被判失败（run 36574308748 的 VC-02-settings-topbar-border）。
+  # 这里把每个边框通道按与 fg/bg **同一口径**校验：合成后必须不透明、且与自身 rgba8 ±1/通道 自洽。
+  # 缺失即失败：通道不见了不能静默当成"没测这条"。
+  #
+  # 两条**结构性**要求（防假通过）：
+  #  1. 每个通道必须带 `rendered`：**没画出来的边不是证据**。`border-top: none` 的元素其
+  #     border-top-color 仍会算出 currentColor，若允许未画通道参与对账，"某个没画出来的边
+  #     恰好等于某个令牌"就能让记录通过。
+  #  2. 每个通道的 `declaredComputed`（元素自己的原始计算值）必须能**复算出**同一条通道的
+  #     合成值：不透明值直接比，半透明值按 §3.2 合成到底色上再比。否则通道值就可能是自造的
+  #     而与真测值无法区分（采集器曾在解析失败时拿合成底色充当通道值）。
+  $borderChannels = @{}
+  $borderRenderedFlags = @{}
+  # 自报的 `rendered` 必须与本条记录自己的 computedStyle 交叉核对，因此这里要把快照取进来。
+  $computedStyle = Get-JsonProperty $Record 'computedStyle'
+  $border = Get-JsonProperty $measured 'border'
+  if ($null -eq $border) {
+    Add-Failure ($Where + '.measured 缺少 border（四边边框色的合成后通道）')
+  } else {
+    $borderRgba = Get-JsonProperty $border 'rgba8'
+    $borderDeclaredBlock = Get-JsonProperty $border 'declaredComputed'
+    $borderRenderedBlock = Get-JsonProperty $border 'rendered'
+    if ($null -eq $borderRenderedBlock) {
+      Add-Failure ($Where + '.measured.border 缺少 rendered（每边是否真的被绘制）')
+    }
+    if ($null -eq $borderRgba) {
+      Add-Failure ($Where + '.measured.border 缺少 rgba8')
+    } else {
+      foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+        $channelLabel = 'measured.border.rgba8.' + $side
+        # rendered 必须先落地，未渲染的通道随后不进入令牌对账集合。
+        if ($null -ne $borderRenderedBlock) {
+          $bareSide = $side.Replace('border', '')
+          $sideRendered = Get-JsonProperty $borderRenderedBlock $bareSide
+          if ($sideRendered -isnot [bool]) {
+            Add-Failure ($Where + '.measured.border.rendered.' + $bareSide + ' 必须是布尔值（该边是否真的被绘制）')
+          } else {
+            $borderRenderedFlags[$side] = [bool]$sideRendered
+            # **交叉核对**：rendered 是记录的自报字段，不能自证。声明"这一边被画出来了"，
+            # 同一条记录的 computedStyle 就必须给出该边 style≠none 且 width>0（反之亦然）。
+            $styleKey = 'border' + $bareSide.Substring(0, 1).ToUpper() + $bareSide.Substring(1) + 'Style'
+            $widthKey = 'border' + $bareSide.Substring(0, 1).ToUpper() + $bareSide.Substring(1) + 'Width'
+            $sideStyle = [string](Get-JsonProperty $computedStyle $styleKey)
+            $sideWidth = [string](Get-JsonProperty $computedStyle $widthKey)
+            $paintedByStyle = (-not [string]::IsNullOrWhiteSpace($sideStyle)) -and ($sideStyle -ne 'none')
+            $paintedByWidth = $false
+            if (-not [string]::IsNullOrWhiteSpace($sideWidth) -and $sideWidth -match '^([0-9]*\.?[0-9]+)px$') {
+              $paintedByWidth = ([double]$Matches[1] -gt 0)
+            }
+            if ([bool]$sideRendered) {
+              if (-not $paintedByStyle -or -not $paintedByWidth) {
+                Add-Failure ($Where + '.measured.border.rendered.' + $bareSide + ' 声明该边被绘制，但同一条记录的 computedStyle 给出 ' +
+                  $styleKey + '=' + $sideStyle + ' / ' + $widthKey + '=' + $sideWidth + '——自报的 rendered 与真实计算样式矛盾（未画的边不是证据）')
+              }
+            } else {
+              if ($paintedByStyle -and $paintedByWidth) {
+                Add-Failure ($Where + '.measured.border.rendered.' + $bareSide + ' 声明该边未被绘制，但 computedStyle 给出 ' +
+                  $styleKey + '=' + $sideStyle + ' / ' + $widthKey + '=' + $sideWidth + '——自报的 rendered 与真实计算样式矛盾')
+              }
+            }
+          }
+        }
+        $channels = Get-JsonProperty $borderRgba $side
+        if ($null -eq $channels) {
+          Add-Failure ($Where + '.' + $channelLabel + ' 缺少 ' + $side)
+          continue
+        }
+        $doubles = ConvertTo-DoubleArray $channels
+        if ($doubles.Count -ne 3) {
+          Add-Failure ($Where + '.' + $channelLabel + ' 必须是 3 个通道')
+          continue
+        }
+        $borderChannels[$side] = $doubles
+        # 键名必须各自对齐采集器：`declaredComputed` 与 `rgba8` 用**带前缀**的键
+        # （bordertop/borderright/borderbottom/borderleft），`rendered` 用**不带前缀**的
+        # top/right/bottom/left。两处混用会让这条断言永远失败（本机实测过一次）。
+        $declaredSide = $null
+        if ($null -ne $borderDeclaredBlock) { $declaredSide = [string](Get-JsonProperty $borderDeclaredBlock $side) }
+        Assert-ChannelReproducible $declaredSide $doubles $bgChannels $channelLabel $Where
+      }
+    }
+  }
+  $outlineChannels = $null
+  $outlineRenderedFlag = $false
+  $outline = Get-JsonProperty $measured 'outline'
+  if ($null -eq $outline) {
+    Add-Failure ($Where + '.measured 缺少 outline（轮廓色的合成后通道）')
+  } else {
+    $outlineRgba = Get-JsonProperty $outline 'rgba8'
+    if ($null -eq $outlineRgba) {
+      Add-Failure ($Where + '.measured.outline 缺少 rgba8')
+    } else {
+      $outlineDoubles = ConvertTo-DoubleArray $outlineRgba
+      if ($outlineDoubles.Count -ne 3) {
+        Add-Failure ($Where + '.measured.outline.rgba8 必须是 3 个通道')
+      } else {
+        $outlineChannels = $outlineDoubles
+        Assert-ChannelReproducible ([string](Get-JsonProperty $outline 'declaredComputed')) $outlineDoubles $bgChannels 'measured.outline.rgba8' $Where
+      }
+    }
+    # 未渲染的轮廓必须显式声明，不能拿一个"测到的"颜色冒充画出来的聚焦圈；
+    # 而且它必须真的参与判定（rendered=false 的轮廓不进令牌对账集合）。
+    # 与边框同理：`rendered` **不能自证**，必须与同一条记录的 computedStyle.outlineStyle/outlineWidth 双向核对。
+    $outlineRendered = Get-JsonProperty $outline 'rendered'
+    if ($null -eq $outlineRendered) {
+      Add-Failure ($Where + '.measured.outline 缺少 rendered（该轮廓是否真的被绘制）')
+    } elseif ($outlineRendered -isnot [bool]) {
+      Add-Failure ($Where + '.measured.outline.rendered 必须是布尔值（该轮廓是否真的被绘制）')
+    } else {
+      $outlineRenderedFlag = [bool]$outlineRendered
+      $computedOutlineStyle = [string](Get-JsonProperty $computedStyle 'outlineStyle')
+      $computedOutlineWidth = [string](Get-JsonProperty $computedStyle 'outlineWidth')
+      $outlinePaintedByStyle = (-not [string]::IsNullOrWhiteSpace($computedOutlineStyle)) -and ($computedOutlineStyle -ne 'none')
+      $outlinePaintedByWidth = $false
+      if (-not [string]::IsNullOrWhiteSpace($computedOutlineWidth) -and $computedOutlineWidth -match '^([0-9]*\.?[0-9]+)px$') {
+        $outlinePaintedByWidth = ([double]$Matches[1] -gt 0)
+      }
+      if ($outlineRenderedFlag) {
+        if (-not $outlinePaintedByStyle -or -not $outlinePaintedByWidth) {
+          Add-Failure ($Where + '.measured.outline.rendered 声明该轮廓被绘制，但同一条记录的 computedStyle 给出 outlineStyle=' + $computedOutlineStyle + ' / outlineWidth=' + $computedOutlineWidth + '——自报的 rendered 与真实计算样式矛盾（没画出来的轮廓不是证据）')
+        }
+      } else {
+        if ($outlinePaintedByStyle -and $outlinePaintedByWidth) {
+          Add-Failure ($Where + '.measured.outline.rendered 声明该轮廓未被绘制，但 computedStyle 给出 outlineStyle=' + $computedOutlineStyle + ' / outlineWidth=' + $computedOutlineWidth + '——自报的 rendered 与真实计算样式矛盾')
+        }
+      }
+    }
+  }
+
+  # ---------------------------------------------------------------- fg 的出处（与 declaredToken 无关，独立执行）
+  # §3.4 第 3 项的「对比度比值」是由 measured.fg/bg 算出来的。fg 必须**要么**就是元素的文字色
+  # （computedStyle.color，role=text/background/nonColour 走这条），**要么**是某个**被画出来**的
+  # 边框/轮廓通道的颜色（role=border/graphic 走这条）。否则这条记录报出的对比度与它要判的颜色无关，
+  # 审查员照抄就会得到相反结论——真实反例：只有 border-bottom 的元素，fg 曾取未画的 top 边
+  # （= currentColor），报 14.64:1，而被画的那条边只有 3.49:1；边框掉到 1.21:1 时数字仍不变。
+  # 这条**不依赖 declaredToken 是否存在**：没有令牌的记录同样会报出对比度，同样必须成立。
+  $paintedGraphicChannels = @()
+  foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+    if ($borderChannels.ContainsKey($side) -and $borderRenderedFlags[$side] -eq $true) {
+      $paintedGraphicChannels += @{ label = ('measured.border.rgba8.' + $side); values = $borderChannels[$side] }
+    }
+  }
+  if ($null -ne $outlineChannels -and $outlineRenderedFlag -eq $true) {
+    $paintedGraphicChannels += @{ label = 'measured.outline.rgba8'; values = $outlineChannels }
+  }
+  $fgExplainedBy = $null
+  $computedTextColour = [string](Get-JsonProperty $computedStyle 'color')
+  if (-not [string]::IsNullOrWhiteSpace($computedTextColour)) {
+    try {
+      $parsedTextColour = ConvertTo-Rgb8 $computedTextColour
+      $textRgb = [double[]]$parsedTextColour.rgb
+      if ([double]$parsedTextColour.alpha -lt 1.0 -and $null -ne $bgChannels -and $bgChannels.Count -eq 3) {
+        $alpha = [double]$parsedTextColour.alpha
+        $textRgb = [double[]]@(
+          [Math]::Round($alpha * [double]$parsedTextColour.rgb[0] + (1 - $alpha) * [double]$bgChannels[0]),
+          [Math]::Round($alpha * [double]$parsedTextColour.rgb[1] + (1 - $alpha) * [double]$bgChannels[1]),
+          [Math]::Round($alpha * [double]$parsedTextColour.rgb[2] + (1 - $alpha) * [double]$bgChannels[2])
+        )
+      }
+      $isTextColour = $true
+      for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+        if ([Math]::Abs([double]$textRgb[$channelIndex] - [double]$fgChannels[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) { $isTextColour = $false; break }
+      }
+      if ($isTextColour) { $fgExplainedBy = 'computedStyle.color' }
+    } catch {
+      Add-Failure ($Where + '.computedStyle.color 无法解析（' + $_.Exception.Message + '）——fg 的出处无法核对')
+    }
+  }
+  if ($null -eq $fgExplainedBy) {
+    foreach ($candidate in $paintedGraphicChannels) {
+      $isSame = $true
+      for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+        if ([Math]::Abs([double]$candidate.values[$channelIndex] - [double]$fgChannels[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) { $isSame = $false; break }
+      }
+      if ($isSame) { $fgExplainedBy = $candidate.label; break }
+    }
+  }
+  if ($null -eq $fgExplainedBy) {
+    Add-Failure ($Where + '：measured.fg.rgba8=[' + (($fgChannels | ForEach-Object { [int]$_ }) -join ',') +
+      '] 既不是 computedStyle.color（' + $computedTextColour + '），也不是任何**被绘制**的边框/轮廓通道的颜色——这条记录报出的对比度与它要判的颜色无关。')
+  }
+  # 角色一致性（同样不依赖 declaredToken）：
+  #  - role=border：若存在**被画出来的边**，fg 必须落在这些边里（这正是设置页顶栏那条记录的形状：
+  #    只有 border-bottom 被画，fg 必须取它，而不是未画边的 currentColor）；
+  #  - role=graphic：若存在**被画出来的轮廓**，fg 必须就是那个轮廓色。
+  # 刻意**不**合并成"fg ∈ 任意被绘制通道"：那样对 graphic 记录会强制 fg 取边框色，而聚焦圈判据
+  # 测的是轮廓、其元素同时又带 1px 边框 —— 真实运行里那条记录会因此被误判失败。
+  $roleForFg = [string](Get-JsonProperty $measured 'role')
+  if ($roleForFg -eq 'border') {
+    $paintedSides = @()
+    foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+      if ($borderChannels.ContainsKey($side) -and $borderRenderedFlags[$side] -eq $true) {
+        $paintedSides += @{ label = ('measured.border.rgba8.' + $side); values = $borderChannels[$side] }
+      }
+    }
+    if ($paintedSides.Count -gt 0) {
+      $fgOnPaintedSide = $false
+      foreach ($candidate in $paintedSides) {
+        $isSame = $true
+        for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+          if ([Math]::Abs([double]$candidate.values[$channelIndex] - [double]$fgChannels[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) { $isSame = $false; break }
+        }
+        if ($isSame) { $fgOnPaintedSide = $true; break }
+      }
+      if (-not $fgOnPaintedSide) {
+        Add-Failure ($Where + '：role=border 的记录存在被绘制的边框，但 measured.fg.rgba8=[' +
+          (($fgChannels | ForEach-Object { [int]$_ }) -join ',') + '] 不是任何被绘制边的颜色——这条记录报出的对比度与它要判的边框色无关。')
+      }
+    }
+  }
+  if ($roleForFg -eq 'graphic' -and $null -ne $outlineChannels -and $outlineRenderedFlag -eq $true) {
+    $fgIsOutline = $true
+    for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+      if ([Math]::Abs([double]$outlineChannels[$channelIndex] - [double]$fgChannels[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) { $fgIsOutline = $false; break }
+    }
+    if (-not $fgIsOutline) {
+      Add-Failure ($Where + '：role=graphic 的记录声明轮廓被绘制，但 measured.fg.rgba8=[' +
+        (($fgChannels | ForEach-Object { [int]$_ }) -join ',') + '] 与该轮廓的合成色不一致——这条记录报出的对比度与它要判的图形色无关。')
+    }
+  }
+
+  # ---------------------------------------------------------------- 颜色角色
+  # 每条记录必须声明它测的是哪个颜色角色，且该角色必须能被识别。
+  # 这把"这个令牌该出现在哪个通道"变成**可校验的结构事实**，而不是靠人读描述。
+  # 五个角色里 `nonColour` 是给**不判颜色**的判据用的（顶栏高度、圆角、间距、阴影）：它们没有
+  # 颜色角色可声明，标成 text 是把结构事实写假；但"不判颜色"同样必须显式登记，不许留空。
+  $role = [string](Get-JsonProperty $measured 'role')
+  $knownRoles = @('text', 'background', 'border', 'graphic', 'nonColour')
+  if ([string]::IsNullOrWhiteSpace($role)) {
+    Add-Failure ($Where + '.measured 缺少 role（本条判据测的颜色角色：text/background/border/graphic/nonColour）')
+  } elseif ($knownRoles -notcontains $role) {
+    Add-Failure ($Where + '.measured.role 不是已知角色：' + $role + '（已知：' + ($knownRoles -join '/') + '）。新种类的测量必须登记成新角色，不得静默丢弃。')
+  }
+
   # 令牌来源（可选）：采集器可以声明"这条实测值对应合同冻结的某个令牌/取值"。
   # 那就必须由本校验器自己复算 —— 不许只信自述（§2.4 铁律 3）。
+  # 注意 `name` 只是**追溯标签**（人读的令牌名），不参与判定：判定用的是 `value`，而且只在
+  # 本条记录声明的颜色角色的通道里对账。名字对不对由审查员看，不由本校验器猜映射表。
   $declaredToken = Get-JsonProperty $Record 'declaredToken'
   if ($null -ne $declaredToken) {
     $tokenName = Assert-NonEmptyString $declaredToken 'name' ($Where + '.declaredToken')
@@ -557,33 +889,72 @@ function Assert-RecordContrast($Record, $Ratio, [string]$Where) {
     if ($null -ne $tokenName -and $null -ne $tokenValue) {
       try {
         $declaredTokenRgb = Get-Rgb8FromToken $tokenValue
-        $measuredChannels = $bgChannels
-        $measuredLabel = 'measured.bg.rgba8'
-        $foregroundMatch = $false
-        for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
-          if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - $fgChannels[$channelIndex]) -le $script:FrozenTolerance.colorChannel) {
-            $foregroundMatch = $true
-          } else {
-            $foregroundMatch = $false
-            break
+        # nonColour 的角色通道集合**是空的**（它本来就不判颜色）。若放行，就等于给
+        # "声明了令牌却没有任何通道可对账"开一条静默通道——那正是 fail-closed 要堵的洞。
+        if ($role -eq 'nonColour') {
+          Add-Failure ($Where + '：role=nonColour（本条判据不判颜色）的记录不得声明 declaredToken ' + $tokenName + '=' + $tokenValue +
+            '——该角色没有可对账的颜色通道，令牌来源无法被复核。要么改判据的颜色角色，要么去掉令牌声明。')
+        } else {
+        # 令牌必须落在**本条判据声明的颜色角色**对应的通道里，而且该通道必须**真的被绘制**
+        # （`rendered=true`）。这条把"这个令牌该出现在哪个通道"从"靠人读描述"变成可校验的结构事实；
+        # 未画的边/轮廓不算证据：`border-top: none` 的元素其 border-top-color 仍会算出 currentColor，
+        # 若允许未画通道参与对账，"某个没画出来的边恰好等于某个令牌"就能让记录通过。
+        $roleChannels = @()
+        switch ($role) {
+          'text' { $roleChannels = @(@{ label = 'measured.fg.rgba8'; values = $fgChannels }) }
+          'background' { $roleChannels = @(@{ label = 'measured.bg.rgba8'; values = $bgChannels }) }
+          'border' {
+            foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+              if ($borderChannels.ContainsKey($side) -and $borderRenderedFlags[$side] -eq $true) {
+                $roleChannels += @{ label = ('measured.border.rgba8.' + $side); values = $borderChannels[$side] }
+              }
+            }
+            if ($null -ne $outlineChannels -and $outlineRenderedFlag -eq $true) {
+              $roleChannels += @{ label = 'measured.outline.rgba8'; values = $outlineChannels }
+            }
+          }
+          'graphic' {
+            # graphic = 被画出来的**图形**色（轮廓或边框）。文字色（measured.fg）属于 `text` 角色，
+            # 不在这里：否则"给一个图形判据声明文字色令牌"也能通过，等于把角色集合串味。
+            if ($null -ne $outlineChannels -and $outlineRenderedFlag -eq $true) {
+              $roleChannels += @{ label = 'measured.outline.rgba8'; values = $outlineChannels }
+            }
+            foreach ($side in @('bordertop', 'borderright', 'borderbottom', 'borderleft')) {
+              if ($borderChannels.ContainsKey($side) -and $borderRenderedFlags[$side] -eq $true) {
+                $roleChannels += @{ label = ('measured.border.rgba8.' + $side); values = $borderChannels[$side] }
+              }
+            }
+          }
+          default { $roleChannels = @() }
+        }
+        if ($roleChannels.Count -eq 0 -and $knownRoles -contains $role) {
+          # 角色合法、但该角色下**没有任何被绘制的通道**：不能悄悄放行（那正是假通过）。
+          Add-Failure ($Where + '：declaredToken ' + $tokenName + '=' + $tokenValue + ' 声明的颜色角色是 role=' + $role +
+            '，但本条记录里该角色下**没有任何被绘制的通道**（rendered=true）可以对账——未画的边/轮廓不是证据。')
+        }
+        if (($role -eq 'border' -or $role -eq 'graphic') -and $roleChannels.Count -gt 0 -and $null -ne $fgChannels -and $fgChannels.Count -eq 3) {
+          # 见下方「角色与 fg 的匹配」——那条在 declaredToken 分支**之外**独立执行；
+          # 这里不重复报，避免同一条记录产生两条内容相同的失败。
+        }
+        if ($roleChannels.Count -gt 0) {
+          $matchedLabel = $null
+          foreach ($candidate in $roleChannels) {
+            $isMatch = $true
+            for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
+              if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - [double]$candidate.values[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) {
+                $isMatch = $false
+                break
+              }
+            }
+            if ($isMatch) { $matchedLabel = [string]$candidate.label; break }
+          }
+          if ($null -eq $matchedLabel) {
+            Add-Failure ($Where + '：declaredToken ' + $tokenName + '=' + $tokenValue +
+              ' 与本条判据声明的颜色角色（role=' + $role + '）下的任何实测合成通道都不在 ±' + $script:FrozenTolerance.colorChannel + '/通道 内——声明的令牌来源无法解释这条实测值。已查通道：' +
+              (($roleChannels | ForEach-Object { $_.label + '=' + (($_.values | ForEach-Object { [int]$_ }) -join ',') }) -join ' | '))
           }
         }
-        if ($foregroundMatch) {
-          $measuredChannels = $fgChannels
-          $measuredLabel = 'measured.fg.rgba8'
-        }
-        $matches = $true
-        for ($channelIndex = 0; $channelIndex -lt 3; $channelIndex++) {
-          if ([Math]::Abs([double]$declaredTokenRgb[$channelIndex] - $measuredChannels[$channelIndex]) -gt $script:FrozenTolerance.colorChannel) {
-            $matches = $false
-            break
-          }
-        }
-        if (-not $matches) {
-          Add-Failure ($Where + '：declaredToken ' + $tokenName + '=' + $tokenValue +
-            ' 与本条实测合成色（' + $measuredLabel + '=' + (($measuredChannels | ForEach-Object { [int]$_ }) -join ',') +
-            '、measured.fg.rgba8=' + (($fgChannels | ForEach-Object { [int]$_ }) -join ',') +
-            '）都不在 ±' + $script:FrozenTolerance.colorChannel + '/通道 内——声明的令牌来源无法解释这条实测值')
+        # 角色未知或该角色的通道缺失时上面已经报过失败；这里不重复报，也**不能**悄悄放行。
         }
       } catch {
         Add-Failure ($Where + '：declaredToken.value 无法复算（' + $_.Exception.Message + '）')
@@ -812,6 +1183,21 @@ function Assert-EvidencePackage([string]$EvidenceDir) {
     return
   }
 
+  # 包的**溯源**必须显式声明：同一个形状既能由真实采集产出，也能由"把旧数据改写成新形状"的演练
+  # 产出。后者在记录级可能被逐条标注，但包级没有任何字段能把它与真采集区分开——
+  # 「同一个包名 + 同一个 generatedBy + 校验器判 VALID」极易被后来的读者当成证据。
+  # 因此 provenance 是必填字段，取值必须已登记；非 real-collector 的包在结尾**不会**拿到
+  # `VISUAL_EVIDENCE_VALID` 的措辞。
+  $provenance = Assert-NonEmptyString $manifest 'provenance' ($where + '.manifest')
+  if ($null -ne $provenance) {
+    $knownProvenance = @('real-collector', 'rehearsal')
+    if ($knownProvenance -notcontains $provenance) {
+      Add-Failure ($where + "：manifest.provenance 取值未登记：'" + $provenance + "'（已知：" + ($knownProvenance -join '/') + "）。新来源必须登记，不得静默。")
+    } elseif ($provenance -ne 'real-collector') {
+      $script:RehearsalPackages += 1
+    }
+  }
+
   # §3.4 第 1 项：目标提交 SHA。
   $target = Assert-RequiredProperty $manifest 'target' ($where + '.manifest')
   if ($null -eq $target) { return }
@@ -860,6 +1246,37 @@ function Assert-EvidencePackage([string]$EvidenceDir) {
     $driverVersion = Assert-NonEmptyString $webview 'driverVersion' ($where + '.manifest.host.webview2')
     if ($null -ne $runtimeVersion -and $null -ne $driverVersion -and $runtimeVersion -ne $driverVersion) {
       Add-Failure ($where + "：WebView2 runtime '" + $runtimeVersion + "' 与 msedgedriver '" + $driverVersion + "' 不一致（宿主版本无法解释本次实测）")
+    }
+    # 版本**来源**必须显式声明。tauri-driver 拉起的应用可能不开调试端口，此时版本取自预检的
+    # 同主机同二进制读数 —— 这是**降级**，必须标注来源，不许静默当成等价替代。
+    # 缺失即失败：读不到来源就无法判断这条版本绑定的强度。
+    $runtimeVersionSource = Assert-NonEmptyString $webview 'runtimeVersionSource' ($where + '.manifest.host.webview2')
+    if ($null -ne $runtimeVersionSource) {
+      $knownSources = @('devtools', 'preflight-devtools')
+      $sources = @($runtimeVersionSource -split ',' | ForEach-Object { $_.Trim() })
+      foreach ($entry in $sources) {
+        if ($knownSources -notcontains $entry) {
+          Add-Failure ($where + "：runtimeVersionSource 含未知来源 '" + $entry + "'（已知：" + ($knownSources -join '/') + "）。新来源必须登记，不得静默。")
+        }
+      }
+      # 降级的前提必须随包走。'preflight-devtools' 表示版本不是从**被实测的那个会话**读到的，
+      # 而是取自同主机同二进制的预检读数 —— 只有"机器级 Evergreen 安装存在、且应用旁边没有
+      # 随包固定版本的运行时"这条前提成立时，两者才指同一个运行时。前提不写进包，包就无法
+      # 自证这条宿主版本绑定的强度（读日志猜正是本轮要堵的洞），因此这里 fail-closed。
+      if ($sources -contains 'preflight-devtools') {
+        $premise = Get-JsonProperty $webview 'premise'
+        if ($null -eq $premise) {
+          Add-Failure ($where + '：runtimeVersionSource 含 preflight-devtools（有前提的降级），但 manifest.host.webview2 没有记录该降级的前提 premise —— 前提没被记录，这条宿主版本绑定就只能当成弱绑定，不许静默当成等价替代。')
+        } else {
+          Assert-NonEmptyString $premise 'statement' ($where + '.manifest.host.webview2.premise') | Out-Null
+          $established = Get-JsonProperty $premise 'established'
+          if ($established -isnot [bool]) {
+            Add-Failure ($where + '.manifest.host.webview2.premise.established 必须是布尔值（该降级的前提是否成立），实际：' + ($(if ($null -eq $established) { '(missing)' } else { [string]$established })))
+          } elseif (-not [bool]$established) {
+            Add-Failure ($where + '：降级前提被记录为**不成立**（established=false）—— 此时预检读数与被测会话的运行时无法证明是同一个，该宿主版本绑定不能作为本包的有效输入。')
+          }
+        }
+      }
     }
   }
   $app = Get-JsonProperty $hostBlock 'app'
@@ -1040,7 +1457,14 @@ foreach ($target in $targets) { Assert-EvidencePackage $target }
 
 Throw-IfFailed
 
-Write-Output ('VISUAL_EVIDENCE_VALID: ' + $script:CheckedPackages + ' 个证据包通过 §3.4 第 1–3 项与容差/覆盖清单校验')
+if ($script:RehearsalPackages -gt 0) {
+  # 演练/合成包：形状一样、结论完全不同。措辞必须把它与真采集区分开，否则"校验器判 VALID"
+  # 这句话会被转述成"这份包是真的"。
+  Write-Output ('VISUAL_EVIDENCE_VALID_REHEARSAL: ' + $script:CheckedPackages + ' 个包形状通过 §3.4 第 1–3 项与容差/覆盖清单校验，' +
+    '但其中 ' + $script:RehearsalPackages + ' 个声明 provenance≠real-collector（演练/合成）——它们**不是真实采集证据**，不得当证据引用。')
+} else {
+  Write-Output ('VISUAL_EVIDENCE_VALID: ' + $script:CheckedPackages + ' 个证据包通过 §3.4 第 1–3 项与容差/覆盖清单校验')
+}
 Write-Output 'note: 本校验器不签发任何 Visual Evidence，也不判任何 VC-xx 的 pass/needs_revision（§3.4 第 4 项由独立视觉审查员产出）。'
 exit 0
 
