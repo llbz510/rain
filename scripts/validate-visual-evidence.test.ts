@@ -1513,6 +1513,31 @@ describe('visual evidence validator: colour role and channels', () => {
     expect(`${result.stdout}${result.stderr}`).toMatch(/widthPx/)
   })
 
+  it('refuses a PAINTED outline whose computedStyle width is not positive (invisible by the browsers own reckoning)', { timeout: powershellTimeoutMs }, () => {
+    // S8 守卫补强（由 Standards 轴独立复审实测发现）：`outlineStyle=dashed + outlineWidth=0.1px +
+    // widthPx=0.1` 曾被**放行**——记录自称"画了一条 0.1px 的轮廓"，而浏览器按 ≤0 的宽度判定它不可见。
+    // 与 `rendered=false` 一侧同一原则：宽度不足以被看见的轮廓，不得声称已绘制并交出宽度。
+    const record = buildRecord({
+      recordId: 'VC-03-focus-ring-invisible-width',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+      outlineRendered: true,
+      computedBorder: { outlineStyle: 'dashed', outlineWidth: '0px' },
+    }) as Record<string, any>
+    record.measured.outline.widthPx = 0.1
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a painted outline whose computed width is not positive must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/outlineWidth=0px|不可见/)
+  })
+
   it('refuses a record whose spacing sample reports a NEGATIVE gap (the old cross-containing-block subtraction)', { timeout: powershellTimeoutMs }, () => {
     // S8 / 记录级缺陷 c。间距是"同一包含块、同一坐标系里两个相邻兄弟的可见间隙"，不可能为负。
     // 真实包 visual-c2c75601-20260930-013637 的 17 条记录量出 -1028 / -669 / -508 / -36 / -28 /
@@ -1597,6 +1622,56 @@ describe('visual evidence validator: colour role and channels', () => {
 
     expect(result.status, 'an element record without derived.spacing must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/spacing|derived/)
+  })
+
+  it('refuses an element record that drops the spacing CALIBRATION fields (so "no negative gap" cannot be self-silenced)', { timeout: powershellTimeoutMs }, () => {
+    // S8 守卫补强（由 Spec 轴独立复审指出）：只要求 `gaps` 非负还不够——采集器退化成"一条都不记"
+    // （`gaps: []`）就能消音。`containerGap` / `skippedOutOfFlowPairs` / `skippedUnpairedPairs`
+    // 三者正是"谁被跳过、为什么跳过"的凭据，必须必填。
+    const record = buildRecord({
+      recordId: 'VC-15-study-catalogbar-height',
+      vc: 'VC-15',
+      criterion: 'keyHeightCatalogBar80',
+      page: 'study',
+      selector: '[data-testid="catalog-bar"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'nonColour',
+      spacing: {
+        ladder: [4, 8, 12, 16, 20, 24, 32, 48],
+        slots: { paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0, marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 },
+        gaps: [],
+        offLadderValues: [],
+      },
+    }) as Record<string, any>
+    expect(record.derived.spacing.containerGap, '前置：本用例的夹具确实没有口径字段').toBeUndefined()
+    const dir = createPackage({ tested: ['VC-15'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a spacing sample without containerGap/skip counters must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/containerGap|skippedOutOfFlowPairs|skippedUnpairedPairs/)
+  })
+
+  it('refuses an element record that drops the whole measured.outline block (a fail-open bypass)', { timeout: powershellTimeoutMs }, () => {
+    // S8 守卫补强（由 Spec 轴独立复审指出）：删掉整块 `measured.outline` 就能让 `Assert-RecordContrast`
+    // 里的两道轮廓门整段不执行（`$outline` 为 null ⇒ 跳过），而 computedStyle 的 outlineStyle/Width
+    // 虽然必填，却不与任何 measured 通道对账 —— fail-open。element 记录必须带该块。
+    const record = buildRecord({
+      recordId: 'VC-03-list-import-button-focus-ring',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+    }) as Record<string, any>
+    delete record.measured.outline
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an element record without measured.outline must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/缺少 outline 通道/)
   })
 
   it('refuses a record that claims a composited value while its own metadata says otherwise', { timeout: powershellTimeoutMs }, () => {

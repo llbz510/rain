@@ -20,6 +20,10 @@ on:
       - 'scripts/validate-visual-evidence.ps1'
       - 'scripts/validate-visual-evidence.test.ts'
       - 'docs/development/visual-contract.md'
+      # S8 新增：把**真实探针**放进 jsdom 跑并裁判记录形状的判据与它的支撑模块。
+      # 支撑模块若不在过滤表里，只改它不会触发本门禁 —— 而它正是探针夹具的宿主。
+      - 'src/__tests__/visual-contract-s8-probe-record-shape.test.ts'
+      - 'src/__tests__/support/**'
   workflow_dispatch:
     inputs:
       target_sha:

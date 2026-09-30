@@ -377,8 +377,52 @@ function measure(spec) {
   if (!element) {
     return { probeId: spec.id, vc: spec.vc, criterion: spec.criterion, page: spec.page, selector: spec.selector, missing: true, note: spec.description || '' };
   }
+  // **取数时机修正（S8，由 Spec 轴独立复审指出）**：`getComputedStyle()` 返回的是**活对象**，
+  // 而声明 `focus: true` 的 spec 会让 `readFocusRing()` 调用 `element.focus()`——聚焦**改变**计算样式。
+  // 旧写法把 `style` 取在最前、却在 `derived`（focus 的结果）**之后**才读它的字段，于是同一条记录里
+  // `measured.outline.style` 是**聚焦后**的 `dashed`、`computedStyle.outlineStyle` 是**聚焦前**的 `none`，
+  // 而 `rendered` 又是按聚焦前算的 `false`——真实包
+  // `VC-03-list-import-button-focus-ring.json` 就是这个形态（同一对象跨变更读两次的活对象效应）。
+  // 现在：**先**把该聚焦的聚焦掉，**再**一次性做冻结快照（rect 与计算样式同批取），
+  // 之后所有字段（computedStyle / measured / derived）一律从这份快照读——一条记录内部只有一个取数时机。
+  // 次序不能颠倒：`focus()` 会把元素滚进视野，所以 rect 也必须在它之后取，否则几何与样式来自两个时刻。
+  const focusRing = spec.focus ? readFocusRing(element) : null;
   const rect = element.getBoundingClientRect();
-  const style = getComputedStyle(element);
+  const live = getComputedStyle(element);
+  const style = {
+    color: live.color,
+    backgroundColor: live.backgroundColor,
+    fontFamily: live.fontFamily,
+    fontSize: live.fontSize,
+    fontWeight: live.fontWeight,
+    fontVariantNumeric: live.fontVariantNumeric,
+    lineHeight: live.lineHeight,
+    borderTopWidth: live.borderTopWidth,
+    borderTopStyle: live.borderTopStyle,
+    borderTopColor: live.borderTopColor,
+    borderRightWidth: live.borderRightWidth,
+    borderRightStyle: live.borderRightStyle,
+    borderRightColor: live.borderRightColor,
+    borderBottomWidth: live.borderBottomWidth,
+    borderBottomStyle: live.borderBottomStyle,
+    borderBottomColor: live.borderBottomColor,
+    borderLeftWidth: live.borderLeftWidth,
+    borderLeftStyle: live.borderLeftStyle,
+    borderLeftColor: live.borderLeftColor,
+    outlineStyle: live.outlineStyle,
+    outlineWidth: live.outlineWidth,
+    outlineColor: live.outlineColor,
+    borderRadius: live.borderTopLeftRadius,
+    paddingTop: live.paddingTop,
+    paddingRight: live.paddingRight,
+    paddingBottom: live.paddingBottom,
+    paddingLeft: live.paddingLeft,
+    marginTop: live.marginTop,
+    marginRight: live.marginRight,
+    marginBottom: live.marginBottom,
+    marginLeft: live.marginLeft,
+    boxShadow: live.boxShadow,
+  };
   const chain = ancestorChain(element);
   const layers = [];
   for (let index = 0; index < chain.length; index += 1) {
@@ -516,7 +560,9 @@ function measure(spec) {
       borderRadiusPx: parseFloat(style.borderTopLeftRadius),
       // focusRing 只在 spec 显式声明 focus=true 时读取：否则每个被测元素都被 focus 会改变焦点状态，
       // 还可能让浏览器把它滚进视野，从而污染**后续**元素的 getBoundingClientRect（既有 E2E 踩过同类坑）。
-      focusRing: spec.focus ? readFocusRing(element) : null,
+      // 读取时机已提前到函数开头（见上方"取数时机修正"），这里只把那份结果带出来——**不再二次调用**，
+      // 否则就会重新引入"同一条记录里两个取数时机"的活对象缺陷。
+      focusRing: focusRing,
       tokens: readTokens(),
       spacing: readSpacingLadder(element),
     },
