@@ -1,0 +1,40 @@
+{
+    "recordId":  "VC-03-study-accent-sweep",
+    "vc":  "VC-03",
+    "criterion":  "noBrandAccentAnywhere",
+    "page":  "study",
+    "measurementScope":  "accentSweep",
+    "selector":  "[data-testid=\"study-interface\"]",
+    "description":  "VC-03① 学习页全页扫描",
+    "sampledViewport":  {
+                            "width":  1028,
+                            "height":  749,
+                            "devicePixelRatio":  1,
+                            "sampledAt":  "2026-09-30T01:43:11.222Z"
+                        },
+    "screenshots":  [
+                        "screenshots/02-study.png"
+                    ],
+    "accentSweep":  {
+                        "accentToken":  "#4a9eff",
+                        "tolerancePerChannel":  1,
+                        "selectorScope":  "[data-testid=\"study-interface\"]",
+                        "scannedElementCount":  625,
+                        "scannedProperties":  [
+                                                  "backgroundColor",
+                                                  "borderTopColor",
+                                                  "borderRightColor",
+                                                  "borderBottomColor",
+                                                  "borderLeftColor",
+                                                  "outlineColor",
+                                                  "color"
+                                              ],
+                        "skippedNotRendered":  [
+                                                   "outline-color when outline-style: none",
+                                                   "border-*-color when border-*-style: none"
+                                               ],
+                        "matches":  [
+
+                                    ]
+                    }
+}

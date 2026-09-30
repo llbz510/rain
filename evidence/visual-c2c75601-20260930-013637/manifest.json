@@ -1,0 +1,300 @@
+{
+    "schemaVersion":  1,
+    "evidenceId":  "visual-c2c75601-20260930-013637",
+    "provenance":  "real-collector",
+    "generatedAt":  "2026-09-30T01:43:11.6082477+00:00",
+    "generatedBy":  "scripts/campaign-visual-evidence.ps1",
+    "target":  {
+                   "commitSha":  "c2c756010eceba941657059ca31d4abd746799d3",
+                   "shortSha":  "c2c75601",
+                   "repo":  "llbz510/rain",
+                   "checkoutRef":  "refs/heads/master",
+                   "runId":  "36655537703",
+                   "runAttempt":  "1"
+               },
+    "viewport":  {
+                     "width":  1028,
+                     "height":  749,
+                     "devicePixelRatio":  1,
+                     "windowState":  "default (native Tauri window from src-tauri/tauri.conf.json; size not modified)",
+                     "observedWidths":  [
+                                            1028
+                                        ],
+                     "observedHeights":  [
+                                             749
+                                         ],
+                     "observedDevicePixelRatios":  [
+                                                       1
+                                                   ]
+                 },
+    "host":  {
+                 "os":  {
+                            "caption":  "Microsoft Windows Server 2025 Datacenter",
+                            "version":  "10.0.26100",
+                            "build":  "26100"
+                        },
+                 "webview2":  {
+                                  "runtimeVersion":  "153.0.4234.48",
+                                  "driverVersion":  "153.0.4234.48",
+                                  "runtimeVersionSource":  "preflight-devtools",
+                                  "premise":  {
+                                                  "machineLevelEvergreenPresent":  true,
+                                                  "fixedVersionRuntimePresent":  false,
+                                                  "evergreenRuntimeVersions":  "153.0.4234.48",
+                                                  "established":  true,
+                                                  "statement":  "machine-level Evergreen install present and no fixed-version runtime alongside the app: a same-host reading is the same runtime"
+                                              }
+                              },
+                 "app":  {
+                             "productName":  "Rain",
+                             "productVersion":  "0.1.0",
+                             "binaryPath":  "src-tauri/target/debug/rain.exe"
+                         },
+                 "driver":  {
+                                "tauriDriver":  "tauri-driver 2.0.6"
+                            }
+             },
+    "tolerance":  {
+                      "colorChannel":  1,
+                      "contrastRatio":  0.05,
+                      "fixedHeightPx":  0.5,
+                      "renderedGeometryPx":  2,
+                      "exactValues":  true
+                  },
+    "toleranceBasis":  "visual-contract.md §3.3: colour ±1/channel, contrast ratio ±0.05, token-derived geometry ±0.5px, rendered geometry ±2px, sizes/weights/radii exact",
+    "coverage":  {
+                     "tested":  [
+                                    "VC-01",
+                                    "VC-02",
+                                    "VC-03",
+                                    "VC-04",
+                                    "VC-12",
+                                    "VC-15"
+                                ],
+                     "untested":  [
+                                      "VC-05",
+                                      "VC-06",
+                                      "VC-07",
+                                      "VC-08",
+                                      "VC-09",
+                                      "VC-10",
+                                      "VC-11",
+                                      "VC-13",
+                                      "VC-14",
+                                      "VC-16",
+                                      "VC-17",
+                                      "VC-19"
+                                  ],
+                     "reserved":  [
+                                      "VC-18"
+                                  ],
+                     "note":  "未测项一律视为未取得证据，不得用「其余看起来一致」推断通过（§3.4）。",
+                     "scopeNote":  "被列为已测的编号，其**本轮实测到的维度**以 records[].criterion 为准（每条记录只声明它自己测的那一维）；未被任何记录覆盖的维度视为未测。VC-15④ 只测本轮可达的顶栏 40 与目录横条 80。留给 V1b 的维度：VC-03：键盘 Tab 聚焦路径与聚焦态截图（本轮只做程序化 focus 后的实测 outline/border）；VC-04：页面上段落类型色的实际使用点、以及是否出现第五种类型色；VC-05/VC-06：默认/选中/播放三态（交互态）；VC-07：三种状态色的实际使用点与冗余文字/形状；VC-08/VC-09/VC-10/VC-11：目录节点、类型胶囊、卡片细节与多视口；VC-12：全页面字号/字重清点（本轮只测被选中元素）；VC-13/VC-14/VC-16：字幕与行高的实际渲染；VC-15①：全页面间距清点（本轮只做元素级抽样）；VC-15④ 的控制栏 40 只在 textExpand/mapExpand 模式渲染；VC-17：导图节点与连线；VC-19：动效时长与 reduced-motion"
+                 },
+    "screenshots":  [
+                        "screenshots/01-video-list.png",
+                        "screenshots/03-settings.png",
+                        "screenshots/02-study.png"
+                    ],
+    "records":  [
+                    {
+                        "recordId":  "VC-01-list-body-bg",
+                        "file":  "records/VC-01-list-body-bg.json"
+                    },
+                    {
+                        "recordId":  "VC-01-list-page-bg",
+                        "file":  "records/VC-01-list-page-bg.json"
+                    },
+                    {
+                        "recordId":  "VC-01-list-topbar",
+                        "file":  "records/VC-01-list-topbar.json"
+                    },
+                    {
+                        "recordId":  "VC-02-list-bg-token",
+                        "file":  "records/VC-02-list-bg-token.json"
+                    },
+                    {
+                        "recordId":  "VC-02-list-topbar-surface",
+                        "file":  "records/VC-02-list-topbar-surface.json"
+                    },
+                    {
+                        "recordId":  "VC-02-list-import-button",
+                        "file":  "records/VC-02-list-import-button.json"
+                    },
+                    {
+                        "recordId":  "VC-02-list-border-token",
+                        "file":  "records/VC-02-list-border-token.json"
+                    },
+                    {
+                        "recordId":  "VC-03-list-import-button",
+                        "file":  "records/VC-03-list-import-button.json"
+                    },
+                    {
+                        "recordId":  "VC-03-list-import-button-border",
+                        "file":  "records/VC-03-list-import-button-border.json"
+                    },
+                    {
+                        "recordId":  "VC-03-list-import-button-focus-ring",
+                        "file":  "records/VC-03-list-import-button-focus-ring.json"
+                    },
+                    {
+                        "recordId":  "VC-12-list-topbar-title",
+                        "file":  "records/VC-12-list-topbar-title.json"
+                    },
+                    {
+                        "recordId":  "VC-15-list-topbar-height",
+                        "file":  "records/VC-15-list-topbar-height.json"
+                    },
+                    {
+                        "recordId":  "VC-15-list-control-radius",
+                        "file":  "records/VC-15-list-control-radius.json"
+                    },
+                    {
+                        "recordId":  "VC-15-list-control-spacing",
+                        "file":  "records/VC-15-list-control-spacing.json"
+                    },
+                    {
+                        "recordId":  "VC-15-list-main-shadow",
+                        "file":  "records/VC-15-list-main-shadow.json"
+                    },
+                    {
+                        "recordId":  "VC-15-list-spacing-ladder-tokens",
+                        "file":  "records/VC-15-list-spacing-ladder-tokens.json"
+                    },
+                    {
+                        "recordId":  "VC-15-list-radius-ladder-tokens",
+                        "file":  "records/VC-15-list-radius-ladder-tokens.json"
+                    },
+                    {
+                        "recordId":  "VC-12-list-font-size-ladder-tokens",
+                        "file":  "records/VC-12-list-font-size-ladder-tokens.json"
+                    },
+                    {
+                        "recordId":  "VC-03-list-accent-sweep",
+                        "file":  "records/VC-03-list-accent-sweep.json"
+                    },
+                    {
+                        "recordId":  "VC-01-settings-bg",
+                        "file":  "records/VC-01-settings-bg.json"
+                    },
+                    {
+                        "recordId":  "VC-01-settings-topbar",
+                        "file":  "records/VC-01-settings-topbar.json"
+                    },
+                    {
+                        "recordId":  "VC-02-settings-bg-token",
+                        "file":  "records/VC-02-settings-bg-token.json"
+                    },
+                    {
+                        "recordId":  "VC-02-settings-topbar-panel",
+                        "file":  "records/VC-02-settings-topbar-panel.json"
+                    },
+                    {
+                        "recordId":  "VC-02-settings-add-model",
+                        "file":  "records/VC-02-settings-add-model.json"
+                    },
+                    {
+                        "recordId":  "VC-02-settings-topbar-muted",
+                        "file":  "records/VC-02-settings-topbar-muted.json"
+                    },
+                    {
+                        "recordId":  "VC-02-settings-topbar-border",
+                        "file":  "records/VC-02-settings-topbar-border.json"
+                    },
+                    {
+                        "recordId":  "VC-03-settings-add-model",
+                        "file":  "records/VC-03-settings-add-model.json"
+                    },
+                    {
+                        "recordId":  "VC-03-settings-add-model-border",
+                        "file":  "records/VC-03-settings-add-model-border.json"
+                    },
+                    {
+                        "recordId":  "VC-12-settings-topbar-title",
+                        "file":  "records/VC-12-settings-topbar-title.json"
+                    },
+                    {
+                        "recordId":  "VC-15-settings-topbar-height",
+                        "file":  "records/VC-15-settings-topbar-height.json"
+                    },
+                    {
+                        "recordId":  "VC-15-settings-add-model-radius",
+                        "file":  "records/VC-15-settings-add-model-radius.json"
+                    },
+                    {
+                        "recordId":  "VC-15-settings-add-model-spacing",
+                        "file":  "records/VC-15-settings-add-model-spacing.json"
+                    },
+                    {
+                        "recordId":  "VC-03-settings-accent-sweep",
+                        "file":  "records/VC-03-settings-accent-sweep.json"
+                    },
+                    {
+                        "recordId":  "VC-01-study-root",
+                        "file":  "records/VC-01-study-root.json"
+                    },
+                    {
+                        "recordId":  "VC-01-study-body",
+                        "file":  "records/VC-01-study-body.json"
+                    },
+                    {
+                        "recordId":  "VC-01-study-video-shell",
+                        "file":  "records/VC-01-study-video-shell.json"
+                    },
+                    {
+                        "recordId":  "VC-03-study-rightpanel-tabbar",
+                        "file":  "records/VC-03-study-rightpanel-tabbar.json"
+                    },
+                    {
+                        "recordId":  "VC-04-study-paragraph-type-tokens",
+                        "file":  "records/VC-04-study-paragraph-type-tokens.json"
+                    },
+                    {
+                        "recordId":  "VC-15-study-catalogbar-height",
+                        "file":  "records/VC-15-study-catalogbar-height.json"
+                    },
+                    {
+                        "recordId":  "VC-15-study-root-spacing",
+                        "file":  "records/VC-15-study-root-spacing.json"
+                    },
+                    {
+                        "recordId":  "VC-03-study-accent-sweep",
+                        "file":  "records/VC-03-study-accent-sweep.json"
+                    }
+                ],
+    "accentSweeps":  [
+                         {
+                             "id":  "VC-03-list-accent-sweep",
+                             "vc":  "VC-03",
+                             "page":  "video-list",
+                             "selectorScope":  "[data-testid=\"video-list-page\"]",
+                             "accentToken":  "#4a9eff"
+                         },
+                         {
+                             "id":  "VC-03-settings-accent-sweep",
+                             "vc":  "VC-03",
+                             "page":  "settings",
+                             "selectorScope":  "[data-testid=\"settings-page\"]",
+                             "accentToken":  "#4a9eff"
+                         },
+                         {
+                             "id":  "VC-03-study-accent-sweep",
+                             "vc":  "VC-03",
+                             "page":  "study",
+                             "selectorScope":  "[data-testid=\"study-interface\"]",
+                             "accentToken":  "#4a9eff"
+                         }
+                     ],
+    "verdicts":  {
+                     "issued":  false,
+                     "issuedBy":  null,
+                     "note":  "本证据包只提供 §3.4 第 1–3 项（输入侧）；第 4 项逐条 pass/needs_revision 与差值由独立视觉审查员（V2）对目标提交判定。采集方不签发结论。"
+                 },
+    "attachments":  {
+                        "screenshotBytes":  {
+                                                "screenshots/01-video-list.png":  9819,
+                                                "screenshots/03-settings.png":  48373,
+                                                "screenshots/02-study.png":  62866
+                                            }
+                    }
+}

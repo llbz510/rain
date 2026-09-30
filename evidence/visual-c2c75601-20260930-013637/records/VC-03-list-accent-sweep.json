@@ -1,0 +1,40 @@
+{
+    "recordId":  "VC-03-list-accent-sweep",
+    "vc":  "VC-03",
+    "criterion":  "noBrandAccentAnywhere",
+    "page":  "video-list",
+    "measurementScope":  "accentSweep",
+    "selector":  "[data-testid=\"video-list-page\"]",
+    "description":  "VC-03① 视频列表页全页扫描：任何被渲染的底色/边框/轮廓/文字都不得等于 #4a9eff（±1/通道）",
+    "sampledViewport":  {
+                            "width":  1028,
+                            "height":  749,
+                            "devicePixelRatio":  1,
+                            "sampledAt":  "2026-09-30T01:42:31.402Z"
+                        },
+    "screenshots":  [
+                        "screenshots/01-video-list.png"
+                    ],
+    "accentSweep":  {
+                        "accentToken":  "#4a9eff",
+                        "tolerancePerChannel":  1,
+                        "selectorScope":  "[data-testid=\"video-list-page\"]",
+                        "scannedElementCount":  14,
+                        "scannedProperties":  [
+                                                  "backgroundColor",
+                                                  "borderTopColor",
+                                                  "borderRightColor",
+                                                  "borderBottomColor",
+                                                  "borderLeftColor",
+                                                  "outlineColor",
+                                                  "color"
+                                              ],
+                        "skippedNotRendered":  [
+                                                   "outline-color when outline-style: none",
+                                                   "border-*-color when border-*-style: none"
+                                               ],
+                        "matches":  [
+
+                                    ]
+                    }
+}
