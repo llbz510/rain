@@ -434,7 +434,17 @@ export function StudyInterface() {
           />
         </div>
         {visibility.catalogBar && (
-          <div style={flexAutoStyle}>
+          // 目录横条高度 = 决策 76 的「目录横条 80」（`--height-catalog`，与顶栏/控制栏同一套
+          // `--height-*` 固定高度命名）。此前这里没有高度、横条按内容自然高度渲染，
+          // 真实桌面实测 **59.59375px**（= 2 × 23.796875 的行高计算值 + 2 × 6 的行内盒空白），
+          // 比冻结值 80 少 20.40625px（`VC-15`④）。
+          // **高度只落在容器上**：容器 80px、被测的 `data-testid="catalog-bar"` 用 `height:100%`
+          // 撑满它（该根元素的 `display` 仍是 `block`，两条目录行仍是原来的
+          // `shell > scroll row` 结构——**水平布局零改动**）。
+          // 为什么不在 `CatalogBar` 里改：本 Slice 先那么做过，结果把真实桌面判据
+          // 「长目录两行真实横向溢出」由绿改红（paragraph 行 extent 2499.09375 对 ownerWidth 2580，
+          // 差 3.1%；master 基线 run 36665063145 为绿）。改高度不该顺手改行内布局，故撤回。
+          <div style={{ ...flexAutoStyle, height: 'var(--height-catalog)' }}>
             <CatalogBar onSeek={handleSeek} />
           </div>
         )}
