@@ -457,7 +457,16 @@ function inputBlockBounds(workflow: string, inputName: string): string {
     // 同级或更浅的映射键 = 该 input 的边界（属性行缩进更深，不会命中）。
     if (indent <= entryIndent && /^\s*[A-Za-z_][\w.-]*:/.test(line)) { end = i; break }
   }
-  return lines.slice(head, end).join('\n')
+  const block = lines.slice(head, end)
+  // 不变量（t4 复审 B4）：块内 `default:` 行必须恰好一行。
+  // 取块后我们只读"第一处 default"，若块里出现重复映射键，先看到的那一行可能不是生效值
+  // （YAML last-wins），于是一个被改坏的默认值仍会绿灯。重复键本身违反 YAML 规范，
+  // 但判据不该把安全属性押在"没人会写重复键"上。
+  const defaults = block.filter((line) => /^\s*default:\s*\S/.test(line))
+  if (defaults.length !== 1) {
+    throw new Error(`输入 ${inputName} 的块里 default 必须恰好一行，实际 ${defaults.length} 行`)
+  }
+  return block.join('\n')
 }
 
 const DIAGNOSTIC_KEY = 'RAIN_VISUAL_DIAGNOSTIC'
@@ -616,6 +625,31 @@ describe('诊断开关接线：默认路径一字不变，诊断产物不是证�
     const defaultLine = block.split('\n').find((line) => /^\s*default:\s*\S/.test(line))
     expect(defaultLine?.trim(), 'diagnostic 自己的 default 必须是 false').not.toBe('default: false')
     expect(block, '邻近 input 不得落进 diagnostic 的块里').not.toContain('neighbour_injected')
+  })
+
+  it('注入证明 ⑮（STD-13 的 B4 邻域）：块内重复 default: false 掩盖被改坏的默认值 → 必须判红', () => {
+    // t4 复审登记的 B4：取块函数只读"第一处 default"，块内若出现**重复映射键**，
+    // 先看到的那行可能不是生效值（YAML last-wins），于是一个默认值已被改成 true 的
+    // diagnostic 仍然绿灯。重复键违反 YAML 规范，但安全属性不该押在"没人会写重复键"上。
+    const lines = workflow.split('\n')
+    const head = lines.findIndex((line) => /^\s{2,8}diagnostic:\s*$/.test(line))
+    const entryIndent = lines[head].length - lines[head].trimStart().length
+    let end = lines.length
+    for (let i = head + 1; i < lines.length; i += 1) {
+      const line = lines[i]
+      if (line.trim() === '') continue
+      if (line.length - line.trimStart().length <= entryIndent && /^\s*[A-Za-z_][\w.-]*:/.test(line)) { end = i; break }
+    }
+    const defaultAt = lines.findIndex((line, index) => index > head && index < end && /^\s*default:\s*false\s*$/.test(line))
+    expect(defaultAt, 'diagnostic 块里必须有自己的 default: false').toBeGreaterThan(-1)
+    const mutatedLines = [...lines]
+    mutatedLines[defaultAt] = mutatedLines[defaultAt].replace('false', 'true')
+    // 在它**之前**插一行重复的 default: false（先被 find 看到）
+    mutatedLines.splice(defaultAt, 0, mutatedLines[defaultAt].replace('true', 'false'))
+    const mutated = mutatedLines.join('\n')
+    expect(mutated, '注入本身要生效').not.toBe(workflow)
+    expect(() => inputBlockBounds(mutated, 'diagnostic'), '块内重复 default 必须被判据拒绝')
+      .toThrow(/default 必须恰好一行/)
   })
 
   it('诊断环境变量落在**采集 step 自己的 env 里**（不是 job 级、不是别的 step）', () => {

@@ -406,7 +406,12 @@ function diagnosticInputBlock(workflow: string): string {
     const indent = line.length - line.trimStart().length
     if (indent <= entryIndent && /^\s*[A-Za-z_][\w.-]*:/.test(line)) { end = i; break }
   }
-  return lines.slice(head, end).join('\n')
+  const block = lines.slice(head, end)
+  // 不变量（t4 复审 B4）：块内 `default:` 恰好一行——否则"取第一处 default"可能读到的不是
+  // 生效值（YAML last-wins），被改坏的默认值照样绿灯。
+  const defaults = block.filter((line) => /^\s*default:\s*\S/.test(line))
+  expect(defaults.length, 'diagnostic 块里 default 必须恰好一行').toBe(1)
+  return block.join('\n')
 }
 
 describe('诊断开关接线：默认路径一字不变，诊断产物不是证据', () => {
