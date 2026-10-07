@@ -263,6 +263,19 @@ export function SideTree({ onSeek, onNavigateNode, playPosition: propPosition }:
   return <div data-testid="side-tree">{topLevel.map((node) => renderNode(node))}</div>
 }
 
+// 目录横条（决策 76 的「目录横条 80」）：`data-testid="catalog-bar"` 是**被测的那个元素**
+// （`VC-15`④ 读它的 `getBoundingClientRect().height`），因此它必须自己撑满消费方给出的
+// 80px —— 用 `height: '100%'`，`display` 仍是默认的 `block`。
+// 本组件保持原有结构（两条目录行仍是 `shell > scroll row`），**水平布局零改动**。
+// 起因（据实登记，是真回归）：本 Slice 一开始把高度直接改成这个根元素的 `display:grid` +
+// `gridTemplateRows:'1fr 1fr'`，结果那条真实桌面判据
+// （`scripts/run-study-catalog-e2e.ps1` 的「长目录两行真实横向溢出」）由绿转红——
+// paragraph 行 `extent=2499.09375` 对 `ownerWidth=2580`（差 3.1%），而 master 基线
+// run `36665063145` 是绿的。改高度不该顺手改行内布局，故撤回结构改动、只保留高度对齐。
+const catalogBarStyle: React.CSSProperties = {
+  height: '100%',
+}
+
 export function CatalogBar({ onSeek }: CatalogProps) {
   const nodes = useRainStore((s) => s.nodeTree)
   const playPosition = useRainStore((s) => s.playPosition)
@@ -346,7 +359,7 @@ export function CatalogBar({ onSeek }: CatalogProps) {
   )
 
   return (
-    <div data-testid="catalog-bar">
+    <div data-testid="catalog-bar" style={catalogBarStyle}>
       <CatalogRow level="structure" nodes={structureNodes} currentNodeId={currentStructureNode?.id ?? null} currentNodeRef={currentStructureRef} structureSwitch={structureSwitch} renderNode={renderNode} />
       <CatalogRow level="paragraph" nodes={paragraphNodes} currentNodeId={currentParagraphNode?.id ?? null} currentNodeRef={currentParagraphRef} renderNode={renderNode} />
     </div>
