@@ -99,16 +99,21 @@ jobs:
           }
 
           # ---- 允许重试：只重试一次，且必须留痕 ------------------------------
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value @"
-
-          ## Clean Windows Harness：窄条件自动重试已触发（第 1 次运行失败 → 重跑同一命令一次）
-
-          - 第 1 次运行的退出码：``$code``
-          - 判据结论：``$verdictText``
-          - 触发条件（全部满足）：退出码非 0；零失败测试文件与零失败测试；恰好 1 个未处理错误；错误消息精确等于 ``[vitest-worker]: Timeout calling "onTaskUpdate"``
-          - **只重试一次**：本次重跑若仍失败，门禁最终判红（不跳过、不替换任何断言，不改任何超时）
-          - 首次运行的完整日志作为本 workflow 的 artifact 上传（``harness-check-first-run``）
-          "@
+          # 刻意**不用 here-string**：here-string 终止符前是否允许缩进在 PS5.1（不允许）与
+          # PS7.3+（允许）之间不同，而这里的缩进还要同时满足 YAML 块标量规则——两套规则叠加
+          # 就会出现"托管上能跑、本机解析失败"的分歧。改用普通单引号数组 + -join，语义与
+          # 缩进都无歧义。
+          $summaryLines = @(
+            '',
+            '## Clean Windows Harness：窄条件自动重试已触发（第 1 次运行失败 → 重跑同一命令一次）',
+            '',
+            "- 第 1 次运行的退出码：``$code``",
+            "- 判据结论：``$verdictText``",
+            '- 触发条件（全部满足）：退出码非 0；零失败测试文件与零失败测试；恰好 1 个未处理错误；错误消息精确等于 ``[vitest-worker]: Timeout calling "onTaskUpdate"``',
+            '- **只重试一次**：本次重跑若仍失败，门禁最终判红（不跳过、不替换任何断言，不改任何超时）',
+            '- 完整日志作 artifact 上传（``harness-check-logs``）：首次运行那份必有；若重跑也失败，重跑那份同样上传，且其失败摘要与尾部会打印在 job 日志里'
+          )
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($summaryLines -join "`n")
           Write-Output "::warning::Narrow auto-retry triggered (vitest-worker RPC timeout with zero test failures). Re-running the same command exactly once."
 
           $retryLog = Join-Path $env:RUNNER_TEMP 'harness-check-retry.log'
@@ -119,15 +124,27 @@ jobs:
           if ($retryCode -ne 0) {
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- 重跑结果：**失败**（退出码 ``$retryCode``）⇒ 门禁最终判红。窄条件自动重试**没有**、也不会掩盖真实失败。"
             Write-Output "::error::Harness failed again on the narrow-condition retry (exit code $retryCode). Failing the gate - the retry did not mask anything."
+            # 重跑的失败类别必须**当场可判**：只报退出码的话，事后没人分得清「又是同一种 flake」
+            # 还是「真实回归」，只能靠重跑猜。这里把重跑日志的尾部直接打进 job log，并与首次
+            # 运行的日志一起作为 artifact 上传（见下一个步骤），失败现场不留白。
+            $failureLines = Select-String -LiteralPath $retryLog -Pattern 'Test Files','Tests ','Errors ','Unhandled Error','Timeout calling' -ErrorAction SilentlyContinue
+            if ($failureLines) {
+              Write-Output '---- retry log: failure summary ----'
+              $failureLines | Select-Object -Last 12 | ForEach-Object { Write-Output $_.Line.TrimEnd() }
+            }
+            Write-Output '---- retry log: tail ----'
+            Get-Content -LiteralPath $retryLog -Tail 40 | ForEach-Object { Write-Output $_ }
           }
           exit $retryCode
 
-      - name: Upload first-run Harness log when a narrow retry was triggered
+      - name: Upload Harness logs when a narrow retry was triggered
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: harness-check-first-run
-          path: ${{ runner.temp }}/harness-check-first-run.log
+          name: harness-check-logs
+          path: |
+            ${{ runner.temp }}/harness-check-first-run.log
+            ${{ runner.temp }}/harness-check-retry.log
           if-no-files-found: ignore
           retention-days: 7
 
