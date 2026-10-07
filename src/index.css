@@ -68,6 +68,10 @@
   /* ===== 固定高度（决策76）===== */
   --height-topbar: 40px;
   --height-controlbar: 40px;
+  /* 目录横条 80（决策76 明文；`M16-layout.md`「约 80px」）。第九个，与上面两个同一命名约定
+     `--height-<区域>`；此前这 80 从未落成令牌，学习页目录横条按内容自然高度渲染，
+     真实桌面实测 59.59375px（= 2 × 行高 23.8 + 2 × 6，见 VC-15④）。 */
+  --height-catalog: 80px;
 }
 
 /* ===== Reset（保留 Task 1）===== */
@@ -95,6 +99,22 @@ body {
   font-size: var(--font-size-sm);
   /* 决策75：正文 1.7 */
   line-height: 1.7;
+}
+
+/* ===== 表单控件继承页面字体（决策73「全局单一无衬线字体族」/ VC-12①）=====
+   实测缺陷（S8 缺陷②）：`button` / `input` / `select` / `textarea` 在 UA 样式里有**自己的**
+   字体声明——Chromium/WebView2 逐字给 `Arial`、字号 `13.3333px`，既不继承 body 的 system-ui 栈，
+   也不落在字号阶梯上。视频列表页顶栏的「导入 / 设置」按钮与搜索框的计算字体族因此是 `Arial`
+   （本机 headless Edge 实测：同一页面 body = `system-ui, -apple-system, "Segoe UI", sans-serif`，
+   控件 = `Arial`）。决策 73 要的是**全局单一无衬线字体族**，所以这里让表单控件按常规做法继承。
+   只声明 `font` 这一个简写属性：控件上已有的 `fontSize: 14px / 13px / 12px` 内联取值来自
+   `--font-size-*` 阶梯，位于**内联**层、优先级高于本规则，字号不会被改写。
+   字体族本身在若干处已显式写 `fontFamily: 'inherit'`；本规则让**其余**控件也一致。 */
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 @keyframes catalog-structure-slide-a {
