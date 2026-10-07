@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
+import { cleanupTrackedProcesses, runTrackedProcess } from './tracked-process.mjs'
 
 /**
  * V1a「真实桌面视觉实测通道」的公开裁判（测试先行）。
@@ -39,18 +39,27 @@ const contractIds = [
   'VC-10', 'VC-11', 'VC-12', 'VC-13', 'VC-14', 'VC-15', 'VC-16', 'VC-17', 'VC-19',
 ]
 
-function runValidator(args: string[]): { status: number; stdout: string; stderr: string } {
-  try {
-    const stdout = execFileSync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', validatorScript, ...args],
-      { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' },
-    )
-    return { status: 0, stdout, stderr: '' }
-  } catch (cause) {
-    const failure = cause as { status?: number; stdout?: string; stderr?: string }
-    return { status: failure.status ?? 1, stdout: failure.stdout ?? '', stderr: failure.stderr ?? '' }
+/**
+ * 跑一次校验器。
+ *
+ * 这里**必须是异步**（本轮改动的核心）：原来用 `execFileSync`，本文件 80+ 次调用会首尾相接成
+ * 一段**连续 39.3 秒**不回到事件循环的区间（本地实测），足以让 vitest worker 的 RPC 超时计时器
+ * 错过窗口，收尾时报 `[vitest-worker]: Timeout calling "onTaskUpdate"`（零测试失败却 exit 1）。
+ * 语义保持不变：同一个可执行文件、同一组参数、同一个 cwd、同一个超时预算、同样的
+ * 「非 0 即失败」判定，只是不再阻塞事件循环。
+ */
+async function runValidator(args: string[]): Promise<{ status: number; stdout: string; stderr: string }> {
+  const result = await runTrackedProcess(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', validatorScript, ...args],
+    { cwd: repoRoot, timeoutMs: powershellTimeoutMs },
+  )
+  if (result.status === null) {
+    // 超时/未能启动：如实失败，不再像 execFileSync 那样抛异常，让调用方按 status 判定。
+    // stderr 必须**保留子进程自己写的内容**（断言读的就是它）；只有它为空时才退回 error 说明。
+    return { status: 1, stdout: result.stdout, stderr: result.stderr || (result.error ?? '') }
   }
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
 function writeJson(path: string, value: unknown): void {
@@ -61,7 +70,7 @@ function writeJson(path: string, value: unknown): void {
  * 数学向量通过**文件**传给校验器：Windows 的参数解析会把 JSON 里的引号吃掉，
  * 内联 JSON 在 `powershell.exe -File` 下会变成不可解析的形态（本轮实测）。
  */
-function runMathVectors(vectors: unknown[]): { status: number; stdout: string; stderr: string } {
+async function runMathVectors(vectors: unknown[]): Promise<{ status: number; stdout: string; stderr: string }> {
   const dir = mkdtempSync(join(tmpdir(), 'rain-visual-math-'))
   const path = join(dir, 'vectors.json')
   writeJson(path, vectors)
@@ -74,17 +83,20 @@ function runMathVectors(vectors: unknown[]): { status: number; stdout: string; s
  * 脚本体先落盘成文件再执行，不走命令行传参：Windows 的参数解析会把内联脚本与 JSON 里的引号
  * 吃掉（本仓已经踩过一次，见上面 runMathVectors 的说明）。
  */
-function runPowerShellJson(script: string): Record<string, unknown> {
+async function runPowerShellJson(script: string): Promise<Record<string, unknown>> {
   const dir = mkdtempSync(join(tmpdir(), 'rain-visual-ps-'))
   const path = join(dir, 'probe.ps1')
   // BOM 是必需的：无 BOM 时 Windows PowerShell 5.1 会按 ANSI 解码含中文的脚本，直接语法错乱。
   writeFileSync(path, `\uFEFF${script}`, 'utf8')
-  const stdout = execFileSync(
+  const result = await runTrackedProcess(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path],
-    { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' },
+    { cwd: repoRoot, timeoutMs: powershellTimeoutMs },
   )
-  return JSON.parse(stdout) as Record<string, unknown>
+  if (result.status !== 0) {
+    throw new Error(`PowerShell 探针失败（status=${result.status}）：${result.error ?? result.stderr}`)
+  }
+  return JSON.parse(result.stdout) as Record<string, unknown>
 }
 
 /* ------------------------------------------------------------------ *
@@ -180,6 +192,19 @@ interface RecordOverrides {
   thresholdBasis?: string
   toleranceRatio?: number
   toleranceBasis?: string
+  /**
+   * `derived.spacing`（间距阶梯抽样）。缺省是形状正确的抽样、gaps 为空；
+   * 传 `{ gaps: [...] }` 用来打负 gap 守卫（S8 / 记录级缺陷 c）。
+   */
+  spacing?: Record<string, unknown>
+  /**
+   * `measured.outline.widthPxIsReservedInitial`。缺省在"没有轮廓"时是 `true`——这正是真实浏览器
+   * 的形态（`outline-style:none` 时 `outline-width` 仍计算为保留初始值 `medium` → `3px`），
+   * 所以 fixture 与采集器真正写出的记录同形。
+   */
+  outlineWidthPxIsReservedInitial?: boolean
+  /** computedStyle 里原始的 `outline-width` 读数（可追溯字段）。 */
+  outlineWidthComputed?: string
 }
 
 function buildTolerance() {
@@ -294,7 +319,10 @@ function buildRecord(overrides: RecordOverrides) {
         rgba8: overrides.outline ?? bg,
         declaredComputed: overrides.outlineDeclaredComputed ?? rgb8ToCss(overrides.outline ?? bg),
         style: (overrides.outlineRendered ?? false) ? 'dashed' : 'none',
-        widthPx: (overrides.outlineRendered ?? false) ? 2 : 0,
+        // 采集器只在**渲染中**的轮廓上写宽度；未渲染时写 null（浏览器那里报的是保留初始值 medium）。
+        widthPx: (overrides.outlineRendered ?? false) ? 2 : null,
+        widthPxIsReservedInitial: overrides.outlineWidthPxIsReservedInitial ?? !(overrides.outlineRendered ?? false),
+        widthComputed: overrides.outlineWidthComputed ?? ((overrides.outlineRendered ?? false) ? '2px' : '3px'),
         rendered: overrides.outlineRendered ?? false,
       },
       contrastRatio: {
@@ -306,6 +334,22 @@ function buildRecord(overrides: RecordOverrides) {
         thresholdBasis: overrides.thresholdBasis ?? (isLargeText ? 'largeText>=24px or >=18.66px bold' : 'text'),
         tolerance: overrides.toleranceRatio ?? 0.05,
         toleranceBasis: overrides.toleranceBasis ?? 'visual-contract.md §3.3 contrast ratio ±0.05',
+      },
+    },
+    // 采集器对 element 记录一律交出间距阶梯抽样（`readSpacingLadder`），所以 fixture 也必须带，
+    // 否则这些用例会拿"采集器不会写出的形状"去裁判校验器。
+    derived: {
+      spacing: overrides.spacing ?? {
+        ladder: [4, 8, 12, 16, 20, 24, 32, 48],
+        slots: {
+          paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8,
+          marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
+        },
+        gaps: [],
+        containerGap: { rowGap: 0, columnGap: 0 },
+        skippedOutOfFlowPairs: 0,
+        skippedUnpairedPairs: 0,
+        offLadderValues: [],
       },
     },
   }
@@ -425,7 +469,7 @@ function createPackage(options: PackageOptions = {}): string {
  * ------------------------------------------------------------------ */
 
 describe('visual evidence validator: math cross-check (-VerifyMathFile)', () => {
-  it('recomputes the published visual-contract §5.5 ratios from the raw hex tokens', { timeout: powershellTimeoutMs }, () => {
+  it('recomputes the published visual-contract §5.5 ratios from the raw hex tokens', { timeout: powershellTimeoutMs }, async () => {
     // expected 列取自校验器 **-VerifyMathFile 的实际打印值**（6 位小数）。
     // 第 5 位以后的偏差即会因 1e-6 的严格断言而失败，因此这一列不是"宽松常量"，而是逐位锚点；
     // 每一位都必须同时与 visual-contract.md §5.5 的两位小数公开值相符（下方 reference implementation 用例）。
@@ -462,7 +506,7 @@ describe('visual evidence validator: math cross-check (-VerifyMathFile)', () => 
         expected: 1.343776,
       },
     ]
-    const result = runMathVectors(vectors)
+    const result = await runMathVectors(vectors)
 
     expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
     for (const vector of vectors) {
@@ -475,8 +519,8 @@ describe('visual evidence validator: math cross-check (-VerifyMathFile)', () => 
     expect(vectors.length).toBe(15)
   })
 
-  it('fails loudly when a supplied expected ratio is wrong', { timeout: powershellTimeoutMs }, () => {
-    const result = runMathVectors([
+  it('fails loudly when a supplied expected ratio is wrong', { timeout: powershellTimeoutMs }, async () => {
+    const result = await runMathVectors([
       { name: 'deliberately wrong expectation', fg: '#e5e5e5', bg: '#242424', expected: 4.5 },
     ])
 
@@ -486,8 +530,8 @@ describe('visual evidence validator: math cross-check (-VerifyMathFile)', () => 
     expect(`${result.stdout}${result.stderr}`).toMatch(/12\.322793/)
   })
 
-  it('fails loudly rather than defaulting when a colour token cannot be parsed', { timeout: powershellTimeoutMs }, () => {
-    const result = runMathVectors([
+  it('fails loudly rather than defaulting when a colour token cannot be parsed', { timeout: powershellTimeoutMs }, async () => {
+    const result = await runMathVectors([
       { name: 'unparseable token', fg: 'var(--color-fg)', bg: '#242424', expected: 12.32 },
     ])
 
@@ -501,9 +545,9 @@ describe('visual evidence validator: math cross-check (-VerifyMathFile)', () => 
  * ------------------------------------------------------------------ */
 
 describe('visual evidence validator: well-formed package', () => {
-  it('accepts a package that carries all four §3.4 items', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a package that carries all four §3.4 items', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage()
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.stderr, `validator stderr: ${result.stderr}`).toBe('')
     expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
@@ -528,26 +572,26 @@ describe('visual evidence validator: missing required fields fail explicitly', (
   ]
 
   for (const field of requiredManifestFields) {
-    it(`rejects a manifest without "${field}"`, { timeout: powershellTimeoutMs }, () => {
+    it(`rejects a manifest without "${field}"`, { timeout: powershellTimeoutMs }, async () => {
       const dir = createPackage({ omitManifestKey: field })
-      const result = runValidator(['-EvidenceRoot', dir])
+      const result = await runValidator(['-EvidenceRoot', dir])
 
       expect(result.status).not.toBe(0)
       expect(`${result.stdout}${result.stderr}`).toMatch(new RegExp(field, 'i'))
     })
   }
 
-  it('rejects a manifest whose target block omits the viewport devicePixelRatio', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a manifest whose target block omits the viewport devicePixelRatio', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({
       manifestOverrides: { viewport: { width: 1280, height: 720, windowState: 'default' } },
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/devicePixelRatio/i)
   })
 
-  it('rejects a manifest whose host block omits the WebView2 runtime version', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a manifest whose host block omits the WebView2 runtime version', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({
       manifestOverrides: {
         host: {
@@ -557,71 +601,71 @@ describe('visual evidence validator: missing required fields fail explicitly', (
         },
       },
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/webview2|runtime/i)
   })
 
-  it('rejects a record with a null rect instead of coercing it to zero', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record with a null rect instead of coercing it to zero', { timeout: powershellTimeoutMs }, async () => {
     const record = { ...buildRecord({ recordId: 'VC-01-null-rect', vc: 'VC-01', criterion: 'bodyBackgroundLuminanceBelow0.05', page: 'video-list', selector: 'body', screenshots: ['screenshots/01-video-list.png'] }), rect: null }
     const dir = createPackage({ records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/rect/i)
   })
 
-  it('rejects a record with an empty computed-style block instead of emitting blank values', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record with an empty computed-style block instead of emitting blank values', { timeout: powershellTimeoutMs }, async () => {
     const record = { ...buildRecord({ recordId: 'VC-01-empty-style', vc: 'VC-01', criterion: 'bodyBackgroundLuminanceBelow0.05', page: 'video-list', selector: 'body', screenshots: ['screenshots/01-video-list.png'] }), computedStyle: {} }
     const dir = createPackage({ records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/computedStyle/i)
   })
 
-  it('rejects a record without a sampled viewport', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record without a sampled viewport', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({ recordId: 'VC-01-no-viewport', vc: 'VC-01', criterion: 'bodyBackgroundLuminanceBelow0.05', page: 'video-list', selector: 'body', screenshots: ['screenshots/01-video-list.png'] }) as Record<string, unknown>
     delete record.sampledViewport
     const dir = createPackage({ records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/sampledViewport|viewport/i)
   })
 
-  it('rejects a coverage block without the explicit untested list', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a coverage block without the explicit untested list', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({ manifestOverrides: { coverage: { tested: ['VC-01'] } } })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/untested/i)
   })
 
-  it('rejects a coverage block without the explicit dimension scope note', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a coverage block without the explicit dimension scope note', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({
       manifestOverrides: {
         coverage: { tested: ['VC-01'], untested: contractIds.filter((id) => id !== 'VC-01'), reserved: ['VC-18'] },
       },
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/scopeNote/i)
   })
 
-  it('rejects a coverage block that leaves VC-18 (the reserved number) in a tested/untested list', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a coverage block that leaves VC-18 (the reserved number) in a tested/untested list', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({ untested: [...contractIds.filter((id) => id !== 'VC-01'), 'VC-18'] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/VC-18/)
   })
 
-  it('rejects a coverage block that omits contract ids entirely', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a coverage block that omits contract ids entirely', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({ untested: ['VC-02', 'VC-03'] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/VC-\d\d/)
@@ -633,16 +677,16 @@ describe('visual evidence validator: missing required fields fail explicitly', (
  * ------------------------------------------------------------------ */
 
 describe('visual evidence validator: screenshots alone adjudicate nothing', () => {
-  it('rejects a package that has a screenshot but zero measurement records', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a package that has a screenshot but zero measurement records', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({ records: [], tested: [], untested: contractIds })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/截图|screenshot/i)
     expect(`${result.stdout}${result.stderr}`).toMatch(/不构成|not admissible|no measurement|0 records/i)
   })
 
-  it('rejects records that reference a screenshot which does not exist in the package', { timeout: powershellTimeoutMs }, () => {
+  it('rejects records that reference a screenshot which does not exist in the package', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-01-missing-shot',
       vc: 'VC-01',
@@ -652,13 +696,13 @@ describe('visual evidence validator: screenshots alone adjudicate nothing', () =
       screenshots: ['screenshots/does-not-exist.png'],
     })
     const dir = createPackage({ records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/does-not-exist\.png/)
   })
 
-  it('rejects a record that claims a criterion without naming any screenshot', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record that claims a criterion without naming any screenshot', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-01-unbound',
       vc: 'VC-01',
@@ -668,16 +712,16 @@ describe('visual evidence validator: screenshots alone adjudicate nothing', () =
       screenshots: [],
     })
     const dir = createPackage({ records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/screenshot/i)
   })
 
-  it('rejects a package whose only screenshot is not a PNG', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a package whose only screenshot is not a PNG', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage()
     writeFileSync(join(dir, 'screenshots', '01-video-list.png'), 'not a png at all', 'utf8')
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/PNG|png/i)
@@ -689,7 +733,7 @@ describe('visual evidence validator: screenshots alone adjudicate nothing', () =
  * ------------------------------------------------------------------ */
 
 describe('visual evidence validator: measured numbers must be recomputable', () => {
-  it('rejects a record whose declared contrast ratio contradicts its own composited colours', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record whose declared contrast ratio contradicts its own composited colours', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-03-lie',
       vc: 'VC-03',
@@ -703,13 +747,13 @@ describe('visual evidence validator: measured numbers must be recomputable', () 
       tested: ['VC-03'],
       records: [record],
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/对比度|contrast/i)
   })
 
-  it('rejects a record whose declared RGB channels drift more than ±1 from the measured composited colour', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record whose declared RGB channels drift more than ±1 from the measured composited colour', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-02-drift',
       vc: 'VC-02',
@@ -721,13 +765,13 @@ describe('visual evidence validator: measured numbers must be recomputable', () 
     }) as Record<string, any>
     record.measured.bg.rgba8 = [0x20, 0x25, 0x2c]
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/通道|channel|\+-\d/i)
   })
 
-  it('rejects a record whose threshold is wrong for the measured font size', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record whose threshold is wrong for the measured font size', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-12-threshold',
       vc: 'VC-12',
@@ -739,13 +783,13 @@ describe('visual evidence validator: measured numbers must be recomputable', () 
       threshold: 3,
     })
     const dir = createPackage({ tested: ['VC-12'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/threshold|4\.5/i)
   })
 
-  it('accepts the 3:1 threshold for genuinely large text (≥24px)', { timeout: powershellTimeoutMs }, () => {
+  it('accepts the 3:1 threshold for genuinely large text (≥24px)', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-12-large-text',
       vc: 'VC-12',
@@ -757,13 +801,13 @@ describe('visual evidence validator: measured numbers must be recomputable', () 
       threshold: 3,
     })
     const dir = createPackage({ tested: ['VC-12'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.stderr, `validator stderr: ${result.stderr}`).toBe('')
     expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
   })
 
-  it('rejects a record whose tolerance is not the §3.3 value', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record whose tolerance is not the §3.3 value', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-01-tolerance',
       vc: 'VC-01',
@@ -774,7 +818,7 @@ describe('visual evidence validator: measured numbers must be recomputable', () 
       toleranceRatio: 0.5,
     })
     const dir = createPackage({ records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/tolerance|容差/i)
@@ -808,41 +852,41 @@ describe('visual evidence validator: non-element measurement scopes', () => {
     ...(overrides.record as Record<string, unknown> | undefined),
   })
 
-  it('accepts a well-formed accent sweep record (empty match list means the accent is absent)', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a well-formed accent sweep record (empty match list means the accent is absent)', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({ tested: ['VC-03'], records: [sweepRecord()] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.stderr, `validator stderr: ${result.stderr}`).toBe('')
     expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
   })
 
-  it('rejects an accent sweep that never scanned any element', { timeout: powershellTimeoutMs }, () => {
+  it('rejects an accent sweep that never scanned any element', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({
       tested: ['VC-03'],
       records: [sweepRecord({ sweep: { scannedElementCount: 0 } })],
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/scannedElementCount/i)
   })
 
-  it('rejects an accent sweep that does not name the rendered properties it scanned', { timeout: powershellTimeoutMs }, () => {
+  it('rejects an accent sweep that does not name the rendered properties it scanned', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({
       tested: ['VC-03'],
       records: [sweepRecord({ sweep: { scannedProperties: ['backgroundColor'] } })],
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/scannedProperties/i)
   })
 
-  it('rejects a sweep whose matches field is missing instead of empty', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a sweep whose matches field is missing instead of empty', { timeout: powershellTimeoutMs }, async () => {
     const record = sweepRecord()
     delete (record.accentSweep as Record<string, unknown>).matches
     const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/matches/i)
@@ -861,12 +905,12 @@ describe('visual evidence validator: non-element measurement scopes', () => {
     resolvedTokens: tokens,
   })
 
-  it('accepts a token-resolution record and rejects an empty one', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a token-resolution record and rejects an empty one', { timeout: powershellTimeoutMs }, async () => {
     const good = createPackage({
       tested: ['VC-04'],
       records: [tokenRecord({ '--color-concept': '#5b9bf8', '--color-example': '#3ecf8e' })],
     })
-    const goodResult = runValidator(['-EvidenceRoot', good])
+    const goodResult = await runValidator(['-EvidenceRoot', good])
     expect(goodResult.stderr, `validator stderr: ${goodResult.stderr}`).toBe('')
     expect(goodResult.status, `validator stdout: ${goodResult.stdout}${goodResult.stderr}`).toBe(0)
 
@@ -874,12 +918,12 @@ describe('visual evidence validator: non-element measurement scopes', () => {
       tested: ['VC-04'],
       records: [tokenRecord({ '--color-concept': '' })],
     })
-    const emptyResult = runValidator(['-EvidenceRoot', emptyToken])
+    const emptyResult = await runValidator(['-EvidenceRoot', emptyToken])
     expect(emptyResult.status).not.toBe(0)
     expect(`${emptyResult.stdout}${emptyResult.stderr}`).toMatch(/resolvedTokens|空值/i)
   })
 
-  it('rejects an unknown measurement scope instead of guessing a shape', { timeout: powershellTimeoutMs }, () => {
+  it('rejects an unknown measurement scope instead of guessing a shape', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-01-weird-scope',
       vc: 'VC-01',
@@ -890,13 +934,13 @@ describe('visual evidence validator: non-element measurement scopes', () => {
       measurementScope: 'whatever',
     })
     const dir = createPackage({ records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/measurementScope/i)
   })
 
-  it('rejects a record whose declared contract token does not match the measured composited colour', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record whose declared contract token does not match the measured composited colour', { timeout: powershellTimeoutMs }, async () => {
     // 采集器可以声明"这个实测值对应合同冻结的某个令牌"；校验器必须自己复算，不许只信自述。
     const record = buildRecord({
       recordId: 'VC-02-token-provenance',
@@ -910,7 +954,7 @@ describe('visual evidence validator: non-element measurement scopes', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-surface', value: '#242424', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/declaredToken|#242424/i)
@@ -922,7 +966,7 @@ describe('visual evidence validator: non-element measurement scopes', () => {
  * ------------------------------------------------------------------ */
 
 describe('visual evidence validator: colour role and channels', () => {
-  it('rejects a border-role token that no border channel can explain', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a border-role token that no border channel can explain', { timeout: powershellTimeoutMs }, async () => {
     // 边框类判据测的是**边框颜色**。这条记录声明 role=border，但 border 通道里的颜色都不是
     // --color-border 的 #6e7074 —— 令牌来源无法解释实测值，必须失败。
     // （这正是托管 run 36574308748 里 VC-02-settings-topbar-border 的形状；当时记录根本没有
@@ -939,13 +983,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-border', value: '#6e7074', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a token no channel can explain must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/role=border|#6e7074/i)
   })
 
-  it('accepts a border-role token that the border channel does explain', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a border-role token that the border channel does explain', { timeout: powershellTimeoutMs }, async () => {
     // 同一个令牌，只要边框通道里真有这个颜色就必须通过——证明上一条失败是因为对不上，不是因为
     // 校验器一律拒绝 border 角色。
     // 记录形状要与新契约自洽：四边都被画出来（computedStyle 也这么说），而 §3.4 第 3 项的对比度
@@ -966,12 +1010,12 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-border', value: '#6e7074', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, `expected pass, got: ${result.stdout}${result.stderr}`).toBe(0)
   })
 
-  it('rejects a record that does not declare which colour role it measured', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record that does not declare which colour role it measured', { timeout: powershellTimeoutMs }, async () => {
     // 角色是把"这个令牌该出现在哪个通道"变成可校验结构事实的那一环；缺了它就只能靠人读描述。
     const record = buildRecord({
       recordId: 'VC-01-no-role',
@@ -983,13 +1027,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     delete record.measured.role
     const dir = createPackage({ tested: ['VC-01'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a record without a declared colour role must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/role/i)
   })
 
-  it('rejects a record that declares an unknown colour role', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record that declares an unknown colour role', { timeout: powershellTimeoutMs }, async () => {
     // 新种类的测量必须登记成新角色，不得静默塞进已知角色里蒙混过关。
     const record = buildRecord({
       recordId: 'VC-01-unknown-role',
@@ -1001,13 +1045,13 @@ describe('visual evidence validator: colour role and channels', () => {
       role: 'shadow',
     }) as Record<string, any>
     const dir = createPackage({ tested: ['VC-01'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'an unregistered colour role must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/known|已知|shadow/i)
   })
 
-  it('rejects a package whose manifest omits the WebView2 version source', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a package whose manifest omits the WebView2 version source', { timeout: powershellTimeoutMs }, async () => {
     // 版本可能是"驱动拉起的应用不开调试端口时取自预检"的降级读数。来源缺失就无法判断这条版本绑定
     // 有多强，因此必须显式声明；校验器不许替它猜一个。
     const record = buildRecord({
@@ -1023,13 +1067,13 @@ describe('visual evidence validator: colour role and channels', () => {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
     delete manifest.host.webview2.runtimeVersionSource
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a missing runtimeVersionSource must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/runtimeVersionSource/i)
   })
 
-  it('rejects a package whose manifest declares an unregistered version source', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a package whose manifest declares an unregistered version source', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-01-version-source-unknown',
       vc: 'VC-01',
@@ -1043,13 +1087,13 @@ describe('visual evidence validator: colour role and channels', () => {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
     manifest.host.webview2.runtimeVersionSource = 'vibes'
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'an unregistered version source must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/runtimeVersionSource|vibes/i)
   })
 
-  it('accepts role=nonColour for a criterion that judges no colour at all', { timeout: powershellTimeoutMs }, () => {
+  it('accepts role=nonColour for a criterion that judges no colour at all', { timeout: powershellTimeoutMs }, async () => {
     // VC-15④ 的顶栏高度、VC-15② 的圆角、VC-15① 的间距、VC-15③ 的阴影都**不判颜色**。
     // 这类记录没有颜色角色可声明：把它标成 text 等于把结构事实写假（文本色通道与"顶栏高度 40"无关）。
     // 因此登记第五个角色 nonColour（不判颜色），它仍然必须显式写出、不许留空。
@@ -1063,12 +1107,12 @@ describe('visual evidence validator: colour role and channels', () => {
       role: 'nonColour',
     })
     const dir = createPackage({ tested: ['VC-15'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, `a registered non-colour role must be accepted; ${result.stdout}${result.stderr}`).toBe(0)
   })
 
-  it('refuses a nonColour record that declares a colour token (a role with no channels cannot be checked)', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a nonColour record that declares a colour token (a role with no channels cannot be checked)', { timeout: powershellTimeoutMs }, async () => {
     // nonColour 的角色通道集合是空的。如果放行，就等于给"声明了令牌却没有任何通道可对账"开了一条
     // 静默通道——正是 fail-closed 要堵的那个洞。所以 nonColour + declaredToken 必须直接失败。
     const record = buildRecord({
@@ -1082,13 +1126,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-15'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a nonColour record must not carry a declared token').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/nonColour/)
   })
 
-  it('refuses a token that only an UNPAINTED border side could explain', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a token that only an UNPAINTED border side could explain', { timeout: powershellTimeoutMs }, async () => {
     // 未画的边不是证据：`border-top: none` 的元素，其 border-top-color 仍会算出 currentColor，
     // 于是"某一个没画出来的边恰好等于某个令牌"就能让记录通过——那是假通过。
     // 只有 rendered=true 的通道才允许参与令牌对账；四边都没画时该记录必须直接失败。
@@ -1105,13 +1149,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'an unpainted border must not explain a border token').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/rendered|被绘制|未渲染/i)
   })
 
-  it('accepts a border token explained by a PAINTED side even when the other three are not painted', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a border token explained by a PAINTED side even when the other three are not painted', { timeout: powershellTimeoutMs }, async () => {
     // 配对的正例，也就是设置页顶栏的真实形状：只有 border-bottom 被画出来（其余三边
     // border-*-style: none、计算值等于 currentColor）。令牌出现在**被画出**的那条边上，必须通过；
     // fg（进而对比度）也必须是那条被画边的颜色。
@@ -1143,12 +1187,12 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: 'COLORS.border', value: '#6e7074', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, `a token on the one painted side must pass; ${result.stdout}${result.stderr}`).toBe(0)
   })
 
-  it('refuses a graphic token that only the TEXT channel could explain', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a graphic token that only the TEXT channel could explain', { timeout: powershellTimeoutMs }, async () => {
     // 角色通道集合必须互不串味：role=graphic 的候选通道里曾包含 measured.fg（文字色），
     // 于是"给一个图形判据声明文字色令牌"也能通过。去掉 fg 之后，这条必须失败。
     const record = buildRecord({
@@ -1166,13 +1210,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-fg', value: '#e5e5e5', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a text colour must not explain a graphic-role token').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/graphic/)
   })
 
-  it('refuses a channel whose declaredComputed cannot produce the recorded composited value', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a channel whose declaredComputed cannot produce the recorded composited value', { timeout: powershellTimeoutMs }, async () => {
     // 复算出同一条通道的合成值（不透明值直接比，半透明值按 §3.2 合成到底色上再比）。
     // 采集器在解析失败时曾用"合成底色"充当通道值——那种自造值与真测值在结构上无法区分，
     // 而这条一致性断言会把它们分开：声明的原始值与实测通道对不上就是失败。
@@ -1191,13 +1235,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a channel that its own declaredComputed cannot produce must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/declaredComputed/)
   })
 
-  it('refuses a self-declared rendered flag that contradicts the record own computedStyle', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a self-declared rendered flag that contradicts the record own computedStyle', { timeout: powershellTimeoutMs }, async () => {
     // `rendered` 是**自报**字段：上一版只接受记录自己写的布尔值，从不与同一条记录里必填的
     // computedStyle 交叉核对。于是只要采集器把 rendered 取自错误的属性（或某边 style 为 none /
     // width:0），"未画的边不算证据"这道门控就会整体失效，而且没有任何测试会红。
@@ -1226,13 +1270,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: '--color-border', value: '#8f8f8f', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a rendered flag that the record own computedStyle contradicts must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/rendered/)
   })
 
-  it('refuses a border record whose reported contrast comes from an UNPAINTED side', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a border record whose reported contrast comes from an UNPAINTED side', { timeout: powershellTimeoutMs }, async () => {
     // §3.4 第 3 项的对比度由 measured.fg/bg 算出。对边框判据，fg 必须是**被画出来的那个颜色**，
     // 否则报出的比值与它要判的颜色无关：真实反例是只有 border-bottom 的元素，fg 曾取未画的
     // top 边（= currentColor = 文字色）→ 报 14.64:1，而被画的那条边其实只有 3.49:1；
@@ -1263,13 +1307,13 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: 'COLORS.border', value: '#6e7074', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a contrast taken from an unpainted side must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/fg/)
   })
 
-  it('accepts a border record whose fg IS the painted side colour and whose rendered flags match computedStyle', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a border record whose fg IS the painted side colour and whose rendered flags match computedStyle', { timeout: powershellTimeoutMs }, async () => {
     // fg 取的就是那条被画边的颜色（#6e7074 压面板 = 3.49:1），四边 rendered 与 computedStyle 一致。
     const record = buildRecord({
       recordId: 'VC-02-painted-fg',
@@ -1296,12 +1340,12 @@ describe('visual evidence validator: colour role and channels', () => {
     }) as Record<string, any>
     record.declaredToken = { name: 'COLORS.border', value: '#6e7074', source: 'visual-contract.md §5.5' }
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, `the honest painted-side shape must pass; ${result.stdout}${result.stderr}`).toBe(0)
   })
 
-  it('refuses a TOKEN-LESS border record whose fg comes from an unpainted side', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a TOKEN-LESS border record whose fg comes from an unpainted side', { timeout: powershellTimeoutMs }, async () => {
     // 上一轮把"fg 必须是被画出边的颜色"这条检查写在了 declaredToken 分支里，于是**没有令牌**的
     // border 记录整条绕过它。这条检查必须独立于 declaredToken 成立——记录有没有令牌，
     // 它都会报出一个对比度，那个数字都必须与它要判的颜色有关。
@@ -1330,13 +1374,13 @@ describe('visual evidence validator: colour role and channels', () => {
       },
     })
     const dir = createPackage({ tested: ['VC-02'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a token-less border record must not report a contrast from an unpainted side').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/fg/)
   })
 
-  it('refuses a text record whose measured fg contradicts its own computedStyle.color', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a text record whose measured fg contradicts its own computedStyle.color', { timeout: powershellTimeoutMs }, async () => {
     // measured.fg/bg 此前只与记录内部的 declared 自洽比较，从不与同一条记录的 computedStyle 交叉核对。
     // 于是"computedStyle.color 与底色同色（真实对比度≈1:1），却自报 fg=#e5e5e5、对比度 14.64"也能通过。
     const record = buildRecord({
@@ -1353,13 +1397,13 @@ describe('visual evidence validator: colour role and channels', () => {
     // the record's own computed style says the text colour is the same as the background
     record.computedStyle.color = 'rgb(26, 26, 26)'
     const dir = createPackage({ tested: ['VC-01'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'an fg that contradicts computedStyle.color must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/computedStyle\.color|fg/)
   })
 
-  it('refuses a self-declared outline that no computed style backs', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a self-declared outline that no computed style backs', { timeout: powershellTimeoutMs }, async () => {
     // 与四边边框同一形态的旁路：`measured.outline.rendered` 也是自报字段，而 computedStyle 里
     // 此前根本没有 outlineStyle/outlineWidth 可交叉核对——声明"画了聚焦圈"就能凭空成立。
     const record = buildRecord({
@@ -1378,13 +1422,271 @@ describe('visual evidence validator: colour role and channels', () => {
       computedBorder: { outlineStyle: 'none', outlineWidth: '0px' },
     })
     const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'an outline rendered flag that computedStyle contradicts must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/outline/i)
   })
 
-  it('refuses a record that claims a composited value while its own metadata says otherwise', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a record that puts the browser reserved outline width (medium = 3px) into widthPx', { timeout: powershellTimeoutMs }, async () => {
+    // S8 / 记录级缺陷 d。真实包 visual-c2c75601-20260930-013637 的 36 条 outline 记录逐字是
+    //   outlineStyle=none / outlineWidth=3px / widthPx=3
+    // 而唯一源规则是 `:focus-visible { outline: 2px dashed var(--color-fg); outline-offset: 2px }`。
+    // 3px 不是被画出来的宽度：Chromium/WebView2 对**任何**没有轮廓的元素都把 outline-width 计算为
+    // 初始值 `medium` → `3px`（本机 headless Edge 实测复现），元素自己的规则从未生效过。
+    // 把保留值写进 widthPx，就是让审查员读到一个与规则对不上的数——所以这是 fail-closed 的形状错误。
+    const record = buildRecord({
+      recordId: 'VC-03-focus-ring-reserved-width',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+      outlineRendered: false,
+      computedBorder: { outlineStyle: 'none', outlineWidth: '3px' },
+    }) as Record<string, any>
+    record.measured.outline.widthPx = 3
+    record.measured.outline.widthPxIsReservedInitial = false
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a reserved initial outline width recorded as a measurement must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/widthPxIsReservedInitial|widthPx/)
+  })
+
+  it('refuses a record that omits the reserved-width flag but keeps the reserved width in widthPx', { timeout: powershellTimeoutMs }, async () => {
+    // 只加字段不够：**缺字段**同样必须失败，否则"不写这个标志"就成了绕过门的办法。
+    const record = buildRecord({
+      recordId: 'VC-03-focus-ring-missing-flag',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+      outlineRendered: false,
+      computedBorder: { outlineStyle: 'none', outlineWidth: '3px' },
+    }) as Record<string, any>
+    record.measured.outline.widthPx = 3
+    delete record.measured.outline.widthPxIsReservedInitial
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'omitting the reserved-width flag must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/widthPxIsReservedInitial/)
+  })
+
+  it('accepts an unpainted outline recorded the way Chromium actually reports it (widthPx null + reserved flag)', { timeout: powershellTimeoutMs }, async () => {
+    // 配对正例：形状改对之后，**真实浏览器的读数**（none / 3px / 保留值）必须能通过。
+    const record = buildRecord({
+      recordId: 'VC-03-focus-ring-unpainted-shape',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+      outlineRendered: false,
+      computedBorder: { outlineStyle: 'none', outlineWidth: '3px' },
+    })
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0)
+  })
+
+  it('still refuses a PAINTED outline whose widthPx disagrees with its own computedStyle', { timeout: powershellTimeoutMs }, async () => {
+    // 守卫的失败能力：渲染中（rendered=true）的轮廓有真实宽度，不得与 computedStyle 打架。
+    const record = buildRecord({
+      recordId: 'VC-03-focus-ring-width-mismatch',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+      outlineRendered: true,
+      computedBorder: { outlineStyle: 'dashed', outlineWidth: '2px' },
+    }) as Record<string, any>
+    record.measured.outline.widthPx = 9
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a painted outline width that contradicts computedStyle must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/widthPx/)
+  })
+
+  it('refuses a PAINTED outline whose computedStyle width is not positive (invisible by the browsers own reckoning)', { timeout: powershellTimeoutMs }, async () => {
+    // S8 守卫补强（由 Standards 轴独立复审实测发现）：`outlineStyle=dashed + outlineWidth=0.1px +
+    // widthPx=0.1` 曾被**放行**——记录自称"画了一条 0.1px 的轮廓"，而浏览器按 ≤0 的宽度判定它不可见。
+    // 与 `rendered=false` 一侧同一原则：宽度不足以被看见的轮廓，不得声称已绘制并交出宽度。
+    const record = buildRecord({
+      recordId: 'VC-03-focus-ring-invisible-width',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+      outlineRendered: true,
+      computedBorder: { outlineStyle: 'dashed', outlineWidth: '0px' },
+    }) as Record<string, any>
+    record.measured.outline.widthPx = 0.1
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a painted outline whose computed width is not positive must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/outlineWidth=0px|不可见/)
+  })
+
+  it('refuses a record whose spacing sample reports a NEGATIVE gap (the old cross-containing-block subtraction)', { timeout: powershellTimeoutMs }, async () => {
+    // S8 / 记录级缺陷 c。间距是"同一包含块、同一坐标系里两个相邻兄弟的可见间隙"，不可能为负。
+    // 真实包 visual-c2c75601-20260930-013637 的 17 条记录量出 -1028 / -669 / -508 / -36 / -28 /
+    // -27 / -24 / -10 —— 全部来自把不同定位上下文的 rect 相减（例：catalog-bar 的 -508 是 shell
+    // 宽度，而两条目录行的真实垂直间距是 40）。负值在正确口径下结构上不可能出现，所以出现即失败。
+    const record = buildRecord({
+      recordId: 'VC-15-study-catalogbar-height',
+      vc: 'VC-15',
+      criterion: 'keyHeightCatalogBar80',
+      page: 'study',
+      selector: '[data-testid="catalog-bar"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'nonColour',
+    }) as Record<string, any>
+    record.derived.spacing.gaps = [
+      {
+        between: 'div[data-testid="catalog-bar"] > div:nth-of-type(1) -> div[data-testid="catalog-bar"] > div:nth-of-type(2)',
+        axis: 'horizontal',
+        gapPx: -508,
+      },
+    ]
+    const dir = createPackage({ tested: ['VC-15'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a negative gapPx must fail: it is a cross-coordinate subtraction, not a spacing').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/负.*gapPx|gapPx=-508/)
+  })
+
+  it('accepts an empty gaps array but refuses a MISSING gaps field (an empty sample is honest, silence is not)', { timeout: powershellTimeoutMs }, async () => {
+    // 空数组 = 抽样了、但没有一对"分离"的兄弟（合法）；缺字段 = 这条记录根本没交出间距抽样（失败）。
+    const emptyRecord = buildRecord({
+      recordId: 'VC-15-study-catalogbar-height',
+      vc: 'VC-15',
+      criterion: 'keyHeightCatalogBar80',
+      page: 'study',
+      selector: '[data-testid="catalog-bar"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'nonColour',
+      spacing: {
+        ladder: [4, 8, 12, 16, 20, 24, 32, 48],
+        slots: {
+          paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0,
+          marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
+        },
+        gaps: [],
+        containerGap: { rowGap: 0, columnGap: 0 },
+        skippedOutOfFlowPairs: 0,
+        skippedUnpairedPairs: 2,
+        offLadderValues: [],
+      },
+    })
+    const emptyResult = await runValidator(['-EvidenceRoot', createPackage({ tested: ['VC-15'], records: [emptyRecord] })])
+    expect(emptyResult.status, `${emptyResult.stdout}${emptyResult.stderr}`).toBe(0)
+
+    const silentRecord = buildRecord({
+      recordId: 'VC-15-study-catalogbar-height',
+      vc: 'VC-15',
+      criterion: 'keyHeightCatalogBar80',
+      page: 'study',
+      selector: '[data-testid="catalog-bar"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'nonColour',
+      spacing: { ladder: [4, 8, 12, 16, 20, 24, 32, 48], slots: {}, offLadderValues: [] },
+    })
+    const silentResult = await runValidator(['-EvidenceRoot', createPackage({ tested: ['VC-15'], records: [silentRecord] })])
+    expect(silentResult.status, 'a spacing sample with no gaps field must fail').not.toBe(0)
+    expect(`${silentResult.stdout}${silentResult.stderr}`).toMatch(/gaps/)
+  })
+
+  it('refuses an element record that ships no spacing sample at all (missing field is not "no spacing")', { timeout: powershellTimeoutMs }, async () => {
+    const record = buildRecord({
+      recordId: 'VC-01-list-body-bg',
+      vc: 'VC-01',
+      criterion: 'backgroundLuminanceBelow0.05',
+      page: 'video-list',
+      selector: 'body',
+      screenshots: ['screenshots/01-video-list.png'],
+    }) as Record<string, any>
+    delete record.derived
+    const dir = createPackage({ tested: ['VC-01'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an element record without derived.spacing must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/spacing|derived/)
+  })
+
+  it('refuses an element record that drops the spacing CALIBRATION fields (so "no negative gap" cannot be self-silenced)', { timeout: powershellTimeoutMs }, async () => {
+    // S8 守卫补强（由 Spec 轴独立复审指出）：只要求 `gaps` 非负还不够——采集器退化成"一条都不记"
+    // （`gaps: []`）就能消音。`containerGap` / `skippedOutOfFlowPairs` / `skippedUnpairedPairs`
+    // 三者正是"谁被跳过、为什么跳过"的凭据，必须必填。
+    const record = buildRecord({
+      recordId: 'VC-15-study-catalogbar-height',
+      vc: 'VC-15',
+      criterion: 'keyHeightCatalogBar80',
+      page: 'study',
+      selector: '[data-testid="catalog-bar"]',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'nonColour',
+      spacing: {
+        ladder: [4, 8, 12, 16, 20, 24, 32, 48],
+        slots: { paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0, marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 },
+        gaps: [],
+        offLadderValues: [],
+      },
+    }) as Record<string, any>
+    expect(record.derived.spacing.containerGap, '前置：本用例的夹具确实没有口径字段').toBeUndefined()
+    const dir = createPackage({ tested: ['VC-15'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'a spacing sample without containerGap/skip counters must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/containerGap|skippedOutOfFlowPairs|skippedUnpairedPairs/)
+  })
+
+  it('refuses an element record that drops the whole measured.outline block (a fail-open bypass)', { timeout: powershellTimeoutMs }, async () => {
+    // S8 守卫补强（由 Spec 轴独立复审指出）：删掉整块 `measured.outline` 就能让 `Assert-RecordContrast`
+    // 里的两道轮廓门整段不执行（`$outline` 为 null ⇒ 跳过），而 computedStyle 的 outlineStyle/Width
+    // 虽然必填，却不与任何 measured 通道对账 —— fail-open。element 记录必须带该块。
+    const record = buildRecord({
+      recordId: 'VC-03-list-import-button-focus-ring',
+      vc: 'VC-03',
+      criterion: 'focusRing2pxDashedFg',
+      page: 'video-list',
+      selector: '[data-testid="video-list-page"] header button',
+      screenshots: ['screenshots/01-video-list.png'],
+      role: 'graphic',
+      fg: DARK_FG,
+      outline: DARK_FG,
+    }) as Record<string, any>
+    delete record.measured.outline
+    const dir = createPackage({ tested: ['VC-03'], records: [record] })
+    const result = await runValidator(['-EvidenceRoot', dir])
+
+    expect(result.status, 'an element record without measured.outline must fail').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/缺少 outline 通道/)
+  })
+
+  it('refuses a record that claims a composited value while its own metadata says otherwise', { timeout: powershellTimeoutMs }, async () => {
     // fg/bg 的 alpha 与 composited 是**自报**元数据（"这个值是不是按 §3.2 合成出来的"）。
     // 此前它们从不与 declared 对账，于是一条记录可以自称"合成过了"，而 declared/rgba8 其实是原值。
     const record = buildRecord({
@@ -1399,13 +1701,13 @@ describe('visual evidence validator: colour role and channels', () => {
     record.measured.fg.alpha = 0.42
     record.measured.fg.composited = true
     const dir = createPackage({ tested: ['VC-01'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'self-reported alpha/composited must be reconcilable with declared').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/alpha|composited/)
   })
 
-  it('refuses a package that declares no provenance at all', { timeout: powershellTimeoutMs }, () => {
+  it('refuses a package that declares no provenance at all', { timeout: powershellTimeoutMs }, async () => {
     // 同一个形状既能由真实采集产出、也能由"把旧数据改写成新形状"的演练产出。没有包级溯源字段时，
     // 「同一个包名 + 同一个 generatedBy + 校验器判 VALID」会被后来的人当成证据。
     const record = buildRecord({
@@ -1417,13 +1719,13 @@ describe('visual evidence validator: colour role and channels', () => {
       screenshots: ['screenshots/01-video-list.png'],
     })
     const dir = createPackage({ tested: ['VC-01'], records: [record], omitManifestKey: 'provenance' })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a package without provenance must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/provenance/)
   })
 
-  it('accepts a rehearsal-shaped package but refuses to call it VISUAL_EVIDENCE_VALID', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a rehearsal-shaped package but refuses to call it VISUAL_EVIDENCE_VALID', { timeout: powershellTimeoutMs }, async () => {
     // 演练包的形状可以完全合法，但措辞必须与真采集区分开：形状一样、含义完全不同。
     const record = buildRecord({
       recordId: 'VC-01-rehearsal',
@@ -1434,7 +1736,7 @@ describe('visual evidence validator: colour role and channels', () => {
       screenshots: ['screenshots/01-video-list.png'],
     })
     const dir = createPackage({ tested: ['VC-01'], records: [record], provenance: 'rehearsal' })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a rehearsal package is shape-valid').toBe(0)
     expect(result.stdout, 'a rehearsal package must not be reported as VISUAL_EVIDENCE_VALID').toMatch(/VISUAL_EVIDENCE_VALID_REHEARSAL/)
@@ -1449,7 +1751,7 @@ describe('visual evidence validator: colour role and channels', () => {
 describe('visual evidence validator: host version binding premise', () => {
   const preflightSource = { runtimeVersionSource: 'preflight-devtools' }
 
-  it('rejects a declared preflight downgrade that does not record the premise it rests on', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a declared preflight downgrade that does not record the premise it rests on', { timeout: powershellTimeoutMs }, async () => {
     // 驱动拉起的应用不开调试端口时，版本取自**预检**（同一个 rain.exe、同一台机器）——这是**降级**，
     // 只有当"机器级 Evergreen 安装存在且应用旁边没有固定版本运行时"这条前提成立时，同机读数才等价。
     // 前提不写进包，包就无法自证这条绑定的强度，只能靠读日志猜——那正是本轮要堵的洞。
@@ -1462,13 +1764,13 @@ describe('visual evidence validator: host version binding premise', () => {
       screenshots: ['screenshots/01-video-list.png'],
     })
     const dir = createPackage({ tested: ['VC-01'], records: [record], webview2: preflightSource })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a preflight downgrade without its premise must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/premise/i)
   })
 
-  it('accepts a declared preflight downgrade whose premise is recorded and established', { timeout: powershellTimeoutMs }, () => {
+  it('accepts a declared preflight downgrade whose premise is recorded and established', { timeout: powershellTimeoutMs }, async () => {
     // 配对的正例：同一个降级，只要前提被记录且成立，就必须通过——证明上一条失败是因为缺前提，
     // 不是因为校验器一律拒绝 preflight-devtools。
     const record = buildRecord({
@@ -1493,12 +1795,12 @@ describe('visual evidence validator: host version binding premise', () => {
         },
       },
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, `an established premise must be accepted; ${result.stdout}${result.stderr}`).toBe(0)
   })
 
-  it('rejects a declared preflight downgrade whose premise explicitly did NOT hold', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a declared preflight downgrade whose premise explicitly did NOT hold', { timeout: powershellTimeoutMs }, async () => {
     // 前提被记录、但记录的是"不成立"时，不能靠"字段存在"蒙混过关：降级就成了无依据的等价替代。
     const record = buildRecord({
       recordId: 'VC-01-premise-failed',
@@ -1522,7 +1824,7 @@ describe('visual evidence validator: host version binding premise', () => {
         },
       },
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status, 'a premise recorded as not established must fail').not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/premise|前提/i)
@@ -1534,7 +1836,7 @@ describe('visual evidence validator: host version binding premise', () => {
  * ------------------------------------------------------------------ */
 
 describe('visual evidence validator: coverage honesty', () => {
-  it('rejects a record for a VC that is listed as untested', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a record for a VC that is listed as untested', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-07-not-declared',
       vc: 'VC-07',
@@ -1544,21 +1846,21 @@ describe('visual evidence validator: coverage honesty', () => {
       screenshots: ['screenshots/01-video-list.png'],
     })
     const dir = createPackage({ tested: ['VC-01'], records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/VC-07/)
   })
 
-  it('rejects a VC that is listed as tested but has no measurement record', { timeout: powershellTimeoutMs }, () => {
+  it('rejects a VC that is listed as tested but has no measurement record', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({ tested: ['VC-01', 'VC-02'] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/VC-02/)
   })
 
-  it('rejects an unknown VC id, including the reserved VC-18', { timeout: powershellTimeoutMs }, () => {
+  it('rejects an unknown VC id, including the reserved VC-18', { timeout: powershellTimeoutMs }, async () => {
     const record = buildRecord({
       recordId: 'VC-18-reserved',
       vc: 'VC-18',
@@ -1568,19 +1870,19 @@ describe('visual evidence validator: coverage honesty', () => {
       screenshots: ['screenshots/01-video-list.png'],
     })
     const dir = createPackage({ tested: ['VC-18'], untested: contractIds, records: [record] })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/VC-18/)
   })
 
-  it('refuses to treat a claimed verdict as issued by this package', { timeout: powershellTimeoutMs }, () => {
+  it('refuses to treat a claimed verdict as issued by this package', { timeout: powershellTimeoutMs }, async () => {
     const dir = createPackage({
       manifestOverrides: {
         verdicts: { issued: true, issuedBy: 'the implementer', note: 'looks fine' },
       },
     })
-    const result = runValidator(['-EvidenceRoot', dir])
+    const result = await runValidator(['-EvidenceRoot', dir])
 
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toMatch(/verdict/i)
@@ -1655,7 +1957,7 @@ describe('visual evidence channel: files and conventions', () => {
     }
   })
 
-  it('ships a PowerShell scripts whose injected probe JavaScript is syntactically valid', () => {
+  it('ships a PowerShell scripts whose injected probe JavaScript is syntactically valid', async () => {
     // 采集器把一整段 JS 作为 here-string 注入页面。这段 JS 一旦语法错，整条通道在托管 runner 上
     // 只会以「探针超时」的形式失败，本地看不出原因。这里把它抽出来按 W3C execute/sync 的语义
     // （脚本体会被包进一个函数体）交给 node --check 做语法检查。
@@ -1685,14 +1987,13 @@ describe('visual evidence channel: files and conventions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rain-visual-probe-'))
     const probePath = join(dir, 'probe.js')
     writeFileSync(probePath, `function __webdriverExecuteSync() {\n${probe}\n}\n`, 'utf8')
-    const result = (() => {
-      try {
-        execFileSync(process.execPath, ['--check', probePath], { encoding: 'utf8', stdio: 'pipe' })
-        return 0
-      } catch (cause) {
-        return (cause as { status?: number }).status ?? 1
-      }
-    })()
+    // 异步执行 node --check：语义不变（非 0 即失败），但不再阻塞 worker 事件循环。
+    const checkRun = await runTrackedProcess(
+      process.execPath,
+      ['--check', probePath],
+      { cwd: repoRoot, timeoutMs: powershellTimeoutMs },
+    )
+    const result = checkRun.status ?? 1
     expect(result, `node --check on the extracted probe JS failed (exit ${result})`).toBe(0)
   })
 
@@ -1721,7 +2022,7 @@ describe('visual evidence channel: files and conventions', () => {
     expect(contractIdsInCollector).toEqual(contractIds)
   })
 
-  it('parses every PowerShell block inside the workflow with the real PowerShell parser', () => {
+  it('parses every PowerShell block inside the workflow with the real PowerShell parser', async () => {
     // 这是本轮被独立审查抓到的真实缺陷的守卫：workflow 里 `shell: pwsh` 的 run 块此前从未被解析过，
     // 一个行尾逗号就让整个 step 语法错误、workflow 永远跑不绿。这里把每个 pwsh 块抽出来交给
     // PowerShell 自己的 AST 解析器（不是文本 grep）。
@@ -1814,19 +2115,14 @@ describe('visual evidence channel: files and conventions', () => {
     ].join('\n')
     const checkPath = join(dir, 'check-combined.ps1')
     writeFileSync(checkPath, check, 'utf8')
-    let status = 0
-    let output = ''
-    try {
-      output = execFileSync(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', checkPath],
-        { encoding: 'utf8', stdio: 'pipe' },
-      )
-    } catch (cause) {
-      const failure = cause as { status?: number; stdout?: string }
-      status = failure.status ?? 1
-      output = failure.stdout ?? ''
-    }
+    // 异步执行（不再阻塞 worker 事件循环）：语义不变，非 0 即视为解析失败并保留输出。
+    const checkRun = await runTrackedProcess(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', checkPath],
+      { cwd: repoRoot, timeoutMs: powershellTimeoutMs },
+    )
+    const status = checkRun.status ?? 1
+    const output = checkRun.stdout || checkRun.stderr || (checkRun.error ?? '')
     // 把 combined 行号映射回「块号 + 块内行号」，避免定位能力下降
     const attribution = output
       .split('\n')
@@ -1865,7 +2161,7 @@ describe('visual evidence channel: files and conventions', () => {
     // 断言语义未变，这里按 PR #68 的既有形状把上限标定为 20s。
   }, 20_000)
 
-  it('backs every declared sweep in the manifest with an actual accentSweep record', { timeout: powershellTimeoutMs }, () => {
+  it('backs every declared sweep in the manifest with an actual accentSweep record', { timeout: powershellTimeoutMs }, async () => {
     // t2 对抗性复核用一个「manifest 声明 3 条 sweep、记录 0 条」的包证明了旧校验器会放行。
     const sweep = {
       recordId: 'VC-03-list-accent-sweep',
@@ -1906,7 +2202,7 @@ describe('visual evidence channel: files and conventions', () => {
         ],
       },
     })
-    const missing = runValidator(['-EvidenceRoot', declaredWithoutRecord])
+    const missing = await runValidator(['-EvidenceRoot', declaredWithoutRecord])
     expect(missing.status).not.toBe(0)
     expect(`${missing.stdout}${missing.stderr}`).toMatch(/VC-03-list-accent-sweep/)
 
@@ -1917,7 +2213,7 @@ describe('visual evidence channel: files and conventions', () => {
         accentSweeps: [{ id: 'VC-03-list-accent-sweep', vc: 'VC-03', page: 'video-list', selectorScope: '[data-testid="video-list-page"]', accentToken: '#4a9eff' }],
       },
     })
-    const consistent = runValidator(['-EvidenceRoot', declaredWithRecord])
+    const consistent = await runValidator(['-EvidenceRoot', declaredWithRecord])
     expect(consistent.stderr, `validator stderr: ${consistent.stderr}`).toBe('')
     expect(consistent.status, `validator stdout: ${consistent.stdout}${consistent.stderr}`).toBe(0)
   })
@@ -2002,7 +2298,7 @@ describe('visual evidence channel: files and conventions', () => {
     expect(workflow).toMatch(/^ {2}pull_request:/m)
   })
 
-  it('keeps both driver helpers at script top level, outside the main try (an in-try definition kills failure.json)', () => {
+  it('keeps both driver helpers at script top level, outside the main try (an in-try definition kills failure.json)', async () => {
     // 真实回归（Standards 轴审查 blocker ①，本机已复现）：这两个函数曾被放进主 try 体内，
     // 而本脚本 :46 是 $ErrorActionPreference = 'Stop'。于是任何发生在定义**之前**的早期失败
     // （TargetSha 校验 / Require-Command / npm build / tauri build / 二进制检查 / 版本探测）
@@ -2076,7 +2372,7 @@ describe('visual evidence channel: files and conventions', () => {
     // 里的字样、或把条件取反成 -ne，两种改法都能骗过文本 grep（57 passed 全绿）。
     // 这里用真正的 PowerShell 解析器问 AST：那个 IfStatement 的条件运算符是不是 -eq、
     // 条件左值是不是 $Port、右值是不是 $NativePort，以及 body 第一条语句是不是 throw。
-    const portGuard = runPowerShellJson(`
+    const portGuard = await runPowerShellJson(`
  $errors = $null
  if (-not (Test-Path -LiteralPath '${collectorScriptPathForPowerShell}')) {
    throw ('collector not found at ' + '${collectorScriptPathForPowerShell}')
