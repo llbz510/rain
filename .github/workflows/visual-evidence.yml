@@ -16,9 +16,15 @@ on:
   pull_request:
     paths:
       - '.github/workflows/visual-evidence.yml'
+      - '.gitignore'
       - 'scripts/campaign-visual-evidence.ps1'
       - 'scripts/validate-visual-evidence.ps1'
       - 'scripts/validate-visual-evidence.test.ts'
+      # 采集器自身的**判据**也是这个门禁的对象：改判据而不触发门禁，等于改了锁却没人验锁。
+      - 'scripts/visual-collector-runtime-paths.test.ts'
+      - 'scripts/visual-collector-selfcheck.test.ts'
+      - 'scripts/visual-style-contract-alignment.test.ts'
+      - 'scripts/support/arm-probe-child.mjs'
       - 'docs/development/visual-contract.md'
       # S8 新增：把**真实探针**放进 jsdom 跑并裁判记录形状的判据与它的支撑模块。
       # 支撑模块若不在过滤表里，只改它不会触发本门禁 —— 而它正是探针夹具的宿主。
@@ -30,6 +36,17 @@ on:
         description: '要采集的目标提交 SHA（留空 = 本次 workflow 运行的 head）'
         required: false
         default: ''
+      diagnostic:
+        # 诊断开关（默认关闭）：打开后采集器会把该记录 computedStyle 的键状态 dump 出来，
+        # 用于回答"同一份数据、两种读法为什么只有一种活下来"这类**运行期**问题。
+        # **诊断产物是诊断，不是证据**：不并入 `records/`、`screenshots/` 与 manifest，
+        # 不作 §3.4 的任何一项，也不参与校验器对证据包的判定。它落在包内 `diagnostic/`
+        # 子目录（`evidence/<包>/diagnostic/`），该路径已由 `.gitignore` 忽略，
+        # 并有守卫判据断言"它不会被 `evidence/**` 纳入提交"。默认路径（false）行为一字不变。
+        description: '诊断模式：额外产出 style 键状态 dump（诊断产物，不入库、不作证据）'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -206,9 +223,17 @@ jobs:
 
       - name: Collect real desktop visual evidence
         shell: pwsh
+        env:
+          # 只在显式打开诊断输入时置 1；默认（false）与既有行为逐字节一致。
+          # 诊断产物写在 evidence/<包>/diagnostic/ 下，**不入库、不作 §3.4 证据**，
+          # 也不参与下面的校验器判定（校验器只看 records/manifest/screenshots）。
+          RAIN_VISUAL_DIAGNOSTIC: ${{ inputs.diagnostic && '1' || '0' }}
         run: |
           $target = '${{ inputs.target_sha }}'
           if ([string]::IsNullOrWhiteSpace($target)) { $target = $env:GITHUB_SHA }
+          if ($env:RAIN_VISUAL_DIAGNOSTIC -eq '1') {
+            Write-Output '::warning::Visual evidence run is in DIAGNOSTIC mode: style key-state dumps will be produced. They are diagnostic only - not evidence, not to be committed, and they do not take part in the §3.4 verdict.'
+          }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/campaign-visual-evidence.ps1 -TargetSha $target
 
       - name: Validate the collected evidence package against visual-contract §3.4

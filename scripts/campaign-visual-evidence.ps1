@@ -389,6 +389,18 @@ function measure(spec) {
   const focusRing = spec.focus ? readFocusRing(element) : null;
   const rect = element.getBoundingClientRect();
   const live = getComputedStyle(element);
+  // **回退链读法（2026-10-08 修复，t1）**：契约要求 computedStyle.borderRadius 必须真的出现在记录里。
+  // 但**长格式 `border-top-left-radius` 在某些引擎里就是空串**——本机 jsdom 25.0.1 实测：
+  // 长格式 `""`（`parseFloat` → NaN）、而**简写 `borderRadius` 有值** `"8px"`。
+  // 上一版在"取到空"时 `throw`，而它抛在**脱离的异步 IIFE** 里 → 探针对象永不发布 →
+  // 所有等待探针对象的测试 5 秒超时 → `npm test` 红（门禁红）。所以这里改成**回退链**：
+  // 长格式优先（真实引擎给逐角精确值），取不到再退回简写。
+  // 并且**不再在浏览器层 throw**：单个元素的问题不得摧毁整页探针。记录级由采集器的
+  // `Assert-ComputedStyleKeys` / `Assert-ComputedStyleValues` 兜底，页级由探针主循环的
+  // 逐元素 catch 兜底（写成 missing 记录并把原因带上）。
+  const borderRadiusRaw = live.borderTopLeftRadius || live.borderRadius || '';
+  const borderRadiusPx = parseFloat(borderRadiusRaw);
+  const borderRadiusText = Number.isFinite(borderRadiusPx) ? `${borderRadiusPx}px` : null;
   const style = {
     color: live.color,
     backgroundColor: live.backgroundColor,
@@ -540,7 +552,9 @@ function measure(spec) {
       // （与四边边框同一形态的旁路：声明"画了聚焦圈"却没有任何计算样式可对账）。
       outlineStyle: style.outlineStyle,
       outlineWidth: style.outlineWidth,
-      borderRadius: style.borderTopLeftRadius,
+      // 与 derived.borderRadiusPx **同源同义**：都来自上面那一次 `live.borderTopLeftRadius` 读取，
+      // 写法统一为 `<n>px`。此处不再直读计算样式——那条读法在托管上被证明会丢键。
+      borderRadius: borderRadiusText,
       paddingTop: style.paddingTop,
       paddingRight: style.paddingRight,
       paddingBottom: style.paddingBottom,
@@ -557,7 +571,7 @@ function measure(spec) {
       lineHeightPx: Number.isFinite(lineHeightPx) ? lineHeightPx : null,
       lineHeightRatio: Number.isFinite(lineHeightPx) && fontSize > 0 ? Number((lineHeightPx / fontSize).toFixed(4)) : null,
       aspectRatio: rect.height > 0 ? Number((rect.width / rect.height).toFixed(4)) : null,
-      borderRadiusPx: parseFloat(style.borderTopLeftRadius),
+      borderRadiusPx: borderRadiusPx,
       // focusRing 只在 spec 显式声明 focus=true 时读取：否则每个被测元素都被 focus 会改变焦点状态，
       // 还可能让浏览器把它滚进视野，从而污染**后续**元素的 getBoundingClientRect（既有 E2E 踩过同类坑）。
       // 读取时机已提前到函数开头（见上方"取数时机修正"），这里只把那份结果带出来——**不再二次调用**，
@@ -644,7 +658,25 @@ function measure(spec) {
   }
   await settle();
   const results = [];
-  for (const spec of config.specs) results.push(measure(spec));
+  // 逐元素 catch（2026-10-08，t2）：**单个异常元素不得杀死整页探针**。
+  // 上一版的失败形态正是"一个元素抛异常 → 整页结果永不发布 → 等待条件只能超时、
+  // 而且日志里不知道为什么"。现在把它写成一条 missing 记录并带上原因，
+  // 让失败在**记录里**可见（校验器与 manifest 都能对账），而不是消失在一句超时里。
+  for (const spec of config.specs) {
+    try {
+      results.push(measure(spec));
+    } catch (error) {
+      results.push({
+        probeId: spec.id,
+        vc: spec.vc,
+        criterion: spec.criterion,
+        page: spec.page,
+        selector: spec.selector,
+        missing: true,
+        note: 'measure failed: ' + (error && error.message ? error.message : String(error)),
+      });
+    }
+  }
   // VC-03① 的跨元素扫描（全称否定）与其它逐元素记录同在一次运行内产出。
   const accentSweeps = (config.accentSweeps || []).map((entry) => {
     const sweep = sweepForAccent(entry.selectorScope, entry.accentToken);
@@ -674,7 +706,27 @@ function measure(spec) {
     accentSweeps: accentSweeps,
     accentSweepCount: accentSweeps.length,
   };
-})();
+})().catch((error) => {
+  // **页面级失败也必须发布探针对象**（2026-10-08，t3）：否则等待条件只能等到超时，
+  // 而日志里只有一句泛泛的 `Timed out waiting for the visual probe …`——
+  // 这正是本批要消灭的"12 分钟后才知道、而且不知道为什么"。
+  // 这里把真实原因写进 status/error，由 PowerShell 侧的条件读取并抛出。
+  window.__RAIN_VISUAL_PROBE__ = {
+    status: 'error',
+    error: (error && error.message) ? String(error.message) : String(error),
+    capturedAt: new Date().toISOString(),
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+      screenWidth: window.screen ? window.screen.width : null,
+      screenHeight: window.screen ? window.screen.height : null,
+    },
+    results: [],
+    accentSweeps: [],
+    accentSweepCount: 0,
+  };
+});
 return 'armed';
 '@
 
@@ -768,6 +820,106 @@ function Require-Command([string]$Name, [string]$InstallHint) {
   if (-not $command) { throw "$Name is required for the visual evidence collector. $InstallHint" }
   return $command.Source
 }
+
+# ---------------------------------------------------------------------------
+# 记录 computedStyle 的**契约键集合** + 采集器自检（fail-closed）。
+#
+# 为什么要有这段（真实事故，2026-10-07，两次同提交复现）：托管采集产出的 34 条记录里
+# `computedStyle` 少了 `borderRadius`，而**源码两侧都是 28 键**——也就是说
+# 「契约判据（两份源码对比）全绿」并**不能**保证「运行期产出的记录也齐备」。
+# 这类问题当时只有在托管采集的自校验阶段（一轮 ~12 分钟）才暴露，而且报错只说"缺少字段"，
+# 不告诉你"一共缺几个、是哪些"。
+#
+# 现在改成：**写记录之前**就断言「记录实际写出的键集合 == 契约键集合」，
+# 不等则当场失败并**逐个点名**缺了什么、多了什么。放在这里而不是放在自校验阶段，
+# 是为了让失败发生在**采集当场**（日志里紧跟记录写入，定位成本最低）。
+# ---------------------------------------------------------------------------
+$script:ComputedStyleContractKeys = @(
+  'color', 'backgroundColor', 'fontFamily', 'fontSize', 'fontWeight', 'fontVariantNumeric',
+  'lineHeight', 'borderTopWidth', 'borderTopStyle', 'borderTopColor', 'borderRadius',
+  'borderRightWidth', 'borderRightStyle', 'borderBottomWidth', 'borderBottomStyle',
+  'borderLeftWidth', 'borderLeftStyle', 'outlineStyle', 'outlineWidth',
+  'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+  'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'boxShadow'
+)
+
+# 纯函数：给定"记录里实际写出的键"与"契约键"，返回缺/多清单。
+# 抽成纯函数是为了能被单测直接裁判（不需要起浏览器/WebDriver）。
+function Compare-ComputedStyleKeys($ActualKeys, $ContractKeys) {
+  $actual = @($ActualKeys | ForEach-Object { [string]$_ })
+  $contract = @($ContractKeys | ForEach-Object { [string]$_ })
+  $missing = @($contract | Where-Object { $actual -notcontains $_ })
+  $extra = @($actual | Where-Object { $contract -notcontains $_ })
+  return @{ missing = $missing; extra = $extra; ok = ($missing.Count -eq 0 -and $extra.Count -eq 0) }
+}
+
+# fail-closed 断言：不齐就抛，并在消息里**逐个点名**。
+function Assert-ComputedStyleKeys($ActualKeys, $ContractKeys, [string]$Where) {
+  $comparison = Compare-ComputedStyleKeys $ActualKeys $ContractKeys
+  if ($comparison.ok) { return }
+  $parts = @()
+  if ($comparison.missing.Count -gt 0) { $parts += ('缺少 ' + $comparison.missing.Count + ' 个：' + ($comparison.missing -join ', ')) }
+  if ($comparison.extra.Count -gt 0) { $parts += ('多出 ' + $comparison.extra.Count + ' 个：' + ($comparison.extra -join ', ')) }
+  throw ('computedStyle 键集合与契约不一致（' + $Where + '）：' + ($parts -join '；') +
+    '。契约共 ' + @($ContractKeys).Count + ' 个键；实际写出 ' + @($ActualKeys).Count + ' 个。')
+}
+
+# 纯函数：**值**层面的自检（2026-10-08，t5）。只查"键齐不齐"是不够的：
+# 校验器对**空值**与**缺键**一视同仁（`$null -eq $v -or ([string]$v).Length -eq 0`），
+# 所以"28 个名字齐备、其中一个值是空串"仍会在 12 分钟后的自校验阶段才红。
+# 这里把同一判据提前到采集当场。
+function Compare-ComputedStyleValues($Style, $ContractKeys) {
+  $empty = @()
+  if ($null -ne $Style) {
+    foreach ($key in @($ContractKeys)) {
+      $property = $Style.PSObject.Properties[[string]$key]
+      if ($null -eq $property -or $null -eq $property.Value -or ([string]$property.Value).Length -eq 0) {
+        $empty += [string]$key
+      }
+    }
+  }
+  return @{ empty = $empty; ok = ($empty.Count -eq 0) }
+}
+
+# fail-closed：有键但值为空 → 抛，并逐个点名"哪些键是空值"。
+function Assert-ComputedStyleValues($Style, $ContractKeys, [string]$Where) {
+  $comparison = Compare-ComputedStyleValues $Style $ContractKeys
+  if ($comparison.ok) { return }
+  throw ('computedStyle 存在**空值**键（' + $Where + '）：' + $comparison.empty.Count + ' 个：' +
+    ($comparison.empty -join ', ') + '。校验器不接受空值（与缺键同等对待），故在采集当场失败。')
+}
+
+# 诊断用 dump（默认关闭）：把 style 中间对象的键状态逐项打印，回答"为什么同一数据、
+# 两种读法只有一种活下来"。**只作诊断，不构成 §3.4 证据、不入库**。
+function Write-StyleDiagnosticDump($Style, [string]$RecordsDir, [string]$ProbeId) {
+  if ($env:RAIN_VISUAL_DIAGNOSTIC -ne '1') { return }
+  try {
+    $dir = Join-Path (Split-Path -Parent $RecordsDir) 'diagnostic'
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $state = [ordered]@{}
+    foreach ($key in @('borderRadius', 'borderTopLeftRadius')) {
+      $value = if ($null -ne $Style -and $null -ne $Style.PSObject.Properties[$key]) { $Style.PSObject.Properties[$key].Value } else { $null }
+      $state[$key] = @{
+        present = ($null -ne $Style -and $null -ne $Style.PSObject.Properties[$key])
+        valueType = if ($null -eq $value) { 'null' } else { $value.GetType().Name }
+        value = if ($null -eq $value) { '<null>' } else { [string]$value }
+      }
+    }
+    $dump = @{
+      probeId = $ProbeId
+      note = 'diagnostic only：不构成 §3.4 证据、不入库、不判任何 VC-xx'
+      styleKeyCount = if ($null -eq $Style) { 0 } else { @($Style.PSObject.Properties).Count }
+      styleKeyNames = if ($null -eq $Style) { @() } else { @($Style.PSObject.Properties | ForEach-Object { $_.Name }) }
+      tracked = $state
+    }
+    $path = Join-Path $dir ($ProbeId + '.style-dump.json')
+    [System.IO.File]::WriteAllText($path, (ConvertTo-Json -InputObject $dump -Depth 12), [System.Text.UTF8Encoding]::new($false))
+  } catch {
+    # 诊断本身绝不影响采集
+    Write-Warning ('style diagnostic dump failed: ' + $_.Exception.Message)
+  }
+}
+
 
 function Wait-WebDriver([int]$Port) {
   $deadline = (Get-Date).AddSeconds(45)
@@ -864,8 +1016,18 @@ function Invoke-VisualProbe([string]$SessionId, $Specs, [string]$Page, $AccentSw
   $configJson = ConvertTo-Json -InputObject $config -Depth 12 -Compress
   Invoke-WebDriverScript $SessionId ('window.__RAIN_VISUAL_PROBE__ = null; window.__RAIN_VISUAL_PROBE_CONFIG__ = ' + $configJson + ';') | Out-Null
   Invoke-WebDriverScript $SessionId $probeScript | Out-Null
+  # 页面级失败必须**当场抛出真实原因**（2026-10-08，t3）：探针 IIFE 现在一定会发布对象，
+  # 失败时 status === 'error' 且带 message。下面这段条件脚本把它抛出去，取代原先那句
+  # 90 秒后才出现、且不含原因的 "Timed out waiting for the visual probe"。
+  # 说明文字刻意留在**这里**（PowerShell 注释）而不放进注入载荷：双引号 here-string 里的
+  # 反引号会被 PowerShell 当转义处理，而且条件脚本要保持最小可解析形态
+  # （injected-scripts-parse.test.ts 会逐个评估注入点，键位/可评估数是被断言的）。
+  # 页面名已由本调用的 description 给出，无需在 JS 里重复。
   Wait-WebDriverCondition $SessionId "the visual probe on page '$Page'" @"
 const probe = $probeInterface;
+if (probe && probe.status === 'error') {
+  throw new Error('visual probe failed: ' + (probe.error || '(no message)'));
+}
 return Boolean(probe) && probe.status === 'done';
 "@
   $raw = [string](Invoke-WebDriverScript $SessionId "return JSON.stringify($probeInterface);")
@@ -945,6 +1107,15 @@ function Write-ProbeRecords($Probe, [string]$RecordsDir, $ScreenshotRefs, [strin
       $record.probeNote = [string]$record.probeNote + '（focus 只在该页唯一一次采集中执行，避免改变后续元素的焦点/滚动状态）'
     }
     $path = Join-Path $RecordsDir (([string]$result.probeId) + '.json')
+    # **顺序很重要（2026-10-08，t6）**：dump 必须在断言**之前**落盘。
+    # 否则"键消失/值为空"的那一次恰恰会在断言处抛错、dump 永远不执行——
+    # 诊断工具在唯一需要它的场景下缺席。
+    Write-StyleDiagnosticDump $result.computedStyle $RecordsDir ([string]$result.probeId)
+    # 写盘之前按**契约键集合**自检（fail-closed，逐个点名缺/多），
+    # 让这类"运行期少键"的问题在采集当场暴露，而不是等到自校验阶段（一轮 12 分钟）才发现。
+    Assert-ComputedStyleKeys @($result.computedStyle.PSObject.Properties | ForEach-Object { $_.Name }) $script:ComputedStyleContractKeys ("element 记录 '" + [string]$result.probeId + "'")
+    # 值层面同样 fail-closed：键齐但某值为空，校验器一样拒（t5）。
+    Assert-ComputedStyleValues $result.computedStyle $script:ComputedStyleContractKeys ("element 记录 '" + [string]$result.probeId + "'")
     [System.IO.File]::WriteAllText($path, (ConvertTo-Json -InputObject $record -Depth 12), [System.Text.UTF8Encoding]::new($false))
     $written += $record
   }
