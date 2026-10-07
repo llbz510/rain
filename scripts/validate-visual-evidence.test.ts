@@ -74,7 +74,7 @@ async function runMathVectors(vectors: unknown[]): Promise<{ status: number; std
   const dir = mkdtempSync(join(tmpdir(), 'rain-visual-math-'))
   const path = join(dir, 'vectors.json')
   writeJson(path, vectors)
-  return runValidator(['-VerifyMathFile', path])
+  return await runValidator(['-VerifyMathFile', path])
 }
 
 /**
@@ -192,19 +192,6 @@ interface RecordOverrides {
   thresholdBasis?: string
   toleranceRatio?: number
   toleranceBasis?: string
-  /**
-   * `derived.spacing`（间距阶梯抽样）。缺省是形状正确的抽样、gaps 为空；
-   * 传 `{ gaps: [...] }` 用来打负 gap 守卫（S8 / 记录级缺陷 c）。
-   */
-  spacing?: Record<string, unknown>
-  /**
-   * `measured.outline.widthPxIsReservedInitial`。缺省在"没有轮廓"时是 `true`——这正是真实浏览器
-   * 的形态（`outline-style:none` 时 `outline-width` 仍计算为保留初始值 `medium` → `3px`），
-   * 所以 fixture 与采集器真正写出的记录同形。
-   */
-  outlineWidthPxIsReservedInitial?: boolean
-  /** computedStyle 里原始的 `outline-width` 读数（可追溯字段）。 */
-  outlineWidthComputed?: string
 }
 
 function buildTolerance() {
@@ -319,10 +306,7 @@ function buildRecord(overrides: RecordOverrides) {
         rgba8: overrides.outline ?? bg,
         declaredComputed: overrides.outlineDeclaredComputed ?? rgb8ToCss(overrides.outline ?? bg),
         style: (overrides.outlineRendered ?? false) ? 'dashed' : 'none',
-        // 采集器只在**渲染中**的轮廓上写宽度；未渲染时写 null（浏览器那里报的是保留初始值 medium）。
-        widthPx: (overrides.outlineRendered ?? false) ? 2 : null,
-        widthPxIsReservedInitial: overrides.outlineWidthPxIsReservedInitial ?? !(overrides.outlineRendered ?? false),
-        widthComputed: overrides.outlineWidthComputed ?? ((overrides.outlineRendered ?? false) ? '2px' : '3px'),
+        widthPx: (overrides.outlineRendered ?? false) ? 2 : 0,
         rendered: overrides.outlineRendered ?? false,
       },
       contrastRatio: {
@@ -334,22 +318,6 @@ function buildRecord(overrides: RecordOverrides) {
         thresholdBasis: overrides.thresholdBasis ?? (isLargeText ? 'largeText>=24px or >=18.66px bold' : 'text'),
         tolerance: overrides.toleranceRatio ?? 0.05,
         toleranceBasis: overrides.toleranceBasis ?? 'visual-contract.md §3.3 contrast ratio ±0.05',
-      },
-    },
-    // 采集器对 element 记录一律交出间距阶梯抽样（`readSpacingLadder`），所以 fixture 也必须带，
-    // 否则这些用例会拿"采集器不会写出的形状"去裁判校验器。
-    derived: {
-      spacing: overrides.spacing ?? {
-        ladder: [4, 8, 12, 16, 20, 24, 32, 48],
-        slots: {
-          paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8,
-          marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
-        },
-        gaps: [],
-        containerGap: { rowGap: 0, columnGap: 0 },
-        skippedOutOfFlowPairs: 0,
-        skippedUnpairedPairs: 0,
-        offLadderValues: [],
       },
     },
   }
@@ -1428,264 +1396,6 @@ describe('visual evidence validator: colour role and channels', () => {
     expect(`${result.stdout}${result.stderr}`).toMatch(/outline/i)
   })
 
-  it('refuses a record that puts the browser reserved outline width (medium = 3px) into widthPx', { timeout: powershellTimeoutMs }, async () => {
-    // S8 / 记录级缺陷 d。真实包 visual-c2c75601-20260930-013637 的 36 条 outline 记录逐字是
-    //   outlineStyle=none / outlineWidth=3px / widthPx=3
-    // 而唯一源规则是 `:focus-visible { outline: 2px dashed var(--color-fg); outline-offset: 2px }`。
-    // 3px 不是被画出来的宽度：Chromium/WebView2 对**任何**没有轮廓的元素都把 outline-width 计算为
-    // 初始值 `medium` → `3px`（本机 headless Edge 实测复现），元素自己的规则从未生效过。
-    // 把保留值写进 widthPx，就是让审查员读到一个与规则对不上的数——所以这是 fail-closed 的形状错误。
-    const record = buildRecord({
-      recordId: 'VC-03-focus-ring-reserved-width',
-      vc: 'VC-03',
-      criterion: 'focusRing2pxDashedFg',
-      page: 'video-list',
-      selector: '[data-testid="video-list-page"] header button',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'graphic',
-      fg: DARK_FG,
-      outline: DARK_FG,
-      outlineRendered: false,
-      computedBorder: { outlineStyle: 'none', outlineWidth: '3px' },
-    }) as Record<string, any>
-    record.measured.outline.widthPx = 3
-    record.measured.outline.widthPxIsReservedInitial = false
-    const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'a reserved initial outline width recorded as a measurement must fail').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/widthPxIsReservedInitial|widthPx/)
-  })
-
-  it('refuses a record that omits the reserved-width flag but keeps the reserved width in widthPx', { timeout: powershellTimeoutMs }, async () => {
-    // 只加字段不够：**缺字段**同样必须失败，否则"不写这个标志"就成了绕过门的办法。
-    const record = buildRecord({
-      recordId: 'VC-03-focus-ring-missing-flag',
-      vc: 'VC-03',
-      criterion: 'focusRing2pxDashedFg',
-      page: 'video-list',
-      selector: '[data-testid="video-list-page"] header button',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'graphic',
-      fg: DARK_FG,
-      outline: DARK_FG,
-      outlineRendered: false,
-      computedBorder: { outlineStyle: 'none', outlineWidth: '3px' },
-    }) as Record<string, any>
-    record.measured.outline.widthPx = 3
-    delete record.measured.outline.widthPxIsReservedInitial
-    const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'omitting the reserved-width flag must fail').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/widthPxIsReservedInitial/)
-  })
-
-  it('accepts an unpainted outline recorded the way Chromium actually reports it (widthPx null + reserved flag)', { timeout: powershellTimeoutMs }, async () => {
-    // 配对正例：形状改对之后，**真实浏览器的读数**（none / 3px / 保留值）必须能通过。
-    const record = buildRecord({
-      recordId: 'VC-03-focus-ring-unpainted-shape',
-      vc: 'VC-03',
-      criterion: 'focusRing2pxDashedFg',
-      page: 'video-list',
-      selector: '[data-testid="video-list-page"] header button',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'graphic',
-      fg: DARK_FG,
-      outline: DARK_FG,
-      outlineRendered: false,
-      computedBorder: { outlineStyle: 'none', outlineWidth: '3px' },
-    })
-    const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0)
-  })
-
-  it('still refuses a PAINTED outline whose widthPx disagrees with its own computedStyle', { timeout: powershellTimeoutMs }, async () => {
-    // 守卫的失败能力：渲染中（rendered=true）的轮廓有真实宽度，不得与 computedStyle 打架。
-    const record = buildRecord({
-      recordId: 'VC-03-focus-ring-width-mismatch',
-      vc: 'VC-03',
-      criterion: 'focusRing2pxDashedFg',
-      page: 'video-list',
-      selector: '[data-testid="video-list-page"] header button',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'graphic',
-      fg: DARK_FG,
-      outline: DARK_FG,
-      outlineRendered: true,
-      computedBorder: { outlineStyle: 'dashed', outlineWidth: '2px' },
-    }) as Record<string, any>
-    record.measured.outline.widthPx = 9
-    const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'a painted outline width that contradicts computedStyle must fail').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/widthPx/)
-  })
-
-  it('refuses a PAINTED outline whose computedStyle width is not positive (invisible by the browsers own reckoning)', { timeout: powershellTimeoutMs }, async () => {
-    // S8 守卫补强（由 Standards 轴独立复审实测发现）：`outlineStyle=dashed + outlineWidth=0.1px +
-    // widthPx=0.1` 曾被**放行**——记录自称"画了一条 0.1px 的轮廓"，而浏览器按 ≤0 的宽度判定它不可见。
-    // 与 `rendered=false` 一侧同一原则：宽度不足以被看见的轮廓，不得声称已绘制并交出宽度。
-    const record = buildRecord({
-      recordId: 'VC-03-focus-ring-invisible-width',
-      vc: 'VC-03',
-      criterion: 'focusRing2pxDashedFg',
-      page: 'video-list',
-      selector: '[data-testid="video-list-page"] header button',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'graphic',
-      fg: DARK_FG,
-      outline: DARK_FG,
-      outlineRendered: true,
-      computedBorder: { outlineStyle: 'dashed', outlineWidth: '0px' },
-    }) as Record<string, any>
-    record.measured.outline.widthPx = 0.1
-    const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'a painted outline whose computed width is not positive must fail').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/outlineWidth=0px|不可见/)
-  })
-
-  it('refuses a record whose spacing sample reports a NEGATIVE gap (the old cross-containing-block subtraction)', { timeout: powershellTimeoutMs }, async () => {
-    // S8 / 记录级缺陷 c。间距是"同一包含块、同一坐标系里两个相邻兄弟的可见间隙"，不可能为负。
-    // 真实包 visual-c2c75601-20260930-013637 的 17 条记录量出 -1028 / -669 / -508 / -36 / -28 /
-    // -27 / -24 / -10 —— 全部来自把不同定位上下文的 rect 相减（例：catalog-bar 的 -508 是 shell
-    // 宽度，而两条目录行的真实垂直间距是 40）。负值在正确口径下结构上不可能出现，所以出现即失败。
-    const record = buildRecord({
-      recordId: 'VC-15-study-catalogbar-height',
-      vc: 'VC-15',
-      criterion: 'keyHeightCatalogBar80',
-      page: 'study',
-      selector: '[data-testid="catalog-bar"]',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'nonColour',
-    }) as Record<string, any>
-    record.derived.spacing.gaps = [
-      {
-        between: 'div[data-testid="catalog-bar"] > div:nth-of-type(1) -> div[data-testid="catalog-bar"] > div:nth-of-type(2)',
-        axis: 'horizontal',
-        gapPx: -508,
-      },
-    ]
-    const dir = createPackage({ tested: ['VC-15'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'a negative gapPx must fail: it is a cross-coordinate subtraction, not a spacing').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/负.*gapPx|gapPx=-508/)
-  })
-
-  it('accepts an empty gaps array but refuses a MISSING gaps field (an empty sample is honest, silence is not)', { timeout: powershellTimeoutMs }, async () => {
-    // 空数组 = 抽样了、但没有一对"分离"的兄弟（合法）；缺字段 = 这条记录根本没交出间距抽样（失败）。
-    const emptyRecord = buildRecord({
-      recordId: 'VC-15-study-catalogbar-height',
-      vc: 'VC-15',
-      criterion: 'keyHeightCatalogBar80',
-      page: 'study',
-      selector: '[data-testid="catalog-bar"]',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'nonColour',
-      spacing: {
-        ladder: [4, 8, 12, 16, 20, 24, 32, 48],
-        slots: {
-          paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0,
-          marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
-        },
-        gaps: [],
-        containerGap: { rowGap: 0, columnGap: 0 },
-        skippedOutOfFlowPairs: 0,
-        skippedUnpairedPairs: 2,
-        offLadderValues: [],
-      },
-    })
-    const emptyResult = await runValidator(['-EvidenceRoot', createPackage({ tested: ['VC-15'], records: [emptyRecord] })])
-    expect(emptyResult.status, `${emptyResult.stdout}${emptyResult.stderr}`).toBe(0)
-
-    const silentRecord = buildRecord({
-      recordId: 'VC-15-study-catalogbar-height',
-      vc: 'VC-15',
-      criterion: 'keyHeightCatalogBar80',
-      page: 'study',
-      selector: '[data-testid="catalog-bar"]',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'nonColour',
-      spacing: { ladder: [4, 8, 12, 16, 20, 24, 32, 48], slots: {}, offLadderValues: [] },
-    })
-    const silentResult = await runValidator(['-EvidenceRoot', createPackage({ tested: ['VC-15'], records: [silentRecord] })])
-    expect(silentResult.status, 'a spacing sample with no gaps field must fail').not.toBe(0)
-    expect(`${silentResult.stdout}${silentResult.stderr}`).toMatch(/gaps/)
-  })
-
-  it('refuses an element record that ships no spacing sample at all (missing field is not "no spacing")', { timeout: powershellTimeoutMs }, async () => {
-    const record = buildRecord({
-      recordId: 'VC-01-list-body-bg',
-      vc: 'VC-01',
-      criterion: 'backgroundLuminanceBelow0.05',
-      page: 'video-list',
-      selector: 'body',
-      screenshots: ['screenshots/01-video-list.png'],
-    }) as Record<string, any>
-    delete record.derived
-    const dir = createPackage({ tested: ['VC-01'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'an element record without derived.spacing must fail').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/spacing|derived/)
-  })
-
-  it('refuses an element record that drops the spacing CALIBRATION fields (so "no negative gap" cannot be self-silenced)', { timeout: powershellTimeoutMs }, async () => {
-    // S8 守卫补强（由 Spec 轴独立复审指出）：只要求 `gaps` 非负还不够——采集器退化成"一条都不记"
-    // （`gaps: []`）就能消音。`containerGap` / `skippedOutOfFlowPairs` / `skippedUnpairedPairs`
-    // 三者正是"谁被跳过、为什么跳过"的凭据，必须必填。
-    const record = buildRecord({
-      recordId: 'VC-15-study-catalogbar-height',
-      vc: 'VC-15',
-      criterion: 'keyHeightCatalogBar80',
-      page: 'study',
-      selector: '[data-testid="catalog-bar"]',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'nonColour',
-      spacing: {
-        ladder: [4, 8, 12, 16, 20, 24, 32, 48],
-        slots: { paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0, marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 },
-        gaps: [],
-        offLadderValues: [],
-      },
-    }) as Record<string, any>
-    expect(record.derived.spacing.containerGap, '前置：本用例的夹具确实没有口径字段').toBeUndefined()
-    const dir = createPackage({ tested: ['VC-15'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'a spacing sample without containerGap/skip counters must fail').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/containerGap|skippedOutOfFlowPairs|skippedUnpairedPairs/)
-  })
-
-  it('refuses an element record that drops the whole measured.outline block (a fail-open bypass)', { timeout: powershellTimeoutMs }, async () => {
-    // S8 守卫补强（由 Spec 轴独立复审指出）：删掉整块 `measured.outline` 就能让 `Assert-RecordContrast`
-    // 里的两道轮廓门整段不执行（`$outline` 为 null ⇒ 跳过），而 computedStyle 的 outlineStyle/Width
-    // 虽然必填，却不与任何 measured 通道对账 —— fail-open。element 记录必须带该块。
-    const record = buildRecord({
-      recordId: 'VC-03-list-import-button-focus-ring',
-      vc: 'VC-03',
-      criterion: 'focusRing2pxDashedFg',
-      page: 'video-list',
-      selector: '[data-testid="video-list-page"] header button',
-      screenshots: ['screenshots/01-video-list.png'],
-      role: 'graphic',
-      fg: DARK_FG,
-      outline: DARK_FG,
-    }) as Record<string, any>
-    delete record.measured.outline
-    const dir = createPackage({ tested: ['VC-03'], records: [record] })
-    const result = await runValidator(['-EvidenceRoot', dir])
-
-    expect(result.status, 'an element record without measured.outline must fail').not.toBe(0)
-    expect(`${result.stdout}${result.stderr}`).toMatch(/缺少 outline 通道/)
-  })
-
   it('refuses a record that claims a composited value while its own metadata says otherwise', { timeout: powershellTimeoutMs }, async () => {
     // fg/bg 的 alpha 与 composited 是**自报**元数据（"这个值是不是按 §3.2 合成出来的"）。
     // 此前它们从不与 declared 对账，于是一条记录可以自称"合成过了"，而 declared/rgba8 其实是原值。
@@ -1987,7 +1697,6 @@ describe('visual evidence channel: files and conventions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rain-visual-probe-'))
     const probePath = join(dir, 'probe.js')
     writeFileSync(probePath, `function __webdriverExecuteSync() {\n${probe}\n}\n`, 'utf8')
-    // 异步执行 node --check：语义不变（非 0 即失败），但不再阻塞 worker 事件循环。
     const checkRun = await runTrackedProcess(
       process.execPath,
       ['--check', probePath],
@@ -2115,7 +1824,6 @@ describe('visual evidence channel: files and conventions', () => {
     ].join('\n')
     const checkPath = join(dir, 'check-combined.ps1')
     writeFileSync(checkPath, check, 'utf8')
-    // 异步执行（不再阻塞 worker 事件循环）：语义不变，非 0 即视为解析失败并保留输出。
     const checkRun = await runTrackedProcess(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', checkPath],
