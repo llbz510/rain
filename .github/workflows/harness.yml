@@ -127,13 +127,11 @@ jobs:
             # 重跑的失败类别必须**当场可判**：只报退出码的话，事后没人分得清「又是同一种 flake」
             # 还是「真实回归」，只能靠重跑猜。这里把重跑日志的尾部直接打进 job log，并与首次
             # 运行的日志一起作为 artifact 上传（见下一个步骤），失败现场不留白。
-            $failureLines = Select-String -LiteralPath $retryLog -Pattern 'Test Files','Tests ','Errors ','Unhandled Error','Timeout calling' -ErrorAction SilentlyContinue
-            if ($failureLines) {
-              Write-Output '---- retry log: failure summary ----'
-              $failureLines | Select-Object -Last 12 | ForEach-Object { Write-Output $_.Line.TrimEnd() }
-            }
-            Write-Output '---- retry log: tail ----'
-            Get-Content -LiteralPath $retryLog -Tail 40 | ForEach-Object { Write-Output $_ }
+            # 刻意不做"先挑摘要行"的花活：实测 Select-String 在这份日志上会一行都挑不出来，
+            # 于是"挑不到就什么都不打印"——正是最需要现场的时候留白。只取尾部，必定有输出。
+            $retryLines = @(Get-Content -LiteralPath $retryLog -Tail 60 -Encoding utf8 -ErrorAction SilentlyContinue)
+            Write-Output ("---- retry log: last {0} lines ----" -f $retryLines.Count)
+            foreach ($retryLine in $retryLines) { Write-Output $retryLine }
           }
           exit $retryCode
 

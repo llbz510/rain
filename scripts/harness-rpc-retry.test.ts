@@ -327,11 +327,12 @@ describe('Harness 窄条件自动重试：workflow 接线（只改 harness.yml�
     expect(workflow).toMatch(/exit \$code/)
   })
 
-  it('重跑的失败类别必须留痕：重跑日志既打印到 job 日志、也随首次运行日志一起上传', () => {
+  it('重跑的失败类别必须留痕：重跑日志的尾部必须无条件打印进 job 日志，并随首次运行日志一起上传', () => {
     expect(workflow).toMatch(/harness-check-retry\.log/)
-    // 打印到 job log（失败现场不留白：只报退出码的话，事后分不清"又是同一种 flake"和"真实回归"）。
-    expect(workflow).toMatch(/retry log: failure summary/)
-    expect(workflow).toMatch(/retry log: tail/)
+    // 无条件打印尾部：不得"先挑摘要行、挑不到就什么都不打印"（实测 Select-String 在这份日志上
+    // 会一行都挑不出来，于是最需要现场的时候反而留白）。
+    expect(workflow).toMatch(/Get-Content -LiteralPath \$retryLog -Tail \d+/)
+    expect(workflow).not.toMatch(/retry log: failure summary/)
     // upload 步骤必须同时纳入两份日志，且缺文件时不判错（首次即绿时本来就没有重跑日志）。
     const uploadAt = workflow.indexOf('actions/upload-artifact')
     expect(uploadAt).toBeGreaterThan(-1)
