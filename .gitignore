@@ -18,3 +18,10 @@ evidence/whisper-direct-diagnostic/
 evidence/**/rain-e2e.db
 evidence/**/rain-e2e.db-shm
 evidence/**/rain-e2e.db-wal
+
+# Visual-evidence **diagnostic** dumps (RAIN_VISUAL_DIAGNOSTIC=1) are diagnostic only:
+# they are not §3.4 evidence, must never be committed, and must not be mistaken for
+# collected evidence by a reviewer reading the package. They live inside a package
+# directory (evidence/<package>/diagnostic/) so that the artifact upload still carries
+# them, which is exactly why this rule has to exist.
+evidence/**/diagnostic/
