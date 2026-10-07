@@ -65,4 +65,69 @@ jobs:
         run: npm ci
 
       - name: Run repository Harness
-        run: npm run harness:check
+        shell: pwsh
+        run: |
+          # ---- 唯一完整入口，命令链一字不改（不在这里重实现 -------------------
+          # `harness:check` = harness:control && test && build:e2e && build && test:rust
+          $checkLog = Join-Path $env:RUNNER_TEMP 'harness-check-first-run.log'
+          & npm run harness:check *>&1 | Out-File -FilePath $checkLog -Encoding utf8
+          # pwsh 的坑：管道不吞退出码——本机实测「管道到 Out-File 后 $LASTEXITCODE」= 7、
+          # 成功时为 0；但为稳妥起见仍**先记码、再落盘**，判定只认文件里的那个数。
+          $code = $LASTEXITCODE
+          $codeFile = Join-Path $env:RUNNER_TEMP 'harness-check-first-run.exit-code'
+          Set-Content -LiteralPath $codeFile -Value $code -Encoding ascii
+          Write-Output "harness:check (first run) exit code = $code"
+
+          if ($code -eq 0) {
+            Write-Output 'Harness passed on the first run; no retry considered.'
+            exit 0
+          }
+
+          # ---- 窄条件自动重试（用户 2026-10-01 批准）-------------------------
+          # 判据本体：scripts/harness-rpc-retry.ts（纯函数，由 scripts/harness-rpc-retry.test.ts 裁判）。
+          # 只有**同时**满足才允许重试：退出码非 0 / 零失败测试与零失败文件 / 恰好一个未处理错误 /
+          # 错误消息精确等于 `[vitest-worker]: Timeout calling "onTaskUpdate"`。
+          # 任何真实失败（有 failed 段）与任何别的签名都会 NO_RETRY。结论编码在退出码里。
+          $verdict = & node scripts/harness-rpc-retry-cli.mjs decide $checkLog $code 2>&1
+          $verdictText = ($verdict | Out-String).Trim()
+          Write-Output $verdictText
+
+          if ($LASTEXITCODE -ne 0) {
+            # 不是那一种失败：原样判红，并保留首次运行的日志与退出码。
+            Write-Output "::warning::Harness failed and the narrow retry condition did NOT match: $verdictText"
+            exit $code
+          }
+
+          # ---- 允许重试：只重试一次，且必须留痕 ------------------------------
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value @"
+
+          ## Clean Windows Harness：窄条件自动重试已触发（第 1 次运行失败 → 重跑同一命令一次）
+
+          - 第 1 次运行的退出码：``$code``
+          - 判据结论：``$verdictText``
+          - 触发条件（全部满足）：退出码非 0；零失败测试文件与零失败测试；恰好 1 个未处理错误；错误消息精确等于 ``[vitest-worker]: Timeout calling "onTaskUpdate"``
+          - **只重试一次**：本次重跑若仍失败，门禁最终判红（不跳过、不替换任何断言，不改任何超时）
+          - 首次运行的完整日志作为本 workflow 的 artifact 上传（``harness-check-first-run``）
+          "@
+          Write-Output "::warning::Narrow auto-retry triggered (vitest-worker RPC timeout with zero test failures). Re-running the same command exactly once."
+
+          $retryLog = Join-Path $env:RUNNER_TEMP 'harness-check-retry.log'
+          & npm run harness:check *>&1 | Out-File -FilePath $retryLog -Encoding utf8
+          $retryCode = $LASTEXITCODE
+          Write-Output "harness:check (retry) exit code = $retryCode"
+
+          if ($retryCode -ne 0) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- 重跑结果：**失败**（退出码 ``$retryCode``）⇒ 门禁最终判红。窄条件自动重试**没有**、也不会掩盖真实失败。"
+            Write-Output "::error::Harness failed again on the narrow-condition retry (exit code $retryCode). Failing the gate - the retry did not mask anything."
+          }
+          exit $retryCode
+
+      - name: Upload first-run Harness log when a narrow retry was triggered
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: harness-check-first-run
+          path: ${{ runner.temp }}/harness-check-first-run.log
+          if-no-files-found: ignore
+          retention-days: 7
+
