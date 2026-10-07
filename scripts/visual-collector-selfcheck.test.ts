@@ -388,16 +388,39 @@ try {
   })
 })
 
+/**
+ * 取 `workflow_dispatch` 里 `diagnostic` input **自己**的 YAML 块。
+ *
+ * 为什么按缩进而不是 `slice(at, at + 700)`（STD-13）：固定窗口会被"邻近 input 的
+ * `default: false`"满足，于是"诊断模式默认关闭"这条安全属性被破坏时两处判据同时假绿。
+ */
+function diagnosticInputBlock(workflow: string): string {
+  const lines = workflow.split('\n')
+  const head = lines.findIndex((line) => /^\s{2,8}diagnostic:\s*$/.test(line))
+  expect(head, '找不到 workflow_dispatch 的 diagnostic 输入').toBeGreaterThan(-1)
+  const entryIndent = lines[head].length - lines[head].trimStart().length
+  let end = lines.length
+  for (let i = head + 1; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.trim() === '') continue
+    const indent = line.length - line.trimStart().length
+    if (indent <= entryIndent && /^\s*[A-Za-z_][\w.-]*:/.test(line)) { end = i; break }
+  }
+  return lines.slice(head, end).join('\n')
+}
+
 describe('诊断开关接线：默认路径一字不变，诊断产物不是证据', () => {
   const workflowPath = join(repoRoot, '.github', 'workflows', 'visual-evidence.yml')
   const workflow = readFileSync(workflowPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
 
   it('workflow_dispatch 新增 diagnostic 输入：boolean、默认 false', () => {
-    const at = workflow.indexOf('\n      diagnostic:')
-    expect(at, '找不到 diagnostic 输入').toBeGreaterThan(-1)
-    const block = workflow.slice(at, at + 700)
+    // 按**缩进边界**取该 input 自己的块（STD-13：固定 700 字符窗口在"把它改 true 并追加一个
+    // 带 default: false 的邻近 input"时会假绿，而默认关闭已经被破坏）。
+    const block = diagnosticInputBlock(workflow)
     expect(block, '必须是布尔输入').toMatch(/type:\s*boolean/)
     expect(block, '必须默认关闭').toMatch(/default:\s*false/)
+    const defaultLine = block.split('\n').find((line) => /^\s*default:\s*\S/.test(line))
+    expect(defaultLine?.trim(), 'diagnostic 自己的默认值必须是 false').toBe('default: false')
   })
 
   it('只有为 true 时才把 RAIN_VISUAL_DIAGNOSTIC 置 1（默认 0）', () => {

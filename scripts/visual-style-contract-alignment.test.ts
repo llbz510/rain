@@ -435,6 +435,31 @@ function envKeyLine(workflow: string, bounds: { start: number; end: number }, ke
   return 0
 }
 
+/**
+ * 取一个 `workflow_dispatch` input 自己的 YAML 块（含它的 `description`/`required`/`type`/`default`）。
+ *
+ * 为什么必须按缩进取（STD-13）：`slice(anchor, anchor + 700)` 这类固定窗口会在
+ * "把目标 input 的 default 改成 true、再追加一个带 `default: false` 的邻近 input"时
+ * **两处判据同时假绿**——因为邻近 input 的 `default: false` 落进了窗口里，
+ * 而真正要守的"默认关闭"已经被破坏。窗口给出的是"看起来在守、其实守不住"的判据。
+ */
+function inputBlockBounds(workflow: string, inputName: string): string {
+  const lines = workflow.split('\n')
+  // dispatch inputs 的属性缩进是 8；input 自身的条目缩进是 6（本文件的实际形态）。
+  const head = lines.findIndex((line) => new RegExp(`^\\s{2,8}${inputName}:\\s*$`).test(line))
+  if (head < 0) throw new Error(`workflow 里找不到 workflow_dispatch 输入 ${inputName}`)
+  const entryIndent = lines[head].length - lines[head].trimStart().length
+  let end = lines.length
+  for (let i = head + 1; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.trim() === '') continue
+    const indent = line.length - line.trimStart().length
+    // 同级或更浅的映射键 = 该 input 的边界（属性行缩进更深，不会命中）。
+    if (indent <= entryIndent && /^\s*[A-Za-z_][\w.-]*:/.test(line)) { end = i; break }
+  }
+  return lines.slice(head, end).join('\n')
+}
+
 const DIAGNOSTIC_KEY = 'RAIN_VISUAL_DIAGNOSTIC'
 const DIAGNOSTIC_STEP = 'Collect real desktop visual evidence'
 
@@ -533,14 +558,64 @@ describe('诊断开关接线：默认路径一字不变，诊断产物不是证�
   const collectStep = stepBlockBounds(workflow, 'collect', COLLECT_STEP)
 
   it('workflow_dispatch 新增 diagnostic 输入：boolean、默认 false（type 必填）', () => {
-    const at = workflow.indexOf('\n      diagnostic:')
-    expect(at, '找不到 diagnostic 输入').toBeGreaterThan(-1)
-    const block = workflow.slice(at, at + 700)
+    // 按**缩进边界**取该 input 自己的块，不用固定字符窗口（STD-13：`slice(at, at+700)` 在
+    // "把它改 true 并追加一个带 `default: false` 的邻近 input"这种复合改动下会**两处同时假绿**，
+    // 而 diagnostic 默认已经变成 true——"诊断模式默认关闭"被破坏却无人报）。
+    const block = inputBlockBounds(workflow, 'diagnostic')
     expect(block, '必须是布尔输入').toMatch(/type:\s*boolean/)
     expect(block, '必须默认关闭').toMatch(/default:\s*false/)
     // 没有 type: boolean 时 GitHub 把 default: false 当**字符串**，而布尔上下文里
     // 非空字符串为真——"默认关闭"会静默失效。所以 type 必须单独钉住。
     expect(block.match(/type:\s*(\S+)/)?.[1], 'type 必须是 boolean').toBe('boolean')
+    // 默认值必须落在**这个** input 块里，而且是它自己的那一行。
+    const defaultLine = block.split('\n').find((line) => /^\s*default:\s*\S/.test(line))
+    expect(defaultLine, 'diagnostic 块里必须有自己的 default 行').toBeDefined()
+    expect(defaultLine!.trim(), 'diagnostic 的默认值必须是 false').toBe('default: false')
+  })
+
+  it('注入证明 ⑭（STD-13）：diagnostic 改成 true + 追加一个带 default:false 的邻近 input → 必须判红', () => {
+    // 这条正是固定窗口会假绿的复合改动：邻近 input 的 `default: false` 会落进窗口，
+    // 于是"默认关闭"的判据被别处的字面量满足，而 diagnostic 自己已经默认打开。
+    //
+    // 注入必须**定点**：先把 diagnostic 自己的块取出来、只改它内部那一行 default，
+    // 再把邻近 input 插到它后面。用全局正则去改"第一个 default: false"会打到别的 input 上
+    // （本轮实测：target_sha 的 `default: ''` 先被改掉，证明随即失败在别处）。
+    const lines = workflow.split('\n')
+    const head = lines.findIndex((line) => /^\s{2,8}diagnostic:\s*$/.test(line))
+    expect(head, '找不到 diagnostic 输入').toBeGreaterThan(-1)
+    const entryIndent = lines[head].length - lines[head].trimStart().length
+    let end = lines.length
+    for (let i = head + 1; i < lines.length; i += 1) {
+      const line = lines[i]
+      if (line.trim() === '') continue
+      const indent = line.length - line.trimStart().length
+      if (indent <= entryIndent && /^\s*[A-Za-z_][\w.-]*:/.test(line)) { end = i; break }
+    }
+    const defaultAt = lines.findIndex((line, index) => index > head && index < end && /^\s*default:\s*false\s*$/.test(line))
+    expect(defaultAt, 'diagnostic 块里必须有自己的 default: false').toBeGreaterThan(-1)
+    const mutatedLines = [...lines]
+    mutatedLines[defaultAt] = mutatedLines[defaultAt].replace('false', 'true')
+    const pad = ' '.repeat(entryIndent + 2)
+    mutatedLines.splice(end, 0,
+      `${' '.repeat(entryIndent)}neighbour_injected:`,
+      `${pad}description: '注入的邻近输入（它的 default: false 会把固定窗口骗过去）'`,
+      `${pad}required: false`,
+      `${pad}type: boolean`,
+      `${pad}default: false`,
+    )
+    const mutated = mutatedLines.join('\n')
+    expect(mutated, '注入本身要生效').not.toBe(workflow)
+    expect(inputBlockBounds(mutated, 'diagnostic'), '注入后 diagnostic 自己的 default 已是 true')
+      .toMatch(/^\s*default:\s*true\s*$/m)
+    // 窗口写法确实会被骗过（这就是 STD-13 的复现）：
+    const anchor = mutated.indexOf('\n      diagnostic:')
+    const windowed = mutated.slice(anchor, anchor + 700)
+    expect(windowed, '固定窗口会被邻近 input 的 default: false 骗过（STD-13 复现）').toMatch(/default:\s*false/)
+    // 新判据必须抓到：diagnostic 自己的 default 已经不是 false。
+    const block = inputBlockBounds(mutated, 'diagnostic')
+    const defaultLine = block.split('\n').find((line) => /^\s*default:\s*\S/.test(line))
+    expect(defaultLine?.trim(), 'diagnostic 自己的 default 必须是 false').not.toBe('default: false')
+    expect(block, '邻近 input 不得落进 diagnostic 的块里').not.toContain('neighbour_injected')
   })
 
   it('诊断环境变量落在**采集 step 自己的 env 里**（不是 job 级、不是别的 step）', () => {
