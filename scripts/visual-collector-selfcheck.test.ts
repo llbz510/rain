@@ -426,11 +426,15 @@ describe('诊断开关接线：默认路径一字不变，诊断产物不是证�
   })
 
   it('dump 落在包内 diagnostic/ 子目录（不在证据根、不混进 records/screenshots）', () => {
-    const dumpAt = collectorSource.indexOf('function Write-StyleDiagnosticDump')
-    const body = collectorSource.slice(dumpAt, dumpAt + 1600)
+    // 按**函数边界**取整段（STD-9：原先 `slice(dumpAt, dumpAt + 1600)` 只剩 124 字符余量，
+    // 把 dump 函数撑长、并把 `$path` 改成 `Join-Path $RecordsDir …` 之后，窗口外那一行就看不见了，
+    // 而"dump 写进 records/"正是这条判据要防的形态）。
+    const body = extractFunctionSource(collectorSource, 'Write-StyleDiagnosticDump')
     expect(body, 'dump 目录必须是包内 diagnostic 子目录').toMatch(/Split-Path -Parent \$RecordsDir/)
     expect(body).toMatch(/'diagnostic'/)
     expect(body, 'dump 不得写进 records/').not.toMatch(/Join-Path \$RecordsDir/)
+    // 落点判据要真的锁住"写哪里"：`$path` 那一行必须落在诊断目录变量下、且带 dump 文件名后缀。
+    expect(body, 'dump 的 $path 必须落在 diagnostic 目录变量下').toMatch(/^\s*\$path = Join-Path \$dir .*style-dump\.json/m)
   })
 
   it('校验器只按名字读取包内已知路径，不枚举目录（故 diagnostic/ 不可能改变判定）', () => {

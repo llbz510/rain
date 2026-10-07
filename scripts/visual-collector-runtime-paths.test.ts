@@ -390,6 +390,7 @@ function armProbeInChild(probeSource: string, config: unknown, waitMs: number): 
       published: boolean
       status: string | null
       error: string | null
+      results?: unknown[]
       waitedMs: number
       unhandled?: number
     }
@@ -397,7 +398,7 @@ function armProbeInChild(probeSource: string, config: unknown, waitMs: number): 
       published: parsed.published,
       status: parsed.status ?? undefined,
       error: parsed.error ?? undefined,
-      results: [],
+      results: Array.isArray(parsed.results) ? parsed.results : [],
       waitedMs: parsed.waitedMs,
       unhandledRejections: parsed.unhandled ?? 0,
     }
@@ -436,11 +437,75 @@ describe('探针运行期：页级失败也必须发布探针对象（jsdom 真�
   it('等待条件必须读 status==="error" 并把真实原因抛出来（不再只有一句泛泛超时）', () => {
     // 这一条仍是源码判据：它锁"接线存在"。真正的行为由上面两条 jsdom 真跑承担。
     // 断言必须落在**等待条件那段注入脚本**里，而不是全文任意位置。
-    const at = collectorSource.indexOf('Wait-WebDriverCondition $SessionId "the visual probe on page')
-    expect(at, '找不到探针等待条件').toBeGreaterThan(-1)
-    const window = collectorSource.slice(at, at + 900)
-    expect(window, '等待条件必须识别探针的 error 状态').toMatch(/probe\.status === 'error'/)
-    expect(window, '必须抛出探针带回的原因').toMatch(/throw new Error\([^\n]*probe\.error/)
-    expect(window, '完成态判定不能被删掉').toMatch(/return Boolean\(probe\) && probe\.status === 'done'/)
+    // 用注入点自身的边界取（`@"` 起始行到 `"@` 结束行），不用固定字符窗口
+    // （复审登记过同类问题：`slice(at, at+900)` 今天非空转，但函数一变长就会静默失效）。
+    const lines = collectorSource.split('\n')
+    const head = lines.findIndex((line) => line.includes('Wait-WebDriverCondition $SessionId "the visual probe on page'))
+    expect(head, '找不到探针等待条件').toBeGreaterThan(-1)
+    let end = -1
+    for (let i = head; i < lines.length; i += 1) {
+      if (lines[i].trim() === '"@') { end = i; break }
+    }
+    expect(end, '等待条件的 here-string 未闭合').toBeGreaterThan(head)
+    const conditionScript = lines.slice(head, end + 1).join('\n')
+    expect(conditionScript, '等待条件必须识别探针的 error 状态').toMatch(/probe\.status === 'error'/)
+    expect(conditionScript, '必须抛出探针带回的原因').toMatch(/throw new Error\([^\n]*probe\.error/)
+    expect(conditionScript, '完成态判定不能被删掉').toMatch(/return Boolean\(probe\) && probe\.status === 'done'/)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// C 段：**逐元素 catch** 的判据（2026-10-08 复审 STD-12）。
+//
+// 这是本批交付的行为之一（"单个元素测量失败不得摧毁整页探针"），而它原先**零判据引用**：
+// 复审把探针主循环里那段 try/catch 整段删掉，6 个受影响文件 87 项**全绿**。
+// 与 B 段同一个道理——声称交付的行为必须有能失败的判据。
+// ---------------------------------------------------------------------------------------------
+
+describe('探针运行期：单个元素失败不得摧毁整页（逐元素 catch 真跑）', () => {
+  // **必须让 measure() 真的抛**才能判这段 catch：坏选择器不行——`measure()` 对 `querySelector`
+  // 取不到的元素是**返回 missing 记录**（见采集器 measure 开头），根本不抛（复审初版夹具就踩了这个坑，
+  // 反证显示"摘掉 catch 仍发布"，于是证明了错的命题）。
+  // 这里用 `getBoundingClientRect` 打桩：命中选择器的元素一取几何就抛，这是 measure() 内部的真实异常。
+  const config = (throwOnSelector: string | null) => ({
+    specs: [
+      { id: 'good-1', vc: 'VC-01', criterion: 'probe', page: 'video-list', selector: '#good', description: 'good element' },
+      { id: 'boom-1', vc: 'VC-01', criterion: 'probe', page: 'video-list', selector: '#boom', description: 'element whose measurement throws' },
+    ],
+    accentSweeps: [],
+    tolerance: { contrastRatio: 0.05, colorChannel: 1 },
+    toleranceBasis: 'visual-contract.md',
+    ...(throwOnSelector ? { throwOnSelector, throwMessage: 'injected measure failure' } : {}),
+  })
+
+  it('一个元素测量抛异常 + 一个正常元素 → 探针仍发布，抛的那个记成 missing 且带真实原因', () => {
+    // 走子进程夹具（它才有 `throwOnSelector` 打桩；两个夹具的探针与配置同源）。
+    const armed = armProbeInChild(probeScript, config('#boom'), 3000)
+    expect(armed.published, '单个元素失败不得让整页探针不发布').toBe(true)
+    expect(armed.status, '整页仍然是完成态（失败被收在记录里）').toBe('done')
+    const records = (armed.results ?? []) as Array<{ probeId?: string; missing?: boolean; note?: string; computedStyle?: Record<string, unknown> }>
+    expect(records.map((r) => r.probeId).sort(), '两个 spec 都要有条目').toEqual(['boom-1', 'good-1'])
+    const bad = records.find((r) => r.probeId === 'boom-1')
+    expect(bad?.missing, '抛异常的元素必须标成 missing 而不是消失').toBe(true)
+    expect(String(bad?.note), 'missing 记录必须带上真实原因（否则等于没有诊断信息）').toContain('injected measure failure')
+    const good = records.find((r) => r.probeId === 'good-1')
+    expect(good?.missing, '同页的正常元素不受影响').toBeFalsy()
+    expect(good?.computedStyle, '正常元素仍然写出 computedStyle').toBeDefined()
+  })
+
+  it('配对反证（子进程隔离）：摘掉逐元素 catch 后，同页**正常元素的记录全部丢失**', () => {
+    // 把探针主循环里的 try/catch 整段替换成"直接 push measure(spec)"——这正是旧形态。
+    const mutated = probeScript.replace(
+      /for \(const spec of config\.specs\) \{\s*try \{\s*results\.push\(measure\(spec\)\);\s*\} catch \(error\) \{[\s\S]*?\n  \}/,
+      'for (const spec of config.specs) { results.push(measure(spec)); }',
+    )
+    expect(mutated, '注入本身要生效（主循环的 try/catch 必须能被摘掉）').not.toBe(probeScript)
+    expect(mutated, '注入后不应再有逐元素 catch').not.toContain('measure failed')
+    const armed = armProbeInChild(mutated, config('#boom'), 2500)
+    // 注意这里**不能**断言"探针不发布"：页级 `.catch` 是第二道防线，它会把整页标成 error 并发布。
+    // 逐元素 catch 的真正职责是"一个坏元素不得让**整页的测量作废**"——所以判据落在 results 上。
+    expect(armed.status, '第二道防线（页级 .catch）把整页标成 error').toBe('error')
+    expect(armed.results ?? [], '坏元素一抛，同页正常元素的记录**全部丢失**了').toEqual([])
+    // 反向对照：同一条异常在有逐元素 catch 时被收成 missing 记录，正常元素照常出记录（见上一条用例）。
   })
 })

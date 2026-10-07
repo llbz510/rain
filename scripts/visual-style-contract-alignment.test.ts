@@ -355,7 +355,8 @@ describe('契约对齐：采集器 computedStyle 键集合 == 校验器必填键
   })
 
   it('注入证明 ③：只改校验器必填集（采集器不动）→ 必须判红', () => {
-    // 校验器源码是 UTF-8 with BOM + CRLF：注入时不能假设纯 LF 或精确缩进
+    // 校验器源码注入时不能假设行尾或缩进：本仓库 tracked `.ps1` 实测**行尾全是 LF**
+    // （工作树里看到的 CRLF 是 `core.autocrlf=true` 的检出假象），其中 4 个带 BOM。
     const broken = validatorSource.replace(/'borderRadius'/, "'borderRadius', 'columnGap'")
     expect(broken, '注入本身要生效').not.toBe(validatorSource)
     const required = extractValidatorKeys(broken)
@@ -438,6 +439,27 @@ const DIAGNOSTIC_KEY = 'RAIN_VISUAL_DIAGNOSTIC'
 const DIAGNOSTIC_STEP = 'Collect real desktop visual evidence'
 
 /**
+ * 按大括号配平抽出一个 PowerShell 函数（含 `function` 关键字）。
+ *
+ * 存在的理由就是 STD-9：任何"某函数内部不许出现某形态 / 某行必须在某处"的判据，
+ * 都**不能**用固定字符窗口来切——窗口只会给出"看起来在守、其实守不住"的判据。
+ */
+function extractPowerShellFunction(source: string, name: string): string {
+  const at = source.indexOf(`function ${name}(`)
+  if (at < 0) throw new Error(`采集器里找不到 function ${name}`)
+  const open = source.indexOf('{', at)
+  let depth = 0
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1
+    else if (source[i] === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(at, i + 1)
+    }
+  }
+  throw new Error(`${name} 未闭合`)
+}
+
+/**
  * 判据本体：诊断开关必须**只在采集 step 自己的 env 里**定义，且默认是 `0`。
  *
  * 抽成函数是为了让"注入证明"能**直接断言它会抛**（复审 STD-2：原先的证明用
@@ -463,6 +485,12 @@ function assertDiagnosticScope(workflow: string): void {
   }
   if (!/RAIN_VISUAL_DIAGNOSTIC:\s*\$\{\{\s*inputs\.diagnostic\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}/.test(workflow)) {
     throw new Error(`诊断开关默认值必须为 0（只有 inputs.diagnostic 为真才是 1），实际未匹配到 ${DIAGNOSTIC_KEY}: \${{ inputs.diagnostic && '1' || '0' }}`)
+  }
+  // 一行不变量（复审 STD-11）：全文**恰好一处**定义。它顺手覆盖了"同 step 内重复定义"这个
+  // 上面按行区间扫描覆盖不到的情形（重复键的 YAML 语义本机无解析器可验，故只用计数钉住"只有一个"）。
+  const definitions = workflow.match(new RegExp(`^\\s*${DIAGNOSTIC_KEY}:`, 'gm')) ?? []
+  if (definitions.length !== 1) {
+    throw new Error(`${DIAGNOSTIC_KEY} 在 workflow 里必须恰好定义一处，实际 ${definitions.length} 处`)
   }
 }
 
@@ -608,21 +636,32 @@ describe('诊断开关接线：默认路径一字不变，诊断产物不是证�
     expect(ignore, '.gitignore 必须忽略 evidence/**/diagnostic/').toMatch(/^evidence\/\*\*\/diagnostic\/$/m)
     // 而且**真的生效**：不是"规则写在文件里"，是 `git check-ignore` 认这条规则。
     // 只用 check-ignore 的退出码（不建任何文件，故不会污染工作区）；exit 0 = 被忽略。
-    const ignored = spawnSync('git', ['check-ignore', '--quiet', '--no-index', 'evidence/visual-xyz/diagnostic/VC-01.style-dump.json'], { cwd: repoRoot })
-    expect(ignored.status, 'git check-ignore 必须认出诊断 dump 路径被忽略（exit 0）').toBe(0)
+    //
+    // **非 git 目录下这三条会抛而不是静默通过**：`git check-ignore` 在仓库外返回 128。
+    // 这是有意的——本判据依赖"宿主是 git 工作树"（CI 与正常开发都在工作树里）。若哪天它
+    // 在一个导出的源码副本里跑，报错信息会直接指出是 git 不可用而不是"规则没生效"。
+    const checkIgnore = (path: string) => {
+      const result = spawnSync('git', ['check-ignore', '--quiet', '--no-index', path], { cwd: repoRoot })
+      expect(
+        result.status,
+        `git check-ignore 无法判定 ${path}（退出码 ${result.status}）：本判据要求宿主是 git 工作树`,
+      ).not.toBe(128)
+      return result.status
+    }
+    expect(checkIgnore('evidence/visual-xyz/diagnostic/VC-01.style-dump.json'), 'git check-ignore 必须认出诊断 dump 路径被忽略（exit 0）').toBe(0)
     // 反向：证据本体**不得**被这条规则误伤。
-    const kept = spawnSync('git', ['check-ignore', '--quiet', '--no-index', 'evidence/visual-xyz/records/VC-01.json'], { cwd: repoRoot })
-    expect(kept.status, 'records/*.json 不得被忽略（exit 1）').toBe(1)
-    const manifest = spawnSync('git', ['check-ignore', '--quiet', '--no-index', 'evidence/visual-xyz/manifest.json'], { cwd: repoRoot })
-    expect(manifest.status, 'manifest.json 不得被忽略（exit 1）').toBe(1)
+    expect(checkIgnore('evidence/visual-xyz/records/VC-01.json'), 'records/*.json 不得被忽略（exit 1）').toBe(1)
+    expect(checkIgnore('evidence/visual-xyz/manifest.json'), 'manifest.json 不得被忽略（exit 1）').toBe(1)
+    expect(checkIgnore('evidence/visual-xyz/screenshots/VC-01.png'), 'screenshots 不得被忽略（exit 1）').toBe(1)
   })
 
   it('dump 落在包内 diagnostic/ 子目录（不在证据根、不混进 records/screenshots）', () => {
-    const dumpAt = collectorSource.indexOf('function Write-StyleDiagnosticDump')
-    const body = collectorSource.slice(dumpAt, dumpAt + 1600)
+    // 按**函数边界**取（STD-9：固定 1600 字符窗口在函数变长后会让落点判据静默失效）。
+    const body = extractPowerShellFunction(collectorSource, 'Write-StyleDiagnosticDump')
     expect(body, 'dump 目录必须是包内 diagnostic 子目录').toMatch(/Split-Path -Parent \$RecordsDir/)
     expect(body).toMatch(/'diagnostic'/)
     expect(body, 'dump 不得写进 records/').not.toMatch(/Join-Path \$RecordsDir/)
+    expect(body, 'dump 的 $path 必须落在 diagnostic 目录变量下').toMatch(/^\s*\$path = Join-Path \$dir .*style-dump\.json/m)
     // 默认关闭是安全属性：dump 函数自己也要有闸门（否则"不入库"就只是环境变量层面的事）
     expect(body, 'dump 默认必须关闭').toMatch(/RAIN_VISUAL_DIAGNOSTIC\s*-ne\s*'1'/)
   })

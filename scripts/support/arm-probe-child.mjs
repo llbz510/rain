@@ -23,12 +23,26 @@ const waitMs = Number(waitMsRaw ?? 3000)
 
 const virtualConsole = new VirtualConsole()
 virtualConsole.on('jsdomError', () => {})
-const dom = new JSDOM('<!doctype html><html><body><div id="x">x</div></body></html>', {
+const dom = new JSDOM('<!doctype html><html><body><div id="x">x</div><div id="good">good</div><div id="boom">boom</div></body></html>', {
   virtualConsole,
   pretendToBeVisual: true,
 })
 const { window } = dom
 Object.defineProperty(window.document, 'fonts', { value: { ready: Promise.resolve() }, configurable: true })
+
+// Failure hook for the per-element-catch judgement: when the config sets `throwOnSelector`,
+// the matching element's `getBoundingClientRect()` throws. That is a REAL throw inside
+// `measure()` (the only kind the per-element catch can be judged by), unlike a bad selector,
+// which `measure()` handles by returning a `missing` record and never throwing.
+if (config.throwOnSelector) {
+  const original = window.Element.prototype.getBoundingClientRect
+  window.Element.prototype.getBoundingClientRect = function patched() {
+    if (this.matches && this.matches(config.throwOnSelector)) {
+      throw new Error(config.throwMessage || 'injected measure failure')
+    }
+    return original.apply(this, arguments)
+  }
+}
 
 const globals = globalThis
 const saved = new Map()
@@ -63,6 +77,7 @@ console.log(JSON.stringify({
   published: Boolean(armed),
   status: armed?.status ?? null,
   error: armed?.error ?? null,
+  results: armed?.results ?? [],
   waitedMs: Date.now() - started,
   unhandled: unhandled.length,
 }))
