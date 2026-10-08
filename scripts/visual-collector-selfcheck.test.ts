@@ -414,6 +414,90 @@ function diagnosticInputBlock(workflow: string): string {
   return block.join('\n')
 }
 
+function workflowStepBlock(workflow: string, stepName: string): string {
+  const marker = `      - name: ${stepName}\n`
+  const start = workflow.indexOf(marker)
+  if (start < 0) throw new Error(`找不到 workflow step：${stepName}`)
+  const end = workflow.indexOf('\n      - name:', start + marker.length)
+  return workflow.slice(start, end < 0 ? workflow.length : end)
+}
+
+function assertWorkflowTargetBinding(workflow: string): void {
+  if (!workflow.includes('target_sha: ${{ steps.resolve.outputs.target_sha }}')) {
+    throw new Error('workflow 必须先解析唯一 target_sha job output')
+  }
+  const checkout = workflowStepBlock(workflow, 'Check out resolved target commit')
+  if (!checkout.includes('ref: ${{ needs.resolve_target.outputs.target_sha }}')) {
+    throw new Error('collect checkout 必须显式指向 resolved target SHA')
+  }
+  const verify = workflowStepBlock(workflow, 'Verify checkout HEAD matches resolved target before build')
+  if (!/git rev-parse HEAD/.test(verify) || !/RAIN_VISUAL_TARGET_SHA/.test(verify) || !/-cne/.test(verify)) {
+    throw new Error('构建前必须严格比较 git rev-parse HEAD 与 resolved target SHA')
+  }
+  const verifyAt = workflow.indexOf('      - name: Verify checkout HEAD matches resolved target before build')
+  const toolchainAt = workflow.indexOf('      - name: Install pinned desktop toolchain')
+  if (verifyAt < 0 || toolchainAt < 0 || verifyAt >= toolchainAt) {
+    throw new Error('checkout HEAD 核验必须发生在工具链安装/构建之前')
+  }
+  const collect = workflowStepBlock(workflow, 'Collect real desktop visual evidence')
+  if (!/RAIN_VISUAL_TARGET_SHA:\s*\$\{\{ needs\.resolve_target\.outputs\.target_sha \}\}/.test(collect)
+    || !/\$target = \$env:RAIN_VISUAL_TARGET_SHA/.test(collect)) {
+    throw new Error('采集器必须消费与 checkout 相同的 resolved target SHA')
+  }
+}
+
+function assertDiagnosticDumpValidation(workflow: string): void {
+  const step = workflowStepBlock(workflow, 'Validate diagnostic dump count and raw source fields')
+  const required = [
+    'if: ${{ inputs.diagnostic }}',
+    "-Filter '*.style-dump.json'",
+    "measurementScope -eq 'element'",
+    '$dumps.Count -ne $elementRecordCount',
+    "$dump.raw.PSObject.Properties['borderTopLeftRadius']",
+    "$dump.raw.PSObject.Properties['borderRadius']",
+    "$dump.PSObject.Properties['selectedSource']",
+  ]
+  for (const needle of required) {
+    if (!step.includes(needle)) throw new Error(`diagnostic dump workflow 校验缺少：${needle}`)
+  }
+}
+
+describe('目标 SHA 硬绑定：解析、checkout、构建前核验与采集输入必须同源', () => {
+  const workflowPath = join(repoRoot, '.github', 'workflows', 'visual-evidence.yml')
+  const workflow = readFileSync(workflowPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+
+  it('collect checkout 与采集器都消费 resolved target SHA，且 HEAD 核验先于构建', () => {
+    expect(() => assertWorkflowTargetBinding(workflow)).not.toThrow()
+  })
+
+  it('注入反例：把 checkout 偷换成事件 SHA（输入 B、checkout A）必须判红', () => {
+    const mutated = workflow.replace(
+      'ref: ${{ needs.resolve_target.outputs.target_sha }}',
+      'ref: ${{ github.sha }}',
+    )
+    expect(mutated, '注入必须真的改到 checkout.ref').not.toBe(workflow)
+    expect(() => assertWorkflowTargetBinding(mutated)).toThrow(/resolved target SHA/)
+  })
+})
+
+describe('diagnostic workflow：dump 数量与 raw/source 字段必须 fail-closed', () => {
+  const workflowPath = join(repoRoot, '.github', 'workflows', 'visual-evidence.yml')
+  const workflow = readFileSync(workflowPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+
+  it('diagnostic=true 时核对 element 记录数与三个关键字段', () => {
+    expect(() => assertDiagnosticDumpValidation(workflow)).not.toThrow()
+  })
+
+  it('注入：删掉 selectedSource 字段检查必须判红', () => {
+    const mutated = workflow.replace(
+      "$dump.PSObject.Properties['selectedSource']",
+      "$dump.PSObject.Properties['removedSource']",
+    )
+    expect(mutated, '注入必须命中 selectedSource 检查').not.toBe(workflow)
+    expect(() => assertDiagnosticDumpValidation(mutated)).toThrow(/selectedSource/)
+  })
+})
+
 describe('诊断开关接线：默认路径一字不变，诊断产物不是证据', () => {
   const workflowPath = join(repoRoot, '.github', 'workflows', 'visual-evidence.yml')
   const workflow = readFileSync(workflowPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
@@ -502,8 +586,11 @@ describe('采集器自检：接线（写记录之前必须调用）与同源读�
   it('borderRadius 走**回退链**且同源：parseFloat 只读一次，两处共用', () => {
     // 回退链是 2026-10-08 的修复核心：长格式 `border-top-left-radius` 在**某些引擎里就是空串**
     // （jsdom 25.0.1 实测长格式 `""`、简写 `borderRadius` 有值 `"8px"`）。因此必须长格式优先、
-    // 取不到退回简写；旧的"直读长格式"既取不到值，也已经在托管上表现为丢键。
-    expect(collectorSource).toMatch(/const borderRadiusRaw = live\.borderTopLeftRadius \|\| live\.borderRadius \|\| ''/)
+    // 取不到退回简写；jsdom 的直读长格式已观测为空；真实托管命中来源需 raw 读数确认。
+    expect(collectorSource).toMatch(/const rawBorderTopLeftRadius = String\(live\.borderTopLeftRadius \|\| ''\)/)
+    expect(collectorSource).toMatch(/const rawBorderRadius = String\(live\.borderRadius \|\| ''\)/)
+    expect(collectorSource).toMatch(/const selectedSource = rawBorderTopLeftRadius\.length > 0/)
+    expect(collectorSource).toMatch(/selectedSource === 'borderTopLeftRadius'/)
     const reads = [...collectorSource.matchAll(/parseFloat\(\s*borderRadiusRaw\s*\)/g)]
     expect(reads.length, 'borderRadiusRaw 只应被 parseFloat 读一次（同源）').toBe(1)
     expect(collectorSource, '不得再 parseFloat 直读长格式（那条读法被证明会取到空）')
@@ -558,14 +645,14 @@ describe('采集器自检：接线（写记录之前必须调用）与同源读�
     expect(collectorSource, '空值判定必须与校验器同口径（源码锚点，非行为判据）').toMatch(/Length -eq 0/)
     // dump 必须在断言**之前**（否则出事那一次恰恰没有 dump）。整行匹配：只匹配前缀的话，
     // 把第二实参从 $RecordsDir 改成别的目录仍然绿（复审 STD-5）。
-    const dumpCallAt = collectorSource.search(/^[ \t]*Write-StyleDiagnosticDump \$result\.computedStyle \$RecordsDir [^\n]*$/m)
+    const dumpCallAt = collectorSource.search(/^[ \t]*Write-StyleDiagnosticDump \$result\.styleDiagnostic \$RecordsDir [^\n]*$/m)
     const assertCallAt = collectorSource.search(/^[ \t]*Assert-ComputedStyleKeys @\(\$result\.computedStyle[^\n]*$/m)
     expect(dumpCallAt, '找不到 dump 调用（须整行含 $RecordsDir）').toBeGreaterThan(-1)
     expect(assertCallAt, '找不到键集合断言调用').toBeGreaterThan(-1)
     expect(dumpCallAt, 'dump 必须先于断言落盘').toBeLessThan(assertCallAt)
   })
 
-  it('诊断 dump 默认关闭，且只在显式开关下写、不影响采集', () => {
+  it('诊断 dump 默认关闭；显式开启后缺字段或写盘失败必须 fail-closed', () => {
     // 变量名可能带 $env: 前缀，正则不要假设前缀形态
     expect(collectorSource).toMatch(/RAIN_VISUAL_DIAGNOSTIC/)
     // 同样按**函数边界**取，不用"下一个 function 或 +2000"那种猜测（STD-1 的同一类问题）。
@@ -573,7 +660,11 @@ describe('采集器自检：接线（写记录之前必须调用）与同源读�
     expect(body.length, 'dump 函数体长度应在合理区间（边界切错会立刻暴露）').toBeGreaterThan(800)
     expect(body.length).toBeLessThan(4000)
     expect(body, '默认必须是关闭的').toMatch(/RAIN_VISUAL_DIAGNOSTIC\s*-ne\s*'1'/)
-    expect(body, '诊断失败不得影响采集').toMatch(/Write-Warning/)
+    expect(body, '显式 diagnostic 的失败不得降级成 warning').not.toMatch(/Write-Warning/)
+    expect(body, '显式 diagnostic 的失败必须终止该次记录任务').toMatch(/throw \('style diagnostic dump failed:/)
+    expect(body, 'dump 必须消费浏览器侧 raw.borderTopLeftRadius').toMatch(/\$raw\.PSObject\.Properties\['borderTopLeftRadius'\]/)
+    expect(body, 'dump 必须消费浏览器侧 raw.borderRadius').toMatch(/\$raw\.PSObject\.Properties\['borderRadius'\]/)
+    expect(body, 'dump 必须消费浏览器侧选择来源').toMatch(/selectedSource/)
   })
 
   /**
