@@ -112,12 +112,9 @@ describe('AC-LV-17 online URL import handoff', () => {
       retrying: false,
     })
     expect(onProgress).toHaveBeenCalledWith('v_100', {
+      videoId: 'v_100',
       stage: 'download',
-      detailStage: 'download',
-      blockCurrent: 0,
-      blockTotal: 0,
       percent: 42,
-      retrying: false,
     })
     expect(loadRuntimeSettings).not.toHaveBeenCalled()
 

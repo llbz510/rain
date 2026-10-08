@@ -18,6 +18,7 @@ import { getEmptyStateMessage } from '@/ui/video-list'
 import { useRainStore } from '@/store/rain-store'
 import type { Video } from '@/models/types'
 import { useAppImport } from '@/pipeline/app-import-owner'
+import { getImportProgressView } from '@/ui/import-progress'
 
 type SortBy = VideoSortBy
 
@@ -513,17 +514,20 @@ export function VideoListPage() {
           </div>
         ) : (
           <div style={gridStyle}>
-            {videos.map((v) => (
+            {videos.map((v) => {
+              const view = getImportProgressView(v, pipelineProgress[v.id])
+              return (
               <VideoCard
                 key={v.id}
-                video={pipelineProgress[v.id] ? { ...v, status: 'processing', stage: pipelineProgress[v.id].stage } : v}
+                video={view.video}
                 onOpen={handleOpen}
                 onOpenImport={handleOpenImport}
-                importProgressPercent={pipelineProgress[v.id]?.percent}
+                importProgressPercent={view.percent}
                 onDelete={handleDelete}
                 loadDeleteInfo={loadDeleteInfo}
               />
-            ))}
+              )
+            })}
           </div>
         )}
       </main>

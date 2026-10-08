@@ -34,6 +34,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Import Pipeline | 执行 ASR -> Stage2 -> merging，处理取消、失败和恢复 | 页面布局、具体 SQL、Whisper 内部实现 | `src/pipeline/pipeline-orchestrator.ts` |
 | ASR Stage | 解析模型、调用 Whisper、校验结果、原子保存 ASR | Stage2、页面提示布局 | `src/pipeline/asr-runner.ts` |
 | Stage2 | 分块、调用已通过能力检查的 OpenAI-compatible LLM、校验、检查点和确定性合并 | ASR、UI、任意改写原始句子 | `src/pipeline/stage2-*.ts` |
+| Import Progress | 五类判别状态、字段约束、单调性、终态封闭；适配旧桌面 wire；每次 Controller 运行持有独立 session | 持久化实时百分比、猜测 UI 阶段、创建未授权重试 | `src/pipeline/import-progress.ts`；UI projection `src/ui/import-progress.ts` |
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
 | Database | schema、查询、事务和持久化转换 | 页面渲染、模型调用、任务调度 | `src/models/database.ts`、`db-singleton.ts` |
 | Database Architecture Policy | 拒绝 SQL plugin 装载点扩散、业务层导入内部数据库 module 和前端事务控制 SQL | 证明业务结果、替代 Rust SQLite 事务测试、决定 schema 迁移 | `scripts/database-architecture-policy.mjs`；裁判 `database-architecture-policy.test.ts` |
@@ -104,7 +105,7 @@ cancelAndWait(videoId)
 
 `AC-LV-13` 的生产删除入口由 `VideoListPage` 适配：页面只按需调用公共查询取得段落/笔记数量，通过 `VideoImportController.cancelAndWait` 的 per-Video stopping gate 阻止新任务、请求桌面取消并结算全部活动 Promise，再调用 `deleteVideoWithCascade` 并把已提交结果发布到列表；取消命令失败必须在任何删除前立即返回。Controller 的 URL 下载交接必须在媒体发布后、Pipeline 接管前再次检查取消，以释放旧 Owner；删除失败保留的记录不得因此失去重试入口。`VideoCard` 只负责单飞准备、确认、取消、进行中状态和错误展示。跨表清理与回滚仍唯一归属 `database-video-deletion.ts` 和 Rust `video_deletion`，页面与组件不得复制其规则。
 
-`AC-LV-19` 把非 ready 卡片点击定义为无副作用的详情导航：`App` 在应用生命周期内保持 `AppImportOwner` 挂载，列表页在切页时真正卸载，重挂后读取同一 Controller 与当前会话进度；页面只保存所选 Video ID，`ImportTaskDialog` 从页面给出的 SQLite `Video` 与可选 `ImportProgress` 渲染状态，且只把详情内显式动作回调给 Controller。`VideoImportController` 继续唯一拥有 start/retry/cancel、活动 AbortController 和实时进度接收；设置/学习页切换不得制造第二个看不见旧 Pipeline 的 Owner。Stage2 runner 是 block/attempt 的唯一生产者，经 Pipeline 可选详细回调进入 Controller；UI 不得自行猜分块或重试。实时进度结束时必须清除，不能覆盖新的持久终态。URL 下载在媒体已发布、Pipeline 尚未接管的取消竞态中，Controller 只能以精确 `pending/null` 比较交换收口自己刚发布的记录，不能覆盖其他 Owner 已推进的状态。进程重启后的静态 `processing` 可由显式取消闭合；`pending` 的自动恢复尚未归入本 AC。
+`AC-LV-19` 把非 ready 卡片点击定义为无副作用的详情导航：`App` 在应用生命周期内保持 `AppImportOwner` 挂载，列表页在切页时真正卸载，重挂后读取同一 Controller 与当前会话进度；页面只保存所选 Video ID，`ImportTaskDialog` 从页面给出的 SQLite `Video` 与可选 `ImportProgress` 渲染状态，且只把详情内显式动作回调给 Controller。`VideoImportController` 继续唯一拥有 start/retry/cancel、活动 AbortController 和实时进度接收；设置/学习页切换不得制造第二个看不见旧 Pipeline 的 Owner。Stage2 runner 是 block/attempt 的唯一生产者，经 Pipeline 判别式 `onImportProgress` 回调进入 Controller；UI 不得自行猜分块或重试。实时进度结束时必须清除，不能覆盖新的持久终态。URL 下载在媒体已发布、Pipeline 尚未接管的取消竞态中，Controller 只能以精确 `pending/null` 比较交换收口自己刚发布的记录，不能覆盖其他 Owner 已推进的状态。进程重启后的静态 `processing` 可由显式取消闭合；`pending` 的自动恢复尚未归入本 AC。
 
 `AC-LV-20` 只补充重启遗留 `pending/null` 的显式恢复：新进程加载列表和打开/关闭详情仍必须完全空闲，dialog 只为这一精确持久状态提供“继续导入”，页面把该意图转给当前应用生命周期内的现有 Controller。Controller 的同 Video ID 活动任务表负责 single-flight，Pipeline 和数据库继续更新原记录；关闭 dialog 只释放 UI 选择，不触碰 AbortController。不得把该入口扩展为启动扫描、跨进程 lease/队列或 Controller 架构迁移。
 
@@ -257,4 +258,4 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | `AC-AR-03` | Tauri asset capability + 共享 `localMediaUrl` adapter | 只允许 app-owned 或用户明确选择的规范化本地路径；禁止任意文件系统通配 scope |
 | `AC-AR-04` | 公共 Database interfaces + Zustand session Store | SQLite 是跨会话业务事实源；Store 只拥有当前会话选择/播放/UI 草稿，不恢复或复制持久业务事实 |
 | `AC-AR-05` | `src/pipeline/app-import-owner.tsx` + `VideoImportController`；`App` 持有 Owner，列表页消费 context | Controller、数据库连接、实时进度与刷新通知高于页面；真实路由卸载/重挂仍复用同任务，取消或后台结算回写同一记录；进度订阅由 Owner 释放 |
-| `AC-AR-06` | 单一 progress domain contract + Pipeline/Controller/event adapters | 五类判别联合、字段合法性、单调性、终态和 checkpoint retry 在域边界统一；UI 不推断或发明阶段 |
+| `AC-AR-06` | `src/pipeline/import-progress.ts` + Pipeline/Controller/event adapters；UI `getImportProgressView` 穷尽投影 | 五类判别联合、字段合法性、单调性、终态和 checkpoint retry 在域边界统一；UI 不推断或发明阶段 |

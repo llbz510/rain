@@ -23,17 +23,9 @@ import {
 import { redactSecret } from '@/llm/client'
 import { isTauri, tauriInvoke } from '@/lib/tauri-env'
 import { runPipeline } from '@/pipeline/pipeline-orchestrator'
+import { adaptProgressEvent, createImportProgressSession, type ImportProgress } from '@/pipeline/import-progress'
 
-export interface ImportProgress {
-  stage: 'download' | 'asr' | 'stage2' | 'merging'
-  percent: number
-  detailStage?: ProgressPayload['stage']
-  blockCurrent?: number
-  blockTotal?: number
-  retrying?: boolean
-  backend?: 'cuda' | 'cpu'
-  fallbackReason?: string
-}
+export type { ImportProgress } from '@/pipeline/import-progress'
 
 export interface ImportRuntimeSettings {
   ready: boolean
@@ -76,14 +68,6 @@ function createUniqueVideoId(): string {
 }
 
 const allocatedLocalVideoIds = new Set<string>()
-
-function normalizeProgressStage(stage: string): ImportProgress['stage'] {
-  if (stage === 'download') return 'download'
-  if (stage === 'asr' || stage === 'stage2' || stage === 'merging') return stage
-  if (stage.startsWith('asr')) return 'asr'
-  if (stage.startsWith('merge')) return 'merging'
-  return 'stage2'
-}
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
@@ -137,6 +121,19 @@ function assertRoleCapability(
 export function createVideoImportController(
   options: VideoImportControllerOptions,
 ): VideoImportController {
+  const progressSessions = new Map<string, ReturnType<typeof createImportProgressSession>>()
+  const publishProgress = (progress: ImportProgress): void => {
+    const accepted = progressSessions.get(progress.videoId)?.accept(progress)
+    if (accepted) options.onProgress(progress.videoId, accepted)
+  }
+  const publishPersistedTerminal = async (videoId: string): Promise<void> => {
+    const persisted = await getVideoById(options.db, videoId)
+    if (persisted?.status === 'failed') {
+      publishProgress({ videoId, stage: 'terminal', status: 'failed', error: persisted.errorMessage ?? 'Import failed' })
+    } else if (persisted?.status === 'ready' || persisted?.status === 'cancelled') {
+      publishProgress({ videoId, stage: 'terminal', status: persisted.status })
+    }
+  }
   const active = new Map<string, AbortController>()
   const activeTasks = new Map<string, Set<Promise<unknown>>>()
   const stopping = new Set<string>()
@@ -188,6 +185,9 @@ export function createVideoImportController(
       const video = await getVideoById(options.db, videoId)
       if (!video) return
       attemptedVideo = video
+      if (!claimedController) {
+        progressSessions.set(videoId, createImportProgressSession(videoId, video.stage === 'merging' ? 'stage2' : video.stage ?? 'asr'))
+      }
 
       if (controller.signal.aborted) {
         const error = new Error('Import cancelled')
@@ -232,7 +232,9 @@ export function createVideoImportController(
         )
       }
 
-      options.onProgress(videoId, { stage: video.stage ?? 'asr', percent: 0 })
+      if (!video.stage || video.stage === 'asr') {
+        publishProgress({ videoId, stage: 'asr', substage: 'extraction', percent: 0 })
+      }
       await runPipeline(
         video,
         {
@@ -241,20 +243,8 @@ export function createVideoImportController(
           model: structuringModel.modelName,
         },
         {
-          onProgress: (stage, percent, details) => {
-            if (stage === 'asr' || stage === 'stage2' || stage === 'merging') {
-              options.onProgress(videoId, details
-                ? {
-                    stage,
-                    percent,
-                    detailStage: stage,
-                    blockCurrent: details.blockCurrent,
-                    blockTotal: details.blockTotal,
-                    retrying: details.retrying,
-                  }
-                : { stage, percent })
-            }
-          },
+          onProgress: () => undefined,
+          onImportProgress: publishProgress,
           onComplete: () => undefined,
           onError: () => undefined,
         },
@@ -305,7 +295,9 @@ export function createVideoImportController(
       }
       options.onError?.('pipeline', error)
     } finally {
+      try { await publishPersistedTerminal(videoId) } catch { /* Preserve the primary import error. */ }
       if (active.get(videoId) === controller) active.delete(videoId)
+      progressSessions.delete(videoId)
       options.onProgress(videoId, null)
       await options.onChanged()
     }
@@ -326,6 +318,7 @@ export function createVideoImportController(
 
     const persisted = await getVideoById(options.db, videoId)
     if (persisted?.status !== 'processing') return
+    progressSessions.set(videoId, createImportProgressSession(videoId, persisted.stage ?? 'asr'))
     await transitionVideoImportState(
       options.db,
       videoId,
@@ -336,6 +329,8 @@ export function createVideoImportController(
         errorMessage: 'Import cancelled',
       },
     )
+    await publishPersistedTerminal(videoId)
+    progressSessions.delete(videoId)
     options.onProgress(videoId, null)
     await options.onChanged()
   }
@@ -378,6 +373,7 @@ export function createVideoImportController(
         )
         await options.onChanged()
       }
+      await publishPersistedTerminal(video.id)
     } catch {
       // Keep the download error as the primary failure.
     }
@@ -394,9 +390,11 @@ export function createVideoImportController(
     if (!video.filePath) throw new Error(`URL video "${video.id}" has no attached media`)
 
     active.set(video.id, downloadController)
+    progressSessions.set(video.id, createImportProgressSession(video.id, 'download'))
     let pipelineOwnsController = false
     try {
       await prepare()
+      publishProgress({ videoId: video.id, stage: 'download', percent: 0 })
       throwIfDownloadCancelled(downloadController)
       const published = await publishDownloadedMedia(options.db, video.id, video.filePath)
       throwIfDownloadCancelled(downloadController)
@@ -408,6 +406,7 @@ export function createVideoImportController(
     } finally {
       if (!pipelineOwnsController && active.get(video.id) === downloadController) {
         active.delete(video.id)
+        progressSessions.delete(video.id)
       }
     }
   }
@@ -421,9 +420,11 @@ export function createVideoImportController(
     if (!sourceUrl) throw new Error(`URL video "${video.id}" has no source URL`)
 
     active.set(video.id, downloadController)
+    progressSessions.set(video.id, createImportProgressSession(video.id, 'download'))
     let pipelineOwnsController = false
     try {
       await prepare()
+      publishProgress({ videoId: video.id, stage: 'download', percent: 0 })
       throwIfDownloadCancelled(downloadController)
       const result = await tauriInvoke<{
         title: string
@@ -458,6 +459,7 @@ export function createVideoImportController(
     } finally {
       if (!pipelineOwnsController && active.get(video.id) === downloadController) {
         active.delete(video.id)
+        progressSessions.delete(video.id)
       }
     }
   }
@@ -599,17 +601,9 @@ export function createVideoImportController(
     },
 
     acceptProgress(payload) {
-      if (!active.has(payload.videoId)) return
-      options.onProgress(payload.videoId, {
-        stage: normalizeProgressStage(payload.stage),
-        percent: payload.percent,
-        detailStage: payload.stage,
-        blockCurrent: payload.blockCurrent,
-        blockTotal: payload.blockTotal,
-        retrying: payload.retrying,
-        backend: payload.backend,
-        fallbackReason: payload.fallbackReason,
-      })
+      if (!active.has(payload.videoId) || active.get(payload.videoId)?.signal.aborted) return
+      const progress = adaptProgressEvent(payload)
+      if (progress) publishProgress(progress)
     },
   }
 }

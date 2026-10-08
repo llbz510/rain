@@ -521,6 +521,10 @@ async function runRealE2e(
     onChanged: () => undefined,
     onProgress: (_changedVideoId, progress) => {
       if (!progress) return
+      if (progress.stage === 'terminal') {
+        pushEvent(result, `import_terminal:${progress.status}`, progress.status === 'failed' ? progress.error : '')
+        return
+      }
       progressObserved = true
       const stage = progress.stage
       if (stageStart[stage] === undefined) stageStart[stage] = performance.now()
