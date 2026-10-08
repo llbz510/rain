@@ -4,26 +4,20 @@
 // 查询与导入刷新结果只由 cancellation-aware queryVideos effect 写入；已提交删除仍可同步移除对应卡片。
 // ========================================
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
   deleteVideoWithCascade,
   getNodesByVideoId,
   getNotesByVideoId,
   queryVideos,
-  type Database,
   type VideoSortBy,
 } from '@/models/database'
-import { getDb } from '@/models/db-singleton'
 import { VideoCard } from '@/ui/components/video-list'
 import { ImportTaskDialog } from '@/ui/components/import-task-dialog'
 import { getEmptyStateMessage } from '@/ui/video-list'
 import { useRainStore } from '@/store/rain-store'
 import type { Video } from '@/models/types'
-import { listenProgress, unlistenProgress } from '@/pipeline/progress-listener'
-import {
-  createVideoImportController,
-  type ImportProgress,
-} from '@/pipeline/video-import-controller'
+import { useAppImport } from '@/pipeline/app-import-owner'
 
 type SortBy = VideoSortBy
 
@@ -247,40 +241,21 @@ const modalBtnPrimaryStyle: React.CSSProperties = {
 }
 
 export function VideoListPage() {
-  const [db, setDb] = useState<Database | null>(null)
+  const {
+    db, controller: importController, databaseError, revision: refreshRevision,
+    progress: pipelineProgress, warning: localImportWarning, clearWarning,
+  } = useAppImport()
   const [videos, setVideos] = useState<Video[]>([])
   const [sortBy, setSortBy] = useState<SortBy>('lastStudied')
   const [keyword, setKeyword] = useState('')
   const [videoListError, setVideoListError] = useState('')
-  const [refreshRevision, setRefreshRevision] = useState(0)
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [importUrl, setImportUrl] = useState('')
   const [urlError, setUrlError] = useState('')
   const [localImportError, setLocalImportError] = useState('')
-  const [localImportWarning, setLocalImportWarning] = useState('')
   const [openError, setOpenError] = useState('')
   const [selectedImportVideoId, setSelectedImportVideoId] = useState<string | null>(null)
-  const [pipelineProgress, setPipelineProgress] = useState<Record<string, ImportProgress>>({})
-
-  // 初始化数据库（Tauri 走 SQLite，jsdom/浏览器走内存 fallback）
-  useEffect(() => {
-    let cancelled = false
-    getDb()
-      .then((d) => {
-        if (!cancelled) {
-          setDb(d)
-          setVideoListError('')
-        }
-      })
-      .catch((err) => {
-        console.error('[VideoListPage] 数据库初始化失败', err)
-        if (!cancelled) setVideoListError(queryErrorMessage(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   // 加载 / 搜索 / 排序
   useEffect(() => {
@@ -311,47 +286,6 @@ export function VideoListPage() {
     const result = await useRainStore.getState().loadVideo(videoId)
     if (!result.ok) setOpenError(result.error)
   }
-
-  const importController = useMemo(() => {
-    if (!db) return null
-    return createVideoImportController({
-      db,
-      loadRuntimeSettings: async () => {
-        await useRainStore.getState().loadRuntimeSettings()
-        const configured = useRainStore.getState()
-        return {
-          ready: configured.settingsReady,
-          error: configured.settingsError,
-          models: configured.modelPool.map((model) => ({ ...model })),
-          roles: { ...configured.roleAssignment },
-          capabilities: configured.capabilityRecords.map((record) => ({ ...record })),
-          whisperBackendPreference: configured.whisperBackendPreference,
-        }
-      },
-      onChanged: () => setRefreshRevision((current) => current + 1),
-      onProgress: (videoId, progress) => {
-        setPipelineProgress((current) => {
-          if (progress) return { ...current, [videoId]: progress }
-          const { [videoId]: _removed, ...remaining } = current
-          return remaining
-        })
-      },
-      onError: (context, error) => {
-        console.error(`[VideoListPage] ${context} error`, error)
-      },
-      onWarning: (message, error) => {
-        console.warn(`[VideoListPage] ${message}`, error)
-        const detail = error instanceof Error ? error.message : String(error)
-        setLocalImportWarning(detail ? `${message}：${detail}` : message)
-      },
-    })
-  }, [db])
-
-  useEffect(() => {
-    if (!importController) return
-    void listenProgress(importController.acceptProgress)
-    return () => unlistenProgress()
-  }, [importController])
 
   const handleOpenImport = useCallback((videoId: string) => {
     setSelectedImportVideoId(videoId)
@@ -395,7 +329,7 @@ export function VideoListPage() {
   const handleLocalImport = async () => {
     setImportMenuOpen(false)
     setLocalImportError('')
-    setLocalImportWarning('')
+    clearWarning()
     try {
       const { isTauri } = await import('@/lib/tauri-env')
       if (!isTauri()) {
@@ -558,8 +492,8 @@ export function VideoListPage() {
 
       <main style={mainStyle}>
         {openError && <div role="alert" style={errorStyle}>{openError}</div>}
-        {videoListError ? (
-          <div role="alert" style={errorStyle}>无法加载视频列表：{videoListError}</div>
+        {databaseError || videoListError ? (
+          <div role="alert" style={errorStyle}>无法加载视频列表：{databaseError || videoListError}</div>
         ) : isEmpty ? (
           <div
             role={isTitleSearch ? 'status' : undefined}

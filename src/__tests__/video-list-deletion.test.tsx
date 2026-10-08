@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async () => undefined),
+  subscribeProgress: vi.fn(async () => () => undefined),
   unlistenProgress: vi.fn(),
 }))
 vi.mock('@/pipeline/pipeline-orchestrator', () => ({
@@ -43,6 +43,7 @@ vi.mock('@/models/database', async (importOriginal) => {
 })
 
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import { VideoCard } from '@/ui/components/video-list'
 import { getDb, resetDb } from '@/models/db-singleton'
 import {
@@ -165,7 +166,7 @@ describe('AC-LV-13 production Video deletion', () => {
       updatedAt: 1,
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     const card = await screen.findByTestId('card-delete-me')
     fireEvent.click(within(card).getByRole('button', { name: '删除' }))
@@ -197,7 +198,7 @@ describe('AC-LV-13 production Video deletion', () => {
       lastStudiedAt: 1,
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     const card = await screen.findByTestId('card-keep-me')
     fireEvent.click(within(card).getByRole('button', { name: '删除' }))
@@ -302,7 +303,7 @@ describe('AC-LV-13 production Video deletion', () => {
       })
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-active-import')
     fireEvent.click(within(card).getByText('处理中课程'))
     const dialog = await screen.findByRole('dialog', { name: '处理中课程导入任务' })
@@ -338,7 +339,7 @@ describe('AC-LV-13 production Video deletion', () => {
       lastStudiedAt: 1,
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-refresh-fails')
     fireEvent.click(within(card).getByRole('button', { name: '删除' }))
     const confirmation = await screen.findByTestId('delete-confirm')
@@ -439,7 +440,7 @@ describe('AC-LV-13 production Video deletion', () => {
       })
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-slow-cancel')
     fireEvent.click(within(card).getByText('慢取消课程'))
     const dialog = await screen.findByRole('dialog', { name: '慢取消课程导入任务' })
@@ -492,7 +493,7 @@ describe('AC-LV-13 production Video deletion', () => {
     }))
     mocks.tauriInvoke.mockRejectedValue(new Error('取消命令失败'))
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-cancel-fails')
     fireEvent.click(within(card).getByText('取消失败课程'))
     const dialog = await screen.findByRole('dialog', { name: '取消失败课程导入任务' })
@@ -544,7 +545,7 @@ describe('AC-LV-13 production Video deletion', () => {
       markPublishStarted()
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-handoff-cancel')
     fireEvent.click(within(card).getByText('交接取消课程'))
     const dialog = await screen.findByRole('dialog', { name: '交接取消课程导入任务' })

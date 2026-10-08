@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async () => undefined),
+  subscribeProgress: vi.fn(async () => () => undefined),
   unlistenProgress: vi.fn(),
 }))
 vi.mock('@/models/database', async (importOriginal) => {
@@ -59,6 +59,7 @@ vi.mock('@/models/db-singleton', async (importOriginal) => {
 import { createDatabase, insertVideo, queryVideos } from '@/models/database'
 import { getDb, resetDb } from '@/models/db-singleton'
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import type { Video } from '@/models/types'
 
 function video(id: string, title: string, createdAt: number, lastStudiedAt: number): Video {
@@ -162,7 +163,7 @@ describe('AC-VL-03 VideoListPage title search', () => {
 
     const pageDb = await getDb()
     for (const record of sharedSearchFixture) await insertVideo(pageDb, record)
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     const search = await screen.findByRole('textbox', { name: '搜索视频标题' })
     const sort = screen.getByRole('combobox', { name: '排序' })
@@ -181,7 +182,7 @@ describe('AC-VL-03 VideoListPage title search', () => {
     const db = await getDb()
     await insertVideo(db, video('existing', 'Existing course', 10, 10))
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     fireEvent.change(await screen.findByRole('textbox', { name: '搜索视频标题' }), { target: { value: 'absent title' } })
 
     expect(await screen.findByRole('status')).toHaveTextContent('没有找到匹配的视频')
@@ -189,7 +190,7 @@ describe('AC-VL-03 VideoListPage title search', () => {
   })
 
   it('keeps the existing empty-library prompt when there is no title query', async () => {
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     expect(await screen.findByText('导入你的第一个视频')).toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
@@ -200,7 +201,7 @@ describe('AC-VL-03 VideoListPage title search', () => {
     await insertVideo(db, video('existing', 'Existing course', 10, 10))
     mocks.queryFailure = new Error('数据库连接断开')
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('无法加载视频列表：数据库连接断开')
     expect(screen.queryByText('导入你的第一个视频')).not.toBeInTheDocument()
@@ -216,7 +217,7 @@ describe('AC-VL-03 VideoListPage title search', () => {
   it('shows database initialization failures through the same visible loading-error boundary', async () => {
     mocks.initializationFailure = new Error('数据库初始化失败')
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('无法加载视频列表：数据库初始化失败')
     expect(screen.queryByText('导入你的第一个视频')).not.toBeInTheDocument()
@@ -227,7 +228,7 @@ describe('AC-VL-03 VideoListPage title search', () => {
     await insertVideo(db, video('old-result', 'old lesson', 10, 10))
     mocks.delayOldQueries = true
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const search = await screen.findByRole('textbox', { name: '搜索视频标题' })
     fireEvent.change(search, { target: { value: 'old' } })
     await waitFor(() => expect(mocks.delayedOldResolvers).toHaveLength(1))

@@ -98,7 +98,7 @@
 | AR-02 | Partial | front-end LLM request boundary | m20/LLM adjacent — Partial | role request/dependency/Desktop Evidence | 禁用静态存在自证 |
 | AR-03 | Partial | localMediaUrl/Tauri asset seam | thumbnail/playback — Partial | capability scope negative/Desktop | 禁用 jsdom/假截图替代 |
 | AR-04 | Partial | Database + Zustand ownership | architecture/store adjacent — Partial | unified dependency/adapter policy | 不复制持久业务事实 |
-| AR-05 | Partial | App owner + Controller lifetime | dialog/deletion — Partial | real remount/late result/no-double-owner | 禁用 jsdom/假截图替代 |
+| AR-05 | Present | `AppImportOwner` → Controller；`App` 路由真实卸载/重挂列表 | app-import-owner/dialog/deletion/M21 — Strong | 无新增必需；生产 App + 真实 Pipeline/公共数据库 Judge 覆盖单飞、后台进度/完成、原任务取消和迟到结果 | 不外推 Tauri/SQLite Desktop、模型、Visual 或 Release Evidence |
 | AR-06 | Partial | progress event/Pipeline domain | M20/M21/Rust/Pipeline — Partial | unified five-class domain contract | 不拼 UI 推断规则 |
 
 ## Proof closure / blocker ledger
@@ -108,7 +108,7 @@
 - `SU/UX`：Desktop/Visual blocker 仅为 `SU-01`（Desktop）、`SU-02`（Desktop/Visual）、`SU-03`（Desktop）、`SU-04`（Desktop）、`SU-05`（Desktop/Visual）、`SU-06`（Desktop/Visual）、`UX-01/02/04`（Visual）、`UX-03`（Visual/Accessibility）、`UX-05/06`（Desktop/Accessibility）。`UX-06` 已有 VideoCard 局部生产键盘/名称 Judge，但其余 Launch 主操作、可见焦点、非纯颜色状态、axe、AA 与 Desktop Evidence 仍阻断。`SU-07` 只需 Strong，不要求 Desktop；截图只能作附件，不能单独裁判。
 - `HE`：`HE-05` 只能由改变该桌面边界后的目标提交 workflow_dispatch 重放；本 Slice 不 dispatch。
 - `PF`：每条都缺冻结主机、fixture、样本/p95 或 soak Evidence，不能由开发机感觉代替。
-- `AR`：`AR-02..06` 仍需真实角色请求、Tauri capability/桌面、真实 remount 或统一领域 Judge；静态扫描/局部组件不等于完成。
+- `AR`：`AR-02/03/04/06` 仍需真实角色请求、Tauri capability/桌面、依赖政策或统一领域 Judge；静态扫描/局部组件不等于完成。`AR-05` 已由生产 App 路由真正卸载/重挂与完整 Pipeline 公开行为 Judge 覆盖，无新增 Desktop 要求。
 - `RL`：所有 Release 工作为用户暂停。受控 GPU run 已取消且未生成/上传 manifest、core/control artifact、build record 或 launcher；只有用户明确恢复后才可排期。不得以取消运行或此审计升级任何 RL AC。
 
 ## Proposed 局部面（23 条；不改变产品语义）

@@ -16,11 +16,12 @@ vi.mock('@/lib/tauri-env', () => ({
 }))
 vi.mock('@/pipeline/pipeline-orchestrator', () => ({ runPipeline: mocks.runPipeline }))
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async () => undefined),
+  subscribeProgress: vi.fn(async () => () => undefined),
   unlistenProgress: vi.fn(),
 }))
 
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import { getDb, resetDb } from '@/models/db-singleton'
 import { listVideos } from '@/models/database'
 import { recordCapabilityCheck } from '@/settings/model-capabilities'
@@ -104,7 +105,7 @@ afterEach(() => {
 
 describe('VideoListPage local import', () => {
   it('persists a pending local video and shows its card before processing completes', async () => {
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     const importButton = screen.getByRole('button', { name: '导入' })
     await waitFor(() => expect(importButton).toBeEnabled())
@@ -138,7 +139,7 @@ describe('VideoListPage local import', () => {
       }
       throw new Error(`Unexpected Tauri command: ${command}`)
     })
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     const importButton = screen.getByRole('button', { name: '导入' })
     await waitFor(() => expect(importButton).toBeEnabled())
