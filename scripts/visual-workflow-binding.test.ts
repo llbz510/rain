@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -74,7 +74,8 @@ describe('visual workflow: exact current package, including failures', () => {
     // Replace only the external process boundary; execute the workflow's actual PowerShell body.
     const prelude = 'function powershell.exe { Write-Output ($args -join " "); $global:LASTEXITCODE = 7 }'
     const result = await runStep(validateStep, directory, { CURRENT_EVIDENCE_PACKAGE: current }, prelude)
-    expect(result.stdout).toContain(current)
+    const actualPath = result.stdout.trim().split('-EvidenceRoot ')[1]
+    expect(realpathSync.native(actualPath)).toBe(realpathSync.native(current))
     expect(result.status, result.stdout + result.stderr).not.toBe(0)
     expect(result.stdout + result.stderr).toMatch(/validator.*7/i)
   })
