@@ -56,6 +56,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve_target:
+    name: Resolve visual evidence target SHA
+    runs-on: windows-2025
+    outputs:
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
+    steps:
+      - name: Resolve and validate target SHA
+        id: resolve
+        shell: pwsh
+        env:
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
+          EVENT_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $target = [string]$env:INPUT_TARGET_SHA
+          if ([string]::IsNullOrWhiteSpace($target)) { $target = [string]$env:EVENT_TARGET_SHA }
+          $target = $target.Trim().ToLowerInvariant()
+          if ($target -notmatch '^[0-9a-f]{40}$') {
+            throw "Visual evidence target must resolve to one full 40-character commit SHA; observed '$target'."
+          }
+          "target_sha=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
   # 轻量门禁：不需要真实桌面，**每次** PR 都跑。这是「通道脚本本身是否还能用」的默认门禁。
   channel:
     name: Visual evidence channel gate (no desktop needed)
@@ -120,7 +141,7 @@ jobs:
   # 真实的桌面运行由 dispatch 或仓库变量触发。
   collect:
     name: Hosted Windows Visual Evidence Collection
-    needs: channel
+    needs: [channel, resolve_target]
     runs-on: windows-2025
     timeout-minutes: 60
     if: ${{ github.event_name == 'workflow_dispatch' || vars.RAIN_RUN_VISUAL_EVIDENCE == '1' }}
@@ -132,10 +153,25 @@ jobs:
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9222 --enable-features=msEdgeDevToolsWdpRemoteDebugging --disable-gpu --no-sandbox --disable-dev-shm-usage
 
     steps:
-      - name: Check out repository
+      - name: Check out resolved target commit
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ needs.resolve_target.outputs.target_sha }}
+
+      - name: Verify checkout HEAD matches resolved target before build
+        shell: pwsh
+        env:
+          RAIN_VISUAL_TARGET_SHA: ${{ needs.resolve_target.outputs.target_sha }}
+        run: |
+          $expected = [string]$env:RAIN_VISUAL_TARGET_SHA
+          $actual = [string](& git rev-parse HEAD)
+          if ($LASTEXITCODE -ne 0) { throw "git rev-parse HEAD failed with exit code $LASTEXITCODE" }
+          $actual = $actual.Trim().ToLowerInvariant()
+          if ($actual -cne $expected) {
+            throw "Visual evidence checkout mismatch before build: resolved target '$expected', checkout HEAD '$actual'."
+          }
+          Write-Output "Verified visual evidence checkout HEAD: $actual"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -224,17 +260,49 @@ jobs:
       - name: Collect real desktop visual evidence
         shell: pwsh
         env:
+          RAIN_VISUAL_TARGET_SHA: ${{ needs.resolve_target.outputs.target_sha }}
           # 只在显式打开诊断输入时置 1；默认（false）与既有行为逐字节一致。
           # 诊断产物写在 evidence/<包>/diagnostic/ 下，**不入库、不作 §3.4 证据**，
           # 也不参与下面的校验器判定（校验器只看 records/manifest/screenshots）。
           RAIN_VISUAL_DIAGNOSTIC: ${{ inputs.diagnostic && '1' || '0' }}
         run: |
-          $target = '${{ inputs.target_sha }}'
-          if ([string]::IsNullOrWhiteSpace($target)) { $target = $env:GITHUB_SHA }
+          $target = $env:RAIN_VISUAL_TARGET_SHA
           if ($env:RAIN_VISUAL_DIAGNOSTIC -eq '1') {
             Write-Output '::warning::Visual evidence run is in DIAGNOSTIC mode: style key-state dumps will be produced. They are diagnostic only - not evidence, not to be committed, and they do not take part in the §3.4 verdict.'
           }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/campaign-visual-evidence.ps1 -TargetSha $target
+
+      - name: Validate diagnostic dump count and raw source fields
+        if: ${{ inputs.diagnostic }}
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem -Path evidence -Directory -Filter 'visual-*' | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $package) { throw 'Diagnostic mode produced no visual evidence package.' }
+          $manifestPath = Join-Path $package.FullName 'manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Diagnostic mode produced no manifest.json.' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $elementRecordCount = 0
+          foreach ($reference in @($manifest.records)) {
+            $recordPath = Join-Path $package.FullName ([string]$reference.file)
+            $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+            if ([string]$record.measurementScope -eq 'element') { $elementRecordCount += 1 }
+          }
+          $diagnosticDir = Join-Path $package.FullName 'diagnostic'
+          $dumps = @(Get-ChildItem -LiteralPath $diagnosticDir -File -Filter '*.style-dump.json' -ErrorAction Stop)
+          if ($dumps.Count -ne $elementRecordCount) {
+            throw "Diagnostic dump count mismatch: dumps=$($dumps.Count), element records=$elementRecordCount."
+          }
+          foreach ($dumpFile in $dumps) {
+            $dump = Get-Content -LiteralPath $dumpFile.FullName -Raw | ConvertFrom-Json
+            if ($null -eq $dump.PSObject.Properties['raw']) { throw "$($dumpFile.Name) is missing raw." }
+            if ($null -eq $dump.raw.PSObject.Properties['borderTopLeftRadius']) { throw "$($dumpFile.Name) is missing raw.borderTopLeftRadius." }
+            if ($null -eq $dump.raw.PSObject.Properties['borderRadius']) { throw "$($dumpFile.Name) is missing raw.borderRadius." }
+            if ($null -eq $dump.PSObject.Properties['selectedSource']) { throw "$($dumpFile.Name) is missing selectedSource." }
+            if ([string]$dump.selectedSource -notin @('borderTopLeftRadius', 'borderRadius', 'none')) {
+              throw "$($dumpFile.Name) has invalid selectedSource '$($dump.selectedSource)'."
+            }
+          }
+          Write-Output "Validated $($dumps.Count) diagnostic style dump(s)."
 
       - name: Validate the collected evidence package against visual-contract §3.4
         shell: pwsh
