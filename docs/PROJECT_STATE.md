@@ -13,13 +13,13 @@ Primary checkout: current Git worktree. Active control documents and runnable sc
 
 ## Current verified baseline
 
-受保护 `origin/master` 是 `0bd2f262a7c888aabaad15d7d8c031805e6688e3`（PR #92 merge commit：收口圆角回退链、探针失败发布、值级自检与诊断开关）；上一条基线是 `c8261d78e2a5ed0508dba82beedfe3cb1db0a5db`（PR #89：S8 四项视觉缺陷修复），再上一条是 `63de0293dcb457776c7f1b58671765abe418d6d2`（PR #91：消除 `validate-visual-evidence` 同步阻塞导致的 vitest worker RPC 超时主路径）。更早事实回到 Git/PR 历史读取，不在当前快照继续累加。
+最近已验证的受保护基线是 `0c6a08beee2ff1f8dadfc7b45301d8da56d17502`（PR #93：目标版本与本次采集包接线收口）；PR 门禁 `Clean Windows Harness` run [37746267834](https://github.com/llbz510/rain/actions/runs/37746267834) 和该合并提交的 master push run [37747786643](https://github.com/llbz510/rain/actions/runs/37747786643) 均为 `success`。更早事实回到 Git/PR 历史读取，不在当前快照继续累加。
 
-- `0bd2f262` 的 master push `Clean Windows Harness` run [`37623582555` attempt 2](https://github.com/llbz510/rain/actions/runs/37623582555/attempts/2) 已于 2026-10-07 `success`；这证明该目标提交的默认 Harness 通过，不替代任何真实桌面视觉裁判。
-- 同一目标提交手动 dispatch 的 `Visual Evidence` run [`37625161921`](https://github.com/llbz510/rain/actions/runs/37625161921) 已 `success`：真实 Hosted Windows/WebView2 采集、采集器自校验与 workflow 二次 §3.4 校验均通过，产出 41 条记录和 3 张截图；该运行只提供 §3.4 第 1–3 项输入，不签发第 4 项结论。
-- 受保护基线的视觉通道由 `channel` / `collect` 两个 job 分工；本轮候选新增 `resolve_target`，解析唯一目标 SHA并绑定实际 checkout。轻量门控与按显式开关执行真实桌面采集继续保留；真实采集仍是成本取舍，不挂到每个 PR。历史证据包 PR #87 当前是 **CLOSED、未合并**，其包已被后续 S8 形状与数值合同取代，不得作为当前入库候选。边界：已有真实 WebView2 包通过 §3.4 第 1–3 项形状校验，但**现有 diagnostic 未记录 raw longhand，不能证明 fallback 是否真实触发**；**无 V2 verdict、无任何 VC/AC 升级**。
+- 合并目标上的 `Visual Evidence` run [37747848432](https://github.com/llbz510/rain/actions/runs/37747848432) 为 `success`（workflow_dispatch，target/head 均为 `0c6a08be`，diagnostic=true）。本次唯一包是 `visual-0c6a08be-20261008-081210`，含 41 条记录、3 张真实截图；采集器自校验、workflow 二次校验和下载后的本机复核均通过 §3.4 第 1–3 项形状校验。该包目前保存在 Actions artifact，尚未入库，也没有 V2 verdict。
+- 通道由 `resolve_target` / `channel` / `collect` 三个 job 分工；checkout、构建前 HEAD 与 collector 输入使用同一个目标 SHA，诊断校验、形状校验、summary 和上传只消费 collector 输出的本次 `package_path`。真实采集仍按显式开关执行，不挂到每个 PR。
+- 本次 34 份诊断 dump 均有浏览器原始圆角双值及 selectedSource；34/34 命中 `borderTopLeftRadius`，所以本次真实 WebView2 没有触发 shorthand fallback，不得把它写成真机 fallback 已验证。诊断不入库、不参与视觉判定。历史包 PR #87 已关闭且未合并，不能替代本次输入；`VC-01`…`VC-19` 仍无任何一条完成独立裁判，任何 AC/Evidence tier 均未升级。
 
-这些成功只证明各自目标提交在干净 Hosted Windows 上通过默认 Harness；不替代真实桌面、GPU、模型、安装器或 Release Evidence。
+默认门禁成功只证明对应提交在干净 Hosted Windows 上通过 Harness；真实采集成功只提供 §3.4 第 1–3 项输入。两者均不替代独立视觉裁判、GPU、模型、安装器或 Release Evidence。
 
 ## Current delivery direction
 
@@ -27,14 +27,14 @@ Primary checkout: current Git worktree. Active control documents and runnable sc
 
 M3/GPU/Release Evidence、受控 GPU artifact build、安装器、签名、许可、Release 和下载页均为 user-paused。已取消的受控 GPU run 没有产生 manifest、core/control artifact、build record 或 launcher；未经用户明确恢复不得调度或重跑相关 workflow，也不得据此升级任何 `AC-RL-*`。
 
-含 `Visual` 或 `Accessibility` 的候选取值已由 `visual-contract.md` 转成可裁判条目，`VCGAP-01`…`VCGAP-23` 的实现缺口台账为 23/23 关闭；这只证明冻结取值已落地并有防回退判据。真实 Hosted WebView2 包现已通过 §3.4 第 1–3 项形状校验，但仍未产生独立审查员的第 4 项 verdict；现有 diagnostic 也未记录 raw longhand，不能反证或证明圆角 fallback 在该次真机运行中被触发。`VC-01`…`VC-19` 仍无一条完成裁判，任何 AC/Evidence tier 均不得据此升级。
+含 `Visual` 或 `Accessibility` 的候选取值已由 `visual-contract.md` 转成可裁判条目，`VCGAP-01`…`VCGAP-23` 的实现缺口台账为 23/23 关闭；这只证明冻结取值已落地并有防回退判据。真实 Hosted WebView2 包现已通过 §3.4 第 1–3 项形状校验，但仍未产生独立审查员的第 4 项 verdict；本次 diagnostic 已记录 raw 双值及命中来源，34/34 命中 longhand，未触发 fallback。`VC-01`…`VC-19` 仍无一条完成裁判，任何 AC/Evidence tier 均不得据此升级。
 
 ## Effective evidence and boundaries
 
 - [`canonical-evidence-freshness-2026-08-02.md`](development/canonical-evidence-freshness-2026-08-02.md) 是 tracked schema v2 Evidence 的当前新鲜度审计。`evidence/rain-real-e2e-20260726-195652/` 只证明其记录的 408b6db-era 配置和运行，不能证明当前 target、其他模型或 vision。
 - `AC-HE-05` 的 Hosted Runtime Settings Judge 仅对 `a329059b8172dab82c7326deb0af322045a0c396` 的 workflow_dispatch run `30756311932` 签发；桌面边界变动后的目标提交仍需独立重放。
 - `AC-HE-01` 的 `npm run harness:control` 只裁判控制面自洽；`AC-HE-06` 只裁判 99 条历史产品决策的当前去向。两者均不证明产品功能、SQLite/Tauri、真实媒体或 Release Evidence。
-- [`visual-contract.md`](development/visual-contract.md) 只把 M13 已有产品依据的决策转成可裁判数字与证据形态；它不定义 AC、不改变 AC 状态或 Evidence tier。最新真实 Hosted WebView2 采集已通过 §3.4 第 1–3 项形状校验，但该成功不包含 V2 的逐条 `pass`/`needs_revision`，并且当次 diagnostic 没有 raw longhand，不能证明 fallback 是否真实触发；因此 `VC-01`…`VC-19` 仍无任何一条完成裁判。§5.3 的 23 条关闭项及其锁定测试只证明实现取值不回退，不证明真实桌面观感达标。
+- [`visual-contract.md`](development/visual-contract.md) 只把 M13 已有产品依据的决策转成可裁判数字与证据形态；它不定义 AC、不改变 AC 状态或 Evidence tier。最新真实 Hosted WebView2 采集已通过 §3.4 第 1–3 项形状校验，但该成功不包含 V2 的逐条 `pass`/`needs_revision`，且当次 diagnostic 的 raw/source 读数只证明 longhand 命中，不能证明 fallback 被触发；因此 `VC-01`…`VC-19` 仍无任何一条完成裁判。§5.3 的 23 条关闭项及其锁定测试只证明实现取值不回退，不证明真实桌面观感达标。
 
 ## Active risks and boundaries
 
@@ -57,7 +57,7 @@ M3/GPU/Release Evidence、受控 GPU artifact build、安装器、签名、许�
 
 修改项目文件的会话必须同步本快照，但只能替换已过期的当前事实和本节交接，不得新增按日期的会话段落或 `## What changed` 时间线。每次交接保留一个可验证的现行 Slice：AC、Owner、公开 Judge、RED/GREEN、独立审查结果、未运行 Evidence、下一唯一动作；历史细节由 commit/PR 记录承载。
 
-当前 Slice 是 **P0 证据绑定加固**，不承载任何 AC，也不签发 Visual Evidence。Owner/改动面：`.github/workflows/visual-evidence.yml`（解析目标 SHA、checkout 明确 `ref`、构建前 HEAD 严格核验、diagnostic dump 数量与字段门控）、`scripts/campaign-visual-evidence.ps1`（采集器内部独立核 HEAD；浏览器侧记录 `raw.borderTopLeftRadius` / `raw.borderRadius` / `selectedSource`；diagnostic 写失败 fail-closed）、`scripts/validate-visual-evidence.ps1`（规范化路径、包根 containment、`screenshots/*.png` / `records/*.json` 直接子路径与 reparse-point 拒绝）、对应测试、精确本次 package_path 的校验/summary/upload 接线和本快照。公开 Judge：`validate-visual-evidence.test.ts`、`visual-collector-runtime-paths.test.ts`、`visual-collector-selfcheck.test.ts`、`visual-style-contract-alignment.test.ts`；RED 已分别复现错 SHA 先建包、包外 PNG/JSON 与 junction 被判绿、dump 失败只 warning、浏览器 raw/source 缺失、workflow 无 dump 字段门控，RED：真实 master 内容树上三份新增判据为 16 failed / 124 passed（140），精确本次包路径七项先 RED 后 GREEN；GREEN：Spec 与 Standards 两位只读独立审查员各自实跑完整受影响集合，均为 7 文件 / 186 项全绿、无阻断项；TypeScript、控制面、diff check 和两份 PS1 的 BOM/AST 通过。托管 channel 首跑在测试路径字符串比较上失败：RUNNER~1 与 runneradmin 是同一个目录，已改为 realpath 目录比较，选错包仍会失败；返工仅修改该测试与本快照，双审各自重跑 7 文件 / 186 项全部通过；独立注入选旧包后，真实目录比较仍会拒绝，守卫未削弱。当前分支尚未运行真实桌面采集，也没有 V2 verdict；已有真实 WebView2 包通过 §3.4 第 1–3 项形状校验，但旧包 diagnostic 未记录 raw longhand，不能证明 fallback 是否真实触发。独立双审先于推送，受保护门禁通过后才合并；无任何 VC/AC 升级。
+当前 Slice 是 **P0 证据绑定加固收口**，已随 PR #93 合并，不新增产品行为，也不签发 Visual Evidence；通道为 `AC-UX-01/03/04` 对应的视觉取数提供输入，不改变这些 AC 的状态。Owner 是 `.github/workflows/visual-evidence.yml`、`scripts/campaign-visual-evidence.ps1` 与 `scripts/validate-visual-evidence.ps1`。公开 Judge 为四份既有通道判据、新增 `visual-workflow-binding.test.ts`，以及受影响的 S8 probe-shape 与同步子进程守卫。RED：真实 master 内容树上三份新增判据 16 failed / 124 passed（140），精确本次包路径七项先 RED 后 GREEN。GREEN：Spec 与 Standards 两位只读独立审查员各自实跑 7 文件 / 186 项全绿；托管首跑发现 RUNNER~1/runneradmin 同目录的路径拼写误判，只修改测试为 realpath 实际目录比较，两位审查员各自重跑仍为 186 项全绿，注入选旧包仍被拒绝。TypeScript、控制面、diff check、两份 PS1 的 BOM/AST 通过；PR 和合并后的 master 完整门禁均通过。真实采集的目标、包、校验与 raw/source 事实见 Current verified baseline。未运行或未完成：GPU/Release 仍暂停；独立视觉裁判仍未签发；本次包仍仅在 Actions artifact，尚未入库。**下一唯一动作**：将本次真实包作为输入交独立视觉审查员逐条裁判；形状通过不得冒充视觉达标。
 
 **写法纪律（Captain 要求，适用于本文件与 `visual-contract.md`）**：凡涉及「不可达/不可能」的论断，**必须给出可达性证明或反证（边界值、可行区间、反例）**；拿不出证明就只能写成**明示的取舍**（说明放弃哪一维、代价是什么、可选项是什么），**不得用「不可能」为取舍背书**。已发生两次并都按此更正：填充态对页背景的可行带 `[0.152926, 0.183333]`（宽 0.0304，取舍而非不可能）、半透明白细边的 `alpha ≥ 0.3284 / 0.3327 / 0.3341`（按 0.0001 网格取最小可行值；观感取舍而非不可能）。**数值写法附带要求**：引用 alpha 阈值必须与「先四舍五入到字节再算比值」的口径一致（写出最小可行 alpha 与其渲染色），否则会出现「阈值差一格、渲染色对不上」的自相矛盾。
 
