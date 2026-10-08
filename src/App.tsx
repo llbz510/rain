@@ -10,18 +10,17 @@ import { VideoListPage } from '@/pages/VideoListPage'
 import { StudyInterface } from '@/pages/StudyInterface'
 import { SettingsPage } from '@/ui/components/settings'
 import { E2eAutomation } from '@/e2e/entry'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 
 export default function App() {
   const currentPage = useRainStore((s) => s.currentPage)
 
   return (
-    <>
+    <AppImportOwner>
       <E2eAutomation />
-      <div hidden={currentPage !== 'list'}>
-        <VideoListPage />
-      </div>
+      {currentPage === 'list' && <VideoListPage />}
       {currentPage === 'settings' && <SettingsPage />}
       {currentPage === 'study' && <StudyInterface />}
-    </>
+    </AppImportOwner>
   )
 }

@@ -63,8 +63,8 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 - 本地视频导入、Stage2、学习页、模型管理、Runtime Settings、数据库原子边界和默认 Windows Harness 已形成强控制。
 - `AC-LV-21` 只有 Strong 行为和本机 NVIDIA 短样本，尚无受支持 NVIDIA 目标候选 Release Evidence。
 - Hosted Runtime Settings Judge 已在 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 上由 workflow_dispatch run `30756311932` 重放通过；该结论只属于此目标提交，后续相关桌面边界变化仍需重新签发。
-- `AC-VL-05` 已由生产 lifecycle + 真实文件系统/SQLite Judge 收口（PR #65，已合并进受保护 master `4a0b14c`）；`AC-VL-06` 的 keep-set/GC 已在受保护 PR #66 落地（同一 Rust `thumbnail_lifecycle` 深 module、keep-set 来自真实 `video` 行、真实 SQLite + 隔离真实目录 + 并发新建写窗口 Judge、tier Strong），并已随 PR #66 合并进受保护 master `3db8032`，第 2 轮 Spec/Standards 复审确认关闭；`AC-VL-04` 的桌面证据仍在独立受保护 PR 上（最小托管骨架：真实 Tauri/WebView2 的桌面 DOM 与真实点击、受控夹具跨进程重启、截图仅附件），尚未合并。`M4-S2` 与 `M4-S3` 由此收口；M4 仍需的只剩其它事项：`M4-S1` schema 升级兼容、`M4-S4` App-scope import Owner、`M4-S5` 判别式 progress contract 与 `M4-S6` 已确认架构政策的实现。
-- risk 22 的 App-scope Controller Owner 与判别式 progress contract 已由 `AC-AR-05/06` 冻结，仍是非阻断实现债。
+- `AC-VL-05` 已由生产 lifecycle + 真实文件系统/SQLite Judge 收口（PR #65，已合并进受保护 master `4a0b14c`）；`AC-VL-06` 的 keep-set/GC 已在受保护 PR #66 落地（同一 Rust `thumbnail_lifecycle` 深 module、keep-set 来自真实 `video` 行、真实 SQLite + 隔离真实目录 + 并发新建写窗口 Judge、tier Strong），并已随 PR #66 合并进受保护 master `3db8032`，第 2 轮 Spec/Standards 复审确认关闭；`AC-VL-04` 的桌面证据仍在独立受保护 PR 上（最小托管骨架：真实 Tauri/WebView2 的桌面 DOM 与真实点击、受控夹具跨进程重启、截图仅附件），尚未合并。`M4-S2` 与 `M4-S3` 由此收口；M4 仍需的只剩其它事项：`M4-S1` schema 升级兼容、`M4-S5` 判别式 progress contract 与 `M4-S6` 已确认架构政策的实现。
+- risk 22a 的 App-scope Controller Owner（`AC-AR-05`）已由显式 `AppImportOwner` 与生产 App 路由卸载/重挂 Judge 覆盖，双审各自实跑 23 文件 / 206 项通过，候选待 Hosted 门禁与受保护 PR 合并；risk 22b 的判别式 progress contract（`AC-AR-06`）仍是独立实现债。
 - schema 升级兼容、正式安装生命周期、签名和发布许可已有 `AC-RL-*` 合同，但实现、外部 Evidence 与人类批准仍缺失。
 
 ## 4. 交付策略：先 Core Release，再扩展完整产品面
@@ -285,6 +285,9 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 - GC 不得删除用户源视频、模型或其他应用文件。
 
 ### M4-S4 App-scope import Owner
+
+- **状态**：`Implemented candidate — AC-AR-05 Strong Judge; independent Spec + Standards PASS; Hosted gate and protected merge pending`。
+- **当前实现/Judge**：`src/pipeline/app-import-owner.tsx` 在 App 生命周期持有 Controller、实时进度与刷新通知；`app-import-owner.test.tsx` 经生产 App 真正卸载/重挂列表，运行真实 Pipeline/Stage2 与公共数据库，覆盖后台进度/完成、单飞、原任务取消、迟到 ASR 与同记录更新。无 Desktop Evidence 要求，不外推模型/GPU/Visual/Release。
 
 - 把 Controller 生命周期从隐藏挂载的 VideoListPage 提升到显式 App Owner。
 - 页面真正卸载/重挂后，后台导入、取消、single-flight 和同记录更新仍成立。

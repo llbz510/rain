@@ -2,11 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async () => undefined),
+  subscribeProgress: vi.fn(async () => () => undefined),
   unlistenProgress: vi.fn(),
 }))
 
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import { resetDb } from '@/models/db-singleton'
 import { useRainStore } from '@/store/rain-store'
 
@@ -22,7 +23,7 @@ afterEach(() => {
 
 describe('AC-VL-04 empty library import call to action', () => {
   it('opens the existing import menu from the empty-library call to action', async () => {
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     const callToAction = await screen.findByRole('button', { name: '导入你的第一个视频' })
     expect(callToAction.tagName).toBe('BUTTON')

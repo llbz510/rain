@@ -6,7 +6,7 @@ let progressCallback: ((payload: ProgressPayload) => void) | undefined
 const { runPipeline } = vi.hoisted(() => ({ runPipeline: vi.fn() }))
 
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async (callback: (payload: ProgressPayload) => void) => {
+  subscribeProgress: vi.fn(async (callback: (payload: ProgressPayload) => void) => {
     progressCallback = callback
   }),
   unlistenProgress: vi.fn(),
@@ -15,6 +15,7 @@ vi.mock('@/pipeline/progress-listener', () => ({
 vi.mock('@/pipeline/pipeline-orchestrator', () => ({ runPipeline }))
 
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import { getDb, resetDb } from '@/models/db-singleton'
 import { getVideoById, insertVideo, transitionVideoImportState } from '@/models/database'
 import { recordCapabilityCheck } from '@/settings/model-capabilities'
@@ -136,7 +137,7 @@ describe('VideoListPage import recovery UI', () => {
     configureRunnableSettings()
     runPipeline.mockImplementation(() => new Promise<void>(() => undefined))
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     expect(await screen.findByTestId('badge-pending-card')).toHaveTextContent('排队中')
     expect(screen.getByTestId('badge-failed-card')).toHaveTextContent('失败')
@@ -171,7 +172,7 @@ describe('VideoListPage import recovery UI', () => {
     configureRunnableSettings()
     runPipeline.mockImplementation(() => new Promise<void>(() => undefined))
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const dialog = await openTaskDialog('progress-video')
     fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
     await waitFor(() => expect(runPipeline).toHaveBeenCalledOnce())
@@ -197,7 +198,7 @@ describe('VideoListPage import recovery UI', () => {
     configureRunnableSettings()
     useRainStore.setState({ capabilityRecords: [] })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const dialog = await openTaskDialog('capability-video')
     expect(await getVideoById(db, 'capability-video')).toMatchObject({
       errorMessage: '上次导入失败',
@@ -223,7 +224,7 @@ describe('VideoListPage import recovery UI', () => {
       loadRuntimeSettings: async () => undefined,
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const dialog = await openTaskDialog('settings-video')
     fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
 
@@ -255,7 +256,7 @@ describe('VideoListPage import recovery UI', () => {
       throw error
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const dialog = await openTaskDialog('cancelled-video')
     fireEvent.click(within(dialog).getByRole('button', { name: '重试导入' }))
 

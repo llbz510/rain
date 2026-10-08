@@ -4,6 +4,7 @@ import { resetDb, getDb } from '@/models/db-singleton'
 import { insertVideo } from '@/models/database'
 import type { Video } from '@/models/types'
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import { useRainStore } from '@/store/rain-store'
 
 const incompleteReadyVideo: Video = {
@@ -57,7 +58,7 @@ describe('AC-ST-01 atomic study loading', () => {
 
   it('keeps the user on the list and reports an incomplete ready video', async () => {
     await insertVideo(await getDb(), incompleteReadyVideo)
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     fireEvent.click(await screen.findByText(incompleteReadyVideo.title))
 

@@ -11,7 +11,7 @@ vi.mock('@/lib/tauri-env', () => ({
   tauriInvoke: mocks.tauriInvoke,
 }))
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async () => undefined),
+  subscribeProgress: vi.fn(async () => () => undefined),
   unlistenProgress: vi.fn(),
 }))
 
@@ -19,6 +19,7 @@ import { createDatabase, getVideoById, insertVideo, listVideos } from '@/models/
 import type { Video } from '@/models/types'
 import { getDb, resetDb } from '@/models/db-singleton'
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import { createVideoImportController } from '@/pipeline/video-import-controller'
 import { useRainStore } from '@/store/rain-store'
 
@@ -587,7 +588,7 @@ describe('AC-LV-17 online URL import handoff', () => {
       throw new Error(`Unexpected Tauri command: ${command}`)
     })
 
-    render(createElement(VideoListPage))
+    render(createElement(AppImportOwner, { children: createElement(VideoListPage) }))
     const importButton = screen.getByRole('button', { name: '导入' })
     await waitFor(() => expect(importButton).toBeEnabled())
     fireEvent.click(importButton)

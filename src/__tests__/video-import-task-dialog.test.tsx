@@ -11,8 +11,9 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async (callback: (payload: ProgressPayload) => void) => {
+  subscribeProgress: vi.fn(async (callback: (payload: ProgressPayload) => void) => {
     mocks.progressCallback = callback
+    return () => undefined
   }),
   unlistenProgress: vi.fn(),
 }))
@@ -27,6 +28,7 @@ vi.mock('@/lib/tauri-env', () => ({
 }))
 
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 import App from '@/App'
 import { getDb, resetDb } from '@/models/db-singleton'
 import { getVideoById, insertVideo, listVideos, transitionVideoImportState } from '@/models/database'
@@ -166,7 +168,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     for (const record of records) await insertVideo(db, record)
     configureRunnableSettings()
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
@@ -239,7 +241,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
       )
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-stale-pending-task')
     fireEvent.click(within(card).getByText('等待继续课程'))
     let dialog = await screen.findByRole('dialog', { name: '等待继续课程导入任务' })
@@ -305,7 +307,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     })
     configureRunnableSettings()
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-failed-task')
     fireEvent.click(screen.getByText('失败课程'))
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -341,7 +343,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     })
     configureRunnableSettings()
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-retry-task')
     expect(within(card).queryByRole('button', { name: '重试导入' })).not.toBeInTheDocument()
 
@@ -376,7 +378,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
       return new Promise<void>(() => undefined)
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-active-task')
     fireEvent.click(within(card).getByText('活动课程'))
     const dialog = await screen.findByRole('dialog', { name: '活动课程导入任务' })
@@ -408,7 +410,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     configureRunnableSettings()
     mocks.isTauri = true
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-stale-processing-task')
     fireEvent.click(within(card).getByText('重启遗留课程'))
     const dialog = await screen.findByRole('dialog', { name: '重启遗留课程导入任务' })
@@ -527,7 +529,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
       )
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-background-task')
     fireEvent.click(within(card).getByText('后台课程'))
     const dialog = await screen.findByRole('dialog', { name: '后台课程导入任务' })
@@ -576,7 +578,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
       return new Promise<void>(() => undefined)
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-progress-task')
     fireEvent.click(within(card).getByText('长视频课程'))
     const dialog = await screen.findByRole('dialog', { name: '长视频课程导入任务' })
@@ -617,7 +619,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     configureRunnableSettings()
     mocks.runPipeline.mockImplementation(() => new Promise<void>(() => undefined))
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-asr-detail-task')
     fireEvent.click(within(card).getByText('语音课程'))
     const dialog = await screen.findByRole('dialog', { name: '语音课程导入任务' })
@@ -686,7 +688,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
       )
     })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-completed-task')
     fireEvent.click(within(card).getByText('完成课程'))
     const dialog = await screen.findByRole('dialog', { name: '完成课程导入任务' })
@@ -722,7 +724,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     configureRunnableSettings()
     useRainStore.setState({ capabilityRecords: [] })
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
     const card = await screen.findByTestId('card-preflight-task')
     fireEvent.click(within(card).getByText('能力检查课程'))
     const dialog = await screen.findByRole('dialog', { name: '能力检查课程导入任务' })

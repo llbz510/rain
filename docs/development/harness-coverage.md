@@ -164,7 +164,7 @@
 | AC-AR-02 | `m20-boundaries.test.ts`、LLM/Stage2/助手相邻测试 | Partial | 真实前端 `src/llm/` 禁止 Tauri invoke 且 command 集合不含 LLM；完整依赖 policy、合并路径和按角色真实请求 Evidence 尚未统一 |
 | AC-AR-03 | `video-thumbnail-ownership.test.tsx`、`study-playback.test.tsx` | Partial | 生产媒体 URL adapter 已用于缩略图/播放器；Tauri capability 的允许/拒绝真实路径、scope 负向 policy 和规范化桌面 Judge 缺失 |
 | AC-AR-04 | `database-architecture-policy.test.ts`、Store/数据库相邻测试 | Partial | SQLite 公共 Owner 与多项重启事实存在；完整 Zustand 仅会话态 dependency policy、双 adapter 与禁止页面持久化复制未统一 |
-| AC-AR-05 | `video-import-task-dialog.test.tsx`、`video-list-deletion.test.tsx` | Partial | 页面切换/后台继续和任务结算有相邻行为；显式唯一 App-scope Owner、真正卸载/重挂、迟到结果与无双 Owner policy 未闭合 |
+| AC-AR-05 | `app-import-owner.test.tsx`、`video-import-task-dialog.test.tsx`、`video-list-deletion.test.tsx`、M21 progress listener | Strong | 生产 App 路由真正卸载/重挂列表；外部 Tauri event/invoke 与 HTTP fixture 下运行真实 Controller/Pipeline/数据库公开接口，锁定双击 single-flight、后台 47% 进度保留、原任务取消及迟到 ASR 不完成、离页后台完整 ASR→Stage2→merge、同一 ready 记录/内容和订阅释放。无需 Desktop Evidence，不外推 GPU/模型/Visual/Release |
 | AC-AR-06 | M20/M21、Rust events/commands tests、Pipeline/Stage2 tests | Partial | 当前事件字段和阶段各有局部裁判；五类判别联合、非法组合、单调性、terminal 后 mutation 与 checkpoint retry 的统一域合同未建立 |
 
 ## 8. 当前不设“已完成”门禁的能力

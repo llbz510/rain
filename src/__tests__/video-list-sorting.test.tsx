@@ -5,9 +5,10 @@ import { createDatabase, insertVideo, queryVideos } from '@/models/database'
 import { getDb, resetDb } from '@/models/db-singleton'
 import type { Video } from '@/models/types'
 import { VideoListPage } from '@/pages/VideoListPage'
+import { AppImportOwner } from '@/pipeline/app-import-owner'
 
 vi.mock('@/pipeline/progress-listener', () => ({
-  listenProgress: vi.fn(async () => undefined),
+  subscribeProgress: vi.fn(async () => () => undefined),
   unlistenProgress: vi.fn(),
 }))
 
@@ -91,7 +92,7 @@ describe('AC-VL-02 Video list sorting', () => {
     const db = await getDb()
     for (const record of fixture) await insertVideo(db, record)
 
-    render(<VideoListPage />)
+    render(<AppImportOwner><VideoListPage /></AppImportOwner>)
 
     const sort = await screen.findByRole('combobox', { name: '排序' })
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
