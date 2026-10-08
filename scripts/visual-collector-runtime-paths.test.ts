@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -126,6 +126,7 @@ interface RecordRun {
 function runWriteProbeRecords(options: {
   computedStyleEntries: string
   diagnostic: boolean
+  blockDiagnosticDirectory?: boolean
 }): RecordRun {
   const workDir = mkdtempSync(join(tmpdir(), 'rain-write-'))
   const recordsDir = join(workDir, 'records')
@@ -133,6 +134,7 @@ function runWriteProbeRecords(options: {
   const dumpDir = join(workDir, 'diagnostic')
   const recordPath = join(recordsDir, 'VC-RUNTIME-01.json')
   const dumpPath = join(dumpDir, 'VC-RUNTIME-01.style-dump.json')
+  if (options.blockDiagnosticDirectory) writeFileSync(dumpDir, 'injected dump write failure', 'utf8')
 
   const functions = [
     extractFunction(collectorSource, 'Compare-ComputedStyleKeys'),
@@ -160,6 +162,10 @@ function runWriteProbeRecords(options: {
     '    description = "runtime path fixture"',
     '    rect = [pscustomobject]@{ x = 0; y = 0; width = 10; height = 10 }',
     '    computedStyle = $style',
+    '    styleDiagnostic = [pscustomobject]@{',
+    '      raw = [pscustomobject]@{ borderTopLeftRadius = ""; borderRadius = "8px" }',
+    '      selectedSource = "borderRadius"',
+    '    }',
     '    measured = [pscustomobject]@{ role = "text" }',
     '    derived = [pscustomobject]@{ borderRadiusPx = 8 }',
     '  })',
@@ -197,6 +203,49 @@ function styleEntries(borderRadius: string): string {
     .map((key) => `  ${key} = ${key === 'borderRadius' ? borderRadius : "'x'"}`)
     .join('\n')
 }
+
+describe('采集器运行期：目标 SHA 必须与真实 checkout HEAD 硬绑定', () => {
+  it('checkout A、输入 B → 在建包/构建前失败，且不产生 manifest', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rain-target-sha-mismatch-'))
+    const isolatedTemp = join(root, 'temp')
+    const evidenceRoot = join(root, 'output')
+    mkdirSync(isolatedTemp, { recursive: true })
+    mkdirSync(evidenceRoot, { recursive: true })
+    const wrongTarget = 'f'.repeat(40)
+    const exe = powershellExe()
+    let output = ''
+
+    try {
+      execFileSync(exe, [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', collectorPath,
+        '-TargetSha', wrongTarget,
+        '-EvidenceRoot', evidenceRoot,
+        '-MaxSeconds', '1',
+        '-SkipBuild',
+        '-SkipPreflightProbe',
+      ], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        cwd: repoRoot,
+        timeout: 60_000,
+        env: { ...process.env, TEMP: isolatedTemp, TMP: isolatedTemp },
+      })
+      throw new Error('错 SHA 不得成功运行采集器')
+    } catch (cause) {
+      const failure = cause as { stdout?: string; stderr?: string }
+      output = `${failure.stdout ?? ''}${failure.stderr ?? ''}`
+    }
+
+    const generated = existsSync(evidenceRoot)
+      ? readdirSync(evidenceRoot, { recursive: true }).map(String)
+      : []
+    expect(output, output).toMatch(/target sha|checkout head|HEAD/i)
+    expect(output, '错误必须同时打印输入 B，便于定位伪绑定').toContain(wrongTarget)
+    expect(generated.some((path) => /manifest\.json$/i.test(path)), '错 SHA 失败不得留下任何有效 manifest').toBe(false)
+    expect(generated.some((path) => /^evidence[\\/]/i.test(path)), '必须在创建 evidence package 之前失败').toBe(false)
+    rmSync(root, { recursive: true, force: true })
+  })
+})
 
 describe('采集器运行期：写盘路径的 fail-closed（真跑 Write-ProbeRecords）', () => {
   it('键齐但 borderRadius 为空串 → 抛错，且记录文件**不存在**（不是"写进去再报错"）', () => {
@@ -241,6 +290,18 @@ describe('采集器运行期：写盘路径的 fail-closed（真跑 Write-ProbeR
     expect(run.message, run.message).toContain('RESULT=THREW')
     expect(run.recordExists).toBe(false)
     expect(run.dumpExists, '断言之前必须已经落盘诊断 dump（否则诊断工具在唯一需要它的场景缺席）').toBe(true)
+    rmSync(run.workDir, { recursive: true, force: true })
+  })
+
+  it('注入：diagnostic=true 时 dump 写失败必须让该条任务失败，且不得继续写正式记录', () => {
+    const run = runWriteProbeRecords({
+      computedStyleEntries: styleEntries("'8px'"),
+      diagnostic: true,
+      blockDiagnosticDirectory: true,
+    })
+    expect(run.message, run.message).toContain('RESULT=THREW')
+    expect(run.message, '错误必须点名 diagnostic dump，而不是静默 warning').toMatch(/style diagnostic dump failed/i)
+    expect(run.recordExists, 'diagnostic 写失败后不得继续写正式记录').toBe(false)
     rmSync(run.workDir, { recursive: true, force: true })
   })
 
@@ -325,7 +386,12 @@ interface ArmedProbe {
 }
 
 /** 把探针放进 jsdom 真跑，返回它最终发布的探针对象（或"从未发布"）。 */
-async function armProbeInJsdom(html: string, config: unknown, probeSource: string): Promise<ArmedProbe> {
+async function armProbeInJsdom(
+  html: string,
+  config: unknown,
+  probeSource: string,
+  computedStyleOverrides: Record<string, string> = {},
+): Promise<ArmedProbe> {
   const { JSDOM, VirtualConsole } = await import('jsdom')
   const virtualConsole = new VirtualConsole()
   const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, { virtualConsole, pretendToBeVisual: true })
@@ -336,6 +402,16 @@ async function armProbeInJsdom(html: string, config: unknown, probeSource: strin
   for (const name of ['window', 'document', 'getComputedStyle', 'requestAnimationFrame']) {
     saved.set(name, globals[name])
     globals[name] = (window as unknown as Record<string, unknown>)[name]
+  }
+  if (Object.keys(computedStyleOverrides).length > 0) {
+    const nativeGetComputedStyle = window.getComputedStyle.bind(window)
+    globals.getComputedStyle = (element: Element) => {
+      const style = nativeGetComputedStyle(element)
+      for (const [key, value] of Object.entries(computedStyleOverrides)) {
+        Object.defineProperty(style, key, { value, configurable: true })
+      }
+      return style
+    }
   }
   ;(window as unknown as Record<string, unknown>).__RAIN_VISUAL_PROBE_CONFIG__ = config
   globals.__RAIN_VISUAL_PROBE_CONFIG__ = config
@@ -364,6 +440,39 @@ async function armProbeInJsdom(html: string, config: unknown, probeSource: strin
 }
 
 const probeScript = extractProbeScript()
+
+describe('探针运行期：圆角 diagnostic 必须保留 raw 双值并标出命中来源', () => {
+  const config = {
+    specs: [{ id: 'radius-1', vc: 'VC-15', criterion: 'radiusLadder', page: 'video-list', selector: '#radius', description: 'radius diagnostic' }],
+    accentSweeps: [],
+    tolerance: { contrastRatio: 0.05, colorChannel: 1 },
+    toleranceBasis: 'visual-contract.md',
+  }
+
+  it('longhand 有值时记录 raw 双值，selectedSource=borderTopLeftRadius', async () => {
+    const armed = await armProbeInJsdom(
+      '<button id="radius" style="border-radius:8px">x</button>',
+      config,
+      probeScript,
+      { borderTopLeftRadius: '12px', borderRadius: '8px' },
+    )
+    const record = (armed.results?.[0] ?? {}) as Record<string, any>
+    expect(record.styleDiagnostic?.raw).toEqual({ borderTopLeftRadius: '12px', borderRadius: '8px' })
+    expect(record.styleDiagnostic?.selectedSource).toBe('borderTopLeftRadius')
+  })
+
+  it('longhand 为空时仍记录 raw 双值，selectedSource=borderRadius（真实 fallback 可辨）', async () => {
+    const armed = await armProbeInJsdom(
+      '<button id="radius" style="border-radius:8px">x</button>',
+      config,
+      probeScript,
+      { borderTopLeftRadius: '', borderRadius: '8px' },
+    )
+    const record = (armed.results?.[0] ?? {}) as Record<string, any>
+    expect(record.styleDiagnostic?.raw).toEqual({ borderTopLeftRadius: '', borderRadius: '8px' })
+    expect(record.styleDiagnostic?.selectedSource).toBe('borderRadius')
+  })
+})
 
 /**
  * 把探针放进一个**子进程**的 jsdom 里跑，返回它最终发布的对象。

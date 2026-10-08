@@ -24,6 +24,7 @@ on:
       - 'scripts/visual-collector-runtime-paths.test.ts'
       - 'scripts/visual-collector-selfcheck.test.ts'
       - 'scripts/visual-style-contract-alignment.test.ts'
+      - 'scripts/visual-workflow-binding.test.ts'
       - 'scripts/support/arm-probe-child.mjs'
       - 'docs/development/visual-contract.md'
       # S8 新增：把**真实探针**放进 jsdom 跑并裁判记录形状的判据与它的支撑模块。
@@ -56,6 +57,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve_target:
+    name: Resolve visual evidence target SHA
+    runs-on: windows-2025
+    outputs:
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
+    steps:
+      - name: Resolve and validate target SHA
+        id: resolve
+        shell: pwsh
+        env:
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
+          EVENT_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $target = [string]$env:INPUT_TARGET_SHA
+          if ([string]::IsNullOrWhiteSpace($target)) { $target = [string]$env:EVENT_TARGET_SHA }
+          $target = $target.Trim().ToLowerInvariant()
+          if ($target -notmatch '^[0-9a-f]{40}$') {
+            throw "Visual evidence target must resolve to one full 40-character commit SHA; observed '$target'."
+          }
+          "target_sha=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
   # 轻量门禁：不需要真实桌面，**每次** PR 都跑。这是「通道脚本本身是否还能用」的默认门禁。
   channel:
     name: Visual evidence channel gate (no desktop needed)
@@ -78,6 +100,9 @@ jobs:
 
       - name: Validate the visual evidence validator (unit tests, real numbers)
         run: npx vitest run scripts/validate-visual-evidence.test.ts
+
+      - name: Validate collector and workflow regression tests
+        run: npx vitest run scripts/visual-collector-runtime-paths.test.ts scripts/visual-collector-selfcheck.test.ts scripts/visual-style-contract-alignment.test.ts scripts/visual-workflow-binding.test.ts
 
       - name: Gate the collector scripts themselves
         shell: pwsh
@@ -120,7 +145,7 @@ jobs:
   # 真实的桌面运行由 dispatch 或仓库变量触发。
   collect:
     name: Hosted Windows Visual Evidence Collection
-    needs: channel
+    needs: [channel, resolve_target]
     runs-on: windows-2025
     timeout-minutes: 60
     if: ${{ github.event_name == 'workflow_dispatch' || vars.RAIN_RUN_VISUAL_EVIDENCE == '1' }}
@@ -132,10 +157,25 @@ jobs:
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9222 --enable-features=msEdgeDevToolsWdpRemoteDebugging --disable-gpu --no-sandbox --disable-dev-shm-usage
 
     steps:
-      - name: Check out repository
+      - name: Check out resolved target commit
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ needs.resolve_target.outputs.target_sha }}
+
+      - name: Verify checkout HEAD matches resolved target before build
+        shell: pwsh
+        env:
+          RAIN_VISUAL_TARGET_SHA: ${{ needs.resolve_target.outputs.target_sha }}
+        run: |
+          $expected = [string]$env:RAIN_VISUAL_TARGET_SHA
+          $actual = [string](& git rev-parse HEAD)
+          if ($LASTEXITCODE -ne 0) { throw "git rev-parse HEAD failed with exit code $LASTEXITCODE" }
+          $actual = $actual.Trim().ToLowerInvariant()
+          if ($actual -cne $expected) {
+            throw "Visual evidence checkout mismatch before build: resolved target '$expected', checkout HEAD '$actual'."
+          }
+          Write-Output "Verified visual evidence checkout HEAD: $actual"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -222,33 +262,77 @@ jobs:
         run: npm ci
 
       - name: Collect real desktop visual evidence
+        id: collect
         shell: pwsh
         env:
+          RAIN_VISUAL_TARGET_SHA: ${{ needs.resolve_target.outputs.target_sha }}
           # 只在显式打开诊断输入时置 1；默认（false）与既有行为逐字节一致。
           # 诊断产物写在 evidence/<包>/diagnostic/ 下，**不入库、不作 §3.4 证据**，
           # 也不参与下面的校验器判定（校验器只看 records/manifest/screenshots）。
           RAIN_VISUAL_DIAGNOSTIC: ${{ inputs.diagnostic && '1' || '0' }}
         run: |
-          $target = '${{ inputs.target_sha }}'
-          if ([string]::IsNullOrWhiteSpace($target)) { $target = $env:GITHUB_SHA }
+          $target = $env:RAIN_VISUAL_TARGET_SHA
           if ($env:RAIN_VISUAL_DIAGNOSTIC -eq '1') {
             Write-Output '::warning::Visual evidence run is in DIAGNOSTIC mode: style key-state dumps will be produced. They are diagnostic only - not evidence, not to be committed, and they do not take part in the §3.4 verdict.'
           }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/campaign-visual-evidence.ps1 -TargetSha $target
+          if ($LASTEXITCODE -ne 0) { throw "Visual evidence collector failed with exit code $LASTEXITCODE" }
+
+      - name: Validate diagnostic dump count and raw source fields
+        if: ${{ inputs.diagnostic }}
+        shell: pwsh
+        env:
+          CURRENT_EVIDENCE_PACKAGE: ${{ steps.collect.outputs.package_path }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CURRENT_EVIDENCE_PACKAGE)) { throw 'No current package was produced by this run.' }
+          $package = Get-Item -LiteralPath $env:CURRENT_EVIDENCE_PACKAGE
+          $manifestPath = Join-Path $package.FullName 'manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Diagnostic mode produced no manifest.json.' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $elementRecordCount = 0
+          foreach ($reference in @($manifest.records)) {
+            $recordPath = Join-Path $package.FullName ([string]$reference.file)
+            $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+            if ([string]$record.measurementScope -eq 'element') { $elementRecordCount += 1 }
+          }
+          $diagnosticDir = Join-Path $package.FullName 'diagnostic'
+          $dumps = @(Get-ChildItem -LiteralPath $diagnosticDir -File -Filter '*.style-dump.json' -ErrorAction Stop)
+          if ($dumps.Count -ne $elementRecordCount) {
+            throw "Diagnostic dump count mismatch: dumps=$($dumps.Count), element records=$elementRecordCount."
+          }
+          foreach ($dumpFile in $dumps) {
+            $dump = Get-Content -LiteralPath $dumpFile.FullName -Raw | ConvertFrom-Json
+            if ($null -eq $dump.PSObject.Properties['raw']) { throw "$($dumpFile.Name) is missing raw." }
+            if ($null -eq $dump.raw.PSObject.Properties['borderTopLeftRadius']) { throw "$($dumpFile.Name) is missing raw.borderTopLeftRadius." }
+            if ($null -eq $dump.raw.PSObject.Properties['borderRadius']) { throw "$($dumpFile.Name) is missing raw.borderRadius." }
+            if ($null -eq $dump.PSObject.Properties['selectedSource']) { throw "$($dumpFile.Name) is missing selectedSource." }
+            if ([string]$dump.selectedSource -notin @('borderTopLeftRadius', 'borderRadius', 'none')) {
+              throw "$($dumpFile.Name) has invalid selectedSource '$($dump.selectedSource)'."
+            }
+          }
+          Write-Output "Validated $($dumps.Count) diagnostic style dump(s)."
 
       - name: Validate the collected evidence package against visual-contract §3.4
         shell: pwsh
+        env:
+          CURRENT_EVIDENCE_PACKAGE: ${{ steps.collect.outputs.package_path }}
         run: |
-          $package = Get-ChildItem -Path evidence -Directory -Filter 'visual-*' | Sort-Object Name -Descending | Select-Object -First 1
-          if (-not $package) { throw 'No visual evidence package was produced.' }
+          if ([string]::IsNullOrWhiteSpace($env:CURRENT_EVIDENCE_PACKAGE)) { throw 'No current package was produced by this run.' }
+          $package = Get-Item -LiteralPath $env:CURRENT_EVIDENCE_PACKAGE
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate-visual-evidence.ps1 -EvidenceRoot $package.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Visual evidence validator failed with exit code $LASTEXITCODE" }
 
       - name: Write job summary
         if: always()
         shell: pwsh
+        env:
+          CURRENT_EVIDENCE_PACKAGE: ${{ steps.collect.outputs.package_path }}
         run: |
           $summaryPath = $env:GITHUB_STEP_SUMMARY
-          $packages = @(Get-ChildItem -Path evidence -Directory -Filter 'visual-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+          $packages = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:CURRENT_EVIDENCE_PACKAGE)) {
+            $packages = @(Get-Item -LiteralPath $env:CURRENT_EVIDENCE_PACKAGE -ErrorAction SilentlyContinue)
+          }
           $lines = @()
           $lines += '# Visual evidence collection (§3.4 items 1-3 only)'
           $lines += ''
@@ -292,13 +376,11 @@ jobs:
           $lines | Out-File -FilePath $summaryPath -Encoding utf8 -Append
 
       - name: Upload visual evidence package
-        if: always()
+        if: ${{ always() && steps.collect.outputs.package_path != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: visual-evidence
-          # 上传整个 evidence 目录（而不是只 evidence/visual-*）：失败时包目录里会有
-          # failure.json（含阶段、异常原文、环境事实与 driver 日志尾部），那是判断
-          # "驱动为什么拉不起会话"的第一现场——前两次失败正因为这里只传目录、把诊断丢了。
-          path: evidence/**
+          # 仅上传本次包；包内 failure.json 与 diagnostic/ 仍可供排障。
+          path: ${{ steps.collect.outputs.package_path }}
           if-no-files-found: warn
           retention-days: 30

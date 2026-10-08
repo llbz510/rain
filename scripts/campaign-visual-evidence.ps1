@@ -398,7 +398,14 @@ function measure(spec) {
   // 并且**不再在浏览器层 throw**：单个元素的问题不得摧毁整页探针。记录级由采集器的
   // `Assert-ComputedStyleKeys` / `Assert-ComputedStyleValues` 兜底，页级由探针主循环的
   // 逐元素 catch 兜底（写成 missing 记录并把原因带上）。
-  const borderRadiusRaw = live.borderTopLeftRadius || live.borderRadius || '';
+  const rawBorderTopLeftRadius = String(live.borderTopLeftRadius || '');
+  const rawBorderRadius = String(live.borderRadius || '');
+  const selectedSource = rawBorderTopLeftRadius.length > 0
+    ? 'borderTopLeftRadius'
+    : (rawBorderRadius.length > 0 ? 'borderRadius' : 'none');
+  const borderRadiusRaw = selectedSource === 'borderTopLeftRadius'
+    ? rawBorderTopLeftRadius
+    : (selectedSource === 'borderRadius' ? rawBorderRadius : '');
   const borderRadiusPx = parseFloat(borderRadiusRaw);
   const borderRadiusText = Number.isFinite(borderRadiusPx) ? `${borderRadiusPx}px` : null;
   const style = {
@@ -524,6 +531,13 @@ function measure(spec) {
     selector: spec.selector,
     description: spec.description || '',
     missing: false,
+    styleDiagnostic: {
+      raw: {
+        borderTopLeftRadius: rawBorderTopLeftRadius,
+        borderRadius: rawBorderRadius,
+      },
+      selectedSource: selectedSource,
+    },
     rect: {
       x: rect.x, y: rect.y, width: rect.width, height: rect.height,
       top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left,
@@ -553,7 +567,7 @@ function measure(spec) {
       outlineStyle: style.outlineStyle,
       outlineWidth: style.outlineWidth,
       // 与 derived.borderRadiusPx **同源同义**：都来自上面那一次 `live.borderTopLeftRadius` 读取，
-      // 写法统一为 `<n>px`。此处不再直读计算样式——那条读法在托管上被证明会丢键。
+      // 写法统一为 `<n>px`。此处不再直读计算样式——jsdom 已观测长格式为空；真实 WebView2 是否触发回退需 raw 读数确认。
       borderRadius: borderRadiusText,
       paddingTop: style.paddingTop,
       paddingRight: style.paddingRight,
@@ -821,6 +835,21 @@ function Require-Command([string]$Name, [string]$InstallHint) {
   return $command.Source
 }
 
+function Assert-TargetShaMatchesHead([string]$ExpectedSha, [string]$RepositoryRoot) {
+  $actualSha = [string](& git -C $RepositoryRoot rev-parse HEAD 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    throw ("Could not resolve checkout HEAD before visual evidence collection: " + $actualSha.Trim())
+  }
+  $actualSha = $actualSha.Trim().ToLowerInvariant()
+  if ($actualSha -notmatch '^[0-9a-f]{40}$') {
+    throw "git rev-parse HEAD returned an invalid commit sha: '$actualSha'"
+  }
+  if ($actualSha -cne $ExpectedSha) {
+    throw "Visual evidence target SHA mismatch before package creation/build: input target sha '$ExpectedSha' does not equal checkout HEAD '$actualSha'."
+  }
+  return $actualSha
+}
+
 # ---------------------------------------------------------------------------
 # 记录 computedStyle 的**契约键集合** + 采集器自检（fail-closed）。
 #
@@ -891,32 +920,40 @@ function Assert-ComputedStyleValues($Style, $ContractKeys, [string]$Where) {
 
 # 诊断用 dump（默认关闭）：把 style 中间对象的键状态逐项打印，回答"为什么同一数据、
 # 两种读法只有一种活下来"。**只作诊断，不构成 §3.4 证据、不入库**。
-function Write-StyleDiagnosticDump($Style, [string]$RecordsDir, [string]$ProbeId) {
+function Write-StyleDiagnosticDump($Diagnostic, [string]$RecordsDir, [string]$ProbeId) {
   if ($env:RAIN_VISUAL_DIAGNOSTIC -ne '1') { return }
   try {
-    $dir = Join-Path (Split-Path -Parent $RecordsDir) 'diagnostic'
-    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-    $state = [ordered]@{}
-    foreach ($key in @('borderRadius', 'borderTopLeftRadius')) {
-      $value = if ($null -ne $Style -and $null -ne $Style.PSObject.Properties[$key]) { $Style.PSObject.Properties[$key].Value } else { $null }
-      $state[$key] = @{
-        present = ($null -ne $Style -and $null -ne $Style.PSObject.Properties[$key])
-        valueType = if ($null -eq $value) { 'null' } else { $value.GetType().Name }
-        value = if ($null -eq $value) { '<null>' } else { [string]$value }
+    if ($null -eq $Diagnostic -or $null -eq $Diagnostic.PSObject.Properties['raw']) {
+      throw 'browser-side styleDiagnostic.raw is missing'
+    }
+    $raw = $Diagnostic.PSObject.Properties['raw'].Value
+    foreach ($key in @('borderTopLeftRadius', 'borderRadius')) {
+      if ($null -eq $raw -or $null -eq $raw.PSObject.Properties[$key]) {
+        throw ("browser-side styleDiagnostic.raw.$key is missing")
       }
     }
+    if ($null -eq $Diagnostic.PSObject.Properties['selectedSource']) {
+      throw 'browser-side styleDiagnostic.selectedSource is missing'
+    }
+    $selectedSource = [string]$Diagnostic.PSObject.Properties['selectedSource'].Value
+    if ($selectedSource -notin @('borderTopLeftRadius', 'borderRadius', 'none')) {
+      throw ("browser-side styleDiagnostic.selectedSource is invalid: '$selectedSource'")
+    }
+    $dir = Join-Path (Split-Path -Parent $RecordsDir) 'diagnostic'
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     $dump = @{
       probeId = $ProbeId
       note = 'diagnostic only：不构成 §3.4 证据、不入库、不判任何 VC-xx'
-      styleKeyCount = if ($null -eq $Style) { 0 } else { @($Style.PSObject.Properties).Count }
-      styleKeyNames = if ($null -eq $Style) { @() } else { @($Style.PSObject.Properties | ForEach-Object { $_.Name }) }
-      tracked = $state
+      raw = [ordered]@{
+        borderTopLeftRadius = [string]$raw.PSObject.Properties['borderTopLeftRadius'].Value
+        borderRadius = [string]$raw.PSObject.Properties['borderRadius'].Value
+      }
+      selectedSource = $selectedSource
     }
     $path = Join-Path $dir ($ProbeId + '.style-dump.json')
     [System.IO.File]::WriteAllText($path, (ConvertTo-Json -InputObject $dump -Depth 12), [System.Text.UTF8Encoding]::new($false))
   } catch {
-    # 诊断本身绝不影响采集
-    Write-Warning ('style diagnostic dump failed: ' + $_.Exception.Message)
+    throw ('style diagnostic dump failed: ' + $_.Exception.Message)
   }
 }
 
@@ -1110,7 +1147,7 @@ function Write-ProbeRecords($Probe, [string]$RecordsDir, $ScreenshotRefs, [strin
     # **顺序很重要（2026-10-08，t6）**：dump 必须在断言**之前**落盘。
     # 否则"键消失/值为空"的那一次恰恰会在断言处抛错、dump 永远不执行——
     # 诊断工具在唯一需要它的场景下缺席。
-    Write-StyleDiagnosticDump $result.computedStyle $RecordsDir ([string]$result.probeId)
+    Write-StyleDiagnosticDump $result.styleDiagnostic $RecordsDir ([string]$result.probeId)
     # 写盘之前按**契约键集合**自检（fail-closed，逐个点名缺/多），
     # 让这类"运行期少键"的问题在采集当场暴露，而不是等到自校验阶段（一轮 12 分钟）才发现。
     Assert-ComputedStyleKeys @($result.computedStyle.PSObject.Properties | ForEach-Object { $_.Name }) $script:ComputedStyleContractKeys ("element 记录 '" + [string]$result.probeId + "'")
@@ -1438,6 +1475,7 @@ try {
   }
   $TargetSha = $TargetSha.ToLowerInvariant()
   if ($TargetSha -notmatch '^[0-9a-f]{40}$') { throw "TargetSha must be a full 40-char lowercase hex commit sha; observed '$TargetSha'" }
+  $null = Assert-TargetShaMatchesHead $TargetSha $repoRoot
   $shortSha = $TargetSha.Substring(0, 8)
   $deferredList = ($deferredDimensions -join '；')
 
@@ -1447,6 +1485,9 @@ try {
   $screenshotsDir = Join-Path $packageRoot 'screenshots'
   New-Item -ItemType Directory -Path $recordsDir, $screenshotsDir -Force | Out-Null
   Write-Output "visual evidence package: $packageRoot"
+  if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) {
+    [IO.File]::AppendAllText($env:GITHUB_OUTPUT, ("package_path=$packageRoot" + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+  }
 
   $tauriDriver = Require-Command 'tauri-driver' 'Install with: cargo install tauri-driver --locked'
   $edgeDriver = Require-Command 'msedgedriver' 'Install a Microsoft Edge driver matching the local WebView2 runtime.'

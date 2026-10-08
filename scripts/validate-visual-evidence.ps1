@@ -100,6 +100,57 @@ function Throw-IfFailed {
   throw ($lines -join ([Environment]::NewLine))
 }
 
+function Resolve-EvidencePackageFilePath(
+  [string]$EvidenceDir,
+  [string]$ManifestPath,
+  [string]$Kind,
+  [string]$Where
+) {
+  if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
+    Add-Failure ($Where + '：包内路径为空')
+    return $null
+  }
+  if ([System.IO.Path]::IsPathRooted($ManifestPath)) {
+    Add-Failure ($Where + "：绝对路径不允许出现在 evidence package manifest：'$ManifestPath'")
+    return $null
+  }
+
+  $requiredPattern = if ($Kind -eq 'screenshot') { '(?i)^screenshots/[^/\\]+\.png$' } else { '(?i)^records/[^/\\]+\.json$' }
+  $requiredShape = if ($Kind -eq 'screenshot') { 'screenshots/*.png' } else { 'records/*.json' }
+  if ($ManifestPath -notmatch $requiredPattern) {
+    Add-Failure ($Where + "：路径 '$ManifestPath' 不符合唯一允许的包内形状 $requiredShape（只允许直接子文件，不允许 ../、反斜杠或嵌套目录）")
+    return $null
+  }
+
+  $root = [System.IO.Path]::GetFullPath($EvidenceDir).TrimEnd([char[]]@('\', '/'))
+  $candidate = $null
+  try {
+    $candidate = [System.IO.Path]::GetFullPath((Join-Path $root $ManifestPath))
+  } catch {
+    Add-Failure ($Where + "：路径 '$ManifestPath' 无法规范化：" + $_.Exception.Message)
+    return $null
+  }
+  $rootPrefix = $root + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $candidate.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    Add-Failure ($Where + "：路径 '$ManifestPath' 规范化后逃逸 evidence package root '$root'")
+    return $null
+  }
+
+  # 词法 containment 不足以拦 junction/symlink：逐段拒绝 reparse point，防止一个看似合法的
+  # screenshots/foo.png 或 records/foo.json 实际解析到包根之外。
+  $current = $root
+  foreach ($segment in @($ManifestPath -split '/')) {
+    $current = Join-Path $current $segment
+    if (-not (Test-Path -LiteralPath $current)) { continue }
+    $item = Get-Item -LiteralPath $current -Force
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+      Add-Failure ($Where + "：路径 '$ManifestPath' 穿过 symbolic-link/junction reparse-point '$current'；证据文件必须物理位于包根内")
+      return $null
+    }
+  }
+  return $candidate
+}
+
 #region 颜色与对比度数学（复算基底）
 
 function ConvertTo-Rgb8([string]$Token) {
@@ -1089,7 +1140,8 @@ function Assert-SharedRecordFields($Record, $ScreenshotNames, [string]$EvidenceD
       if ($ScreenshotNames -notcontains $shotName) {
         Add-Failure ($Where + "：引用的截图 '" + $shotName + "' 不在本包的截图清单里")
       }
-      Assert-PngFile (Join-Path $EvidenceDir $shotName) ($Where + '.screenshots') | Out-Null
+      $shotPath = Resolve-EvidencePackageFilePath $EvidenceDir $shotName 'screenshot' ($Where + '.screenshots')
+      if ($null -ne $shotPath) { Assert-PngFile $shotPath ($Where + '.screenshots') | Out-Null }
     }
   }
   $viewport = Get-JsonProperty $Record 'sampledViewport'
@@ -1477,7 +1529,9 @@ function Assert-EvidencePackage([string]$EvidenceDir) {
         Add-Failure ($where + "：screenshots 重复列出 '" + $name + "'")
         continue
       }
-      $file = Assert-PngFile (Join-Path $EvidenceDir $name) ($where + '.screenshots')
+      $screenshotPath = Resolve-EvidencePackageFilePath $EvidenceDir $name 'screenshot' ($where + '.screenshots')
+      if ($null -eq $screenshotPath) { continue }
+      $file = Assert-PngFile $screenshotPath ($where + '.screenshots')
       if ($null -ne $file) {
         $screenshotNames += $name
         $screenshotBytes += [int]$file.bytes
@@ -1517,7 +1571,8 @@ function Assert-EvidencePackage([string]$EvidenceDir) {
         Add-Failure ($where + '：records 条目缺少 file')
         continue
       }
-      $recordPath = Join-Path $EvidenceDir $recordFile
+      $recordPath = Resolve-EvidencePackageFilePath $EvidenceDir $recordFile 'record' ($where + '.records')
+      if ($null -eq $recordPath) { continue }
       if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf)) {
         Add-Failure ($where + '：实测记录文件不存在：' + $recordFile)
         continue

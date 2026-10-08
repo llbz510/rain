@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -543,6 +543,137 @@ describe('visual evidence validator: well-formed package', () => {
     expect(result.stderr, `validator stderr: ${result.stderr}`).toBe('')
     expect(result.status, `validator stdout: ${result.stdout}${result.stderr}`).toBe(0)
     expect(result.stdout).toMatch(/VISUAL_EVIDENCE_VALID/)
+  })
+})
+
+describe('visual evidence validator: package path containment', () => {
+  it('rejects a ../ screenshot even when the outside PNG is valid', { timeout: powershellTimeoutMs }, async () => {
+    const dir = createPackage()
+    const outsideName = 'outside.png'
+    writeFileSync(join(dirname(dir), outsideName), pngBytes)
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    const recordPath = join(dir, manifest.records[0].file)
+    const record = JSON.parse(readFileSync(recordPath, 'utf8')) as Record<string, any>
+    manifest.screenshots = [`../${outsideName}`]
+    record.screenshots = [`../${outsideName}`]
+    writeJson(manifestPath, manifest)
+    writeJson(recordPath, record)
+
+    const result = await runValidator(['-EvidenceRoot', dir])
+    expect(result.status, '包外有效 PNG 也必须被拒绝').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/screenshots\/\*\.png|包根|package root|逃逸/i)
+  })
+
+  it('rejects an absolute screenshot path explicitly', { timeout: powershellTimeoutMs }, async () => {
+    const dir = createPackage()
+    const outsidePath = join(dirname(dir), 'absolute-outside.png')
+    writeFileSync(outsidePath, pngBytes)
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    const recordPath = join(dir, manifest.records[0].file)
+    const record = JSON.parse(readFileSync(recordPath, 'utf8')) as Record<string, any>
+    manifest.screenshots = [outsidePath]
+    record.screenshots = [outsidePath]
+    writeJson(manifestPath, manifest)
+    writeJson(recordPath, record)
+
+    const result = await runValidator(['-EvidenceRoot', dir])
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/absolute|绝对|screenshots\/\*\.png|包根|package root/i)
+  })
+
+  it('rejects a ../ record even when the outside JSON is valid', { timeout: powershellTimeoutMs }, async () => {
+    const dir = createPackage()
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    const insideRecordPath = join(dir, manifest.records[0].file)
+    const outsideRecordPath = join(dirname(dir), 'outside-record.json')
+    writeFileSync(outsideRecordPath, readFileSync(insideRecordPath))
+    manifest.records[0].file = '../outside-record.json'
+    writeJson(manifestPath, manifest)
+
+    const result = await runValidator(['-EvidenceRoot', dir])
+    expect(result.status, '包外有效 JSON 也必须被拒绝').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/records\/\*\.json|包根|package root|逃逸/i)
+  })
+
+  it('rejects an absolute record path explicitly', { timeout: powershellTimeoutMs }, async () => {
+    const dir = createPackage()
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    const insideRecordPath = join(dir, manifest.records[0].file)
+    const outsideRecordPath = join(dirname(dir), 'absolute-record.json')
+    writeFileSync(outsideRecordPath, readFileSync(insideRecordPath))
+    manifest.records[0].file = outsideRecordPath
+    writeJson(manifestPath, manifest)
+
+    const result = await runValidator(['-EvidenceRoot', dir])
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/absolute|绝对|records\/\*\.json|包根|package root/i)
+  })
+
+  it('rejects files placed in the wrong package subdirectories', { timeout: powershellTimeoutMs }, async () => {
+    const dir = createPackage()
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    const originalRecordPath = join(dir, manifest.records[0].file)
+    const wrongScreenshot = 'records/not-a-screenshot-location.png'
+    const wrongRecord = 'screenshots/not-a-record-location.json'
+    writeFileSync(join(dir, wrongScreenshot), pngBytes)
+    writeFileSync(join(dir, wrongRecord), readFileSync(originalRecordPath))
+    manifest.screenshots = [wrongScreenshot]
+    manifest.records[0].file = wrongRecord
+    const record = JSON.parse(readFileSync(originalRecordPath, 'utf8')) as Record<string, any>
+    record.screenshots = [wrongScreenshot]
+    writeJson(join(dir, wrongRecord), record)
+    writeJson(manifestPath, manifest)
+
+    const result = await runValidator(['-EvidenceRoot', dir])
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/screenshots\/\*\.png|records\/\*\.json/i)
+  })
+
+  it('rejects nested files because the contract allows only direct screenshots/*.png and records/*.json children', { timeout: powershellTimeoutMs }, async () => {
+    const dir = createPackage()
+    const manifestPath = join(dir, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
+    const originalRecordPath = join(dir, manifest.records[0].file)
+    const nestedScreenshot = 'screenshots/nested/shot.png'
+    const nestedRecord = 'records/nested/record.json'
+    mkdirSync(dirname(join(dir, nestedScreenshot)), { recursive: true })
+    mkdirSync(dirname(join(dir, nestedRecord)), { recursive: true })
+    writeFileSync(join(dir, nestedScreenshot), pngBytes)
+    writeFileSync(join(dir, nestedRecord), readFileSync(originalRecordPath))
+    manifest.screenshots = [nestedScreenshot]
+    manifest.records[0].file = nestedRecord
+    const record = JSON.parse(readFileSync(originalRecordPath, 'utf8')) as Record<string, any>
+    record.screenshots = [nestedScreenshot]
+    writeJson(join(dir, nestedRecord), record)
+    writeJson(manifestPath, manifest)
+
+    const result = await runValidator(['-EvidenceRoot', dir])
+    expect(result.status).not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/screenshots\/\*\.png|records\/\*\.json/i)
+  })
+
+  it('rejects junction escapes behind otherwise legal screenshots/*.png and records/*.json paths', { timeout: powershellTimeoutMs }, async () => {
+    const dir = createPackage()
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Record<string, any>
+    const screenshotPath = join(dir, manifest.screenshots[0])
+    const recordPath = join(dir, manifest.records[0].file)
+    const outsideScreenshots = mkdtempSync(join(tmpdir(), 'rain-outside-shots-'))
+    const outsideRecords = mkdtempSync(join(tmpdir(), 'rain-outside-records-'))
+    writeFileSync(join(outsideScreenshots, '01-video-list.png'), readFileSync(screenshotPath))
+    writeFileSync(join(outsideRecords, `${manifest.records[0].recordId}.json`), readFileSync(recordPath))
+    rmSync(join(dir, 'screenshots'), { recursive: true, force: true })
+    rmSync(join(dir, 'records'), { recursive: true, force: true })
+    symlinkSync(outsideScreenshots, join(dir, 'screenshots'), 'junction')
+    symlinkSync(outsideRecords, join(dir, 'records'), 'junction')
+
+    const result = await runValidator(['-EvidenceRoot', dir])
+    expect(result.status, '合法相对路径背后的 reparse-point 逃逸也必须失败').not.toBe(0)
+    expect(`${result.stdout}${result.stderr}`).toMatch(/symbolic|symlink|junction|reparse|符号链接|重解析/i)
   })
 })
 
