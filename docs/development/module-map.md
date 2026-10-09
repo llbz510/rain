@@ -251,7 +251,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | `AC-VL-01..04/07` | 生产 App/`VideoListPage` composition、`VideoCard`、公共 Database video query interface | 页面组合查询与显式动作；完整组合 Judge 贯通真实 Controller/Pipeline/数据库，受控 URL 的本地媒体由 ASR owner 消费；不复制流程规则，视觉与业务行为分层裁判 |
 | `AC-VL-05` | Rust `thumbnail_lifecycle` deep module + 现有数据库删除 workflow | 只处理合法 ID 推导的 app-owned `thumbnails/` target；先 commit、后由 blocking handle-based filesystem owner 删除，Windows 必须核验 opened target 的 resolved path，永不接受任意用户路径 |
 | `AC-VL-06` | 同一 Rust thumbnail lifecycle deep module + keep-set/GC workflow | keep-set 只来自真实 `video` 行；只扫描受控 `thumbnails/` 目录并复用既有 path validation，非法或越界条目一律保留；每轮有候选上限与失败上限，拿不到 keep-set 或受控目录不可用一律不删，进程内不得重入，正在导入的新近缩略图由保护窗口保护；不得把扫描放回页面或 command adapter |
-| `AC-SU-01..07` | `StudyInterface` composition、`src/study/` navigation/session、catalog、VideoZone、shortcut/focus policy、layout persistence | 页面保持组合入口；播放/选择/预览/面板焦点使用共享事实，不在组件间复制快捷键或持久状态 |
+| `AC-SU-01..07` | `StudyInterface` composition、`src/study/` navigation/session、catalog、VideoZone、shortcut/focus policy、`src/study/layout-proportions.ts` 公共 settings 持久化 | 页面保持组合入口；播放/选择/预览/面板焦点使用共享事实，不在组件间复制快捷键或持久状态 |
 | `AC-UX-01..06` | `src/index.css` token system、生产组件、visual/accessibility policy | CSS token 是唯一视觉事实源；完整页面 visual/keyboard/axe/contrast Judge 不由 token 存在自证 |
 | `AC-PF-01..05` | 独立 performance/soak runners + 对应 startup/List/Study/progress/App lifecycle Owner | runner 只测量，不成为生产 Owner；冻结机器、fixture、样本数、p95、资源斜率和退出残留必须写入 Evidence |
 | `AC-AR-02` | `src/llm/` 和角色 request workflows | 所有 OpenAI-compatible LLM 请求留在前端 adapter；Rust command 精确集合不得出现 LLM HTTP 边界 |

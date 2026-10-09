@@ -44,6 +44,7 @@ export function getVisibility(mode: LayoutMode): ZoneVisibility {
         videoZone: false,
         controlBar: true,
         catalogBar: false,
+        textZone: false,
         diagramZone: true,
         textPreview: true,
       }

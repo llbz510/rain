@@ -1,8 +1,7 @@
 // src/pages/StudyInterface.tsx
 // ========================================
 // M16 三模式学习界面（Task 5 组装）
-// 布局：CSS Grid 三列（左树 200px / 中间区 1fr / 右面板 320px）
-//       三行（顶栏 40px / 中间区 1fr / 控制栏 40px〔--height-controlbar〕或 0）
+// 布局：可调三列；中间列包含目录、视觉区、控制栏与文本。
 // 区域显隐完全由 src/ui/layout.ts 的 getVisibility(layoutMode) 决定。
 //   follow     → videoZone + textZone + catalogBar + sideTree + rightPanel
 //   textExpand → controlBar + textZone + catalogBar + sideTree + rightPanel
@@ -27,12 +26,11 @@ import { recordPlaybackProgress } from '@/study/session'
 import { createFreeNote, createParagraphExcerpt, saveNoteContent } from '@/study/notes'
 import { useStudyShortcutController } from '@/study/shortcut-controller'
 import { activeStudyMediaActions } from '@/study/media-session'
+import { useStudyProportions } from '@/study/layout-proportions'
+import { LayoutSeparator } from '@/ui/components/layout-separator'
 
 const rootStyle: React.CSSProperties = {
   display: 'grid',
-  // 列：左树 / 中间 / 右面板（sideTree + rightPanel 在所有模式下恒显）
-  gridTemplateColumns:
-    'var(--side-tree-width, 200px) 1fr var(--right-panel-width, 320px)',
   background: 'var(--color-bg)',
   color: 'var(--color-fg)',
   height: '100vh',
@@ -76,18 +74,18 @@ const titleStyle: React.CSSProperties = {
 const sideTreeStyle: React.CSSProperties = {
   gridColumn: '1',
   gridRow: '2',
+  minWidth: 0,
   overflow: 'auto',
   background: 'var(--color-surface)',
   borderRight: '1px solid var(--color-border)',
   padding: 'var(--spacing-2)',
 }
 
-// 中间区：纵向 flex，按可见性堆叠 videoZone / catalogBar / textZone / diagramZone / textPreview
+// 中间区：固定目录高度，视觉区（含控制栏）与文本使用持久比例。
 const middleStyle: React.CSSProperties = {
-  gridColumn: '2',
+  gridColumn: '3',
   gridRow: '2',
-  display: 'flex',
-  flexDirection: 'column',
+  display: 'grid',
   minWidth: 0,
   minHeight: 0,
   overflow: 'hidden',
@@ -109,7 +107,7 @@ const hiddenVideoStyle: React.CSSProperties = {
 }
 
 const rightPanelStyle: React.CSSProperties = {
-  gridColumn: '3',
+  gridColumn: '5',
   gridRow: '2',
   display: 'flex',
   flexDirection: 'column',
@@ -181,8 +179,8 @@ const activeAiPanelStyle: React.CSSProperties = {
 }
 
 const controlBarStyle: React.CSSProperties = {
-  gridColumn: '1 / -1',
-  gridRow: '3',
+  flex: '0 0 var(--height-controlbar)',
+  height: 'var(--height-controlbar)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -208,6 +206,11 @@ function currentParagraphType(nodes: Node[], sentences: Sentence[], playPosition
 }
 
 export function StudyInterface() {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const middleRef = useRef<HTMLElement>(null)
+  const catalogRef = useRef<HTMLDivElement>(null)
+  const separatorRef = useRef<HTMLDivElement>(null)
+  const { proportions, ready, saving, error: layoutError, change: changeProportions, save: saveProportions } = useStudyProportions()
   const layoutMode = useRainStore((s) => s.layoutMode)
   const aiPanelState = useRainStore((s) => s.aiPanelState)
   const playPosition = useRainStore((s) => s.playPosition)
@@ -394,15 +397,19 @@ export function StudyInterface() {
 
   const quickParagraphType = currentParagraphType(nodeTree, sentences, playPosition, selectedNodeId)
 
-  // 控制栏隐藏时第 3 行塌缩为 0，避免浪费垂直空间
-  const gridTemplateRows = `var(--height-topbar) 1fr ${
-    visibility.controlBar ? 'var(--height-controlbar)' : '0px'
-  }`
+  const [leftShare, middleShare, rightShare] = proportions.columns
+  const split = layoutMode === 'mapExpand' ? proportions.mapExpand : proportions.follow
+  const middleRows = layoutMode === 'textExpand'
+    ? 'var(--height-catalog) var(--height-controlbar) minmax(0, 1fr)'
+    : `${visibility.catalogBar ? 'var(--height-catalog)' : '0px'} minmax(0, ${split}fr) var(--spacing-1) minmax(0, ${1 - split}fr)`
+  const columnExtent = () => (rootRef.current?.getBoundingClientRect().width ?? 0) - 2 * (separatorRef.current?.getBoundingClientRect().width || 4)
 
   return (
     <div
       data-testid="study-interface"
-      style={{ ...rootStyle, gridTemplateRows }}
+      aria-busy={!ready || saving}
+      ref={rootRef}
+      style={{ ...rootStyle, gridTemplateRows: 'var(--height-topbar) minmax(0, 1fr)', gridTemplateColumns: `${leftShare}fr var(--spacing-1) ${middleShare}fr var(--spacing-1) ${rightShare}fr` }}
     >
       {/* 顶栏：返回 + 标题 */}
       <header style={topbarStyle}>
@@ -410,17 +417,28 @@ export function StudyInterface() {
           ← 返回
         </button>
         <span style={titleStyle}>{videoTitle || '视频'}</span>
+        {layoutError && <span role="alert">{layoutError}</span>}
       </header>
 
       {/* 左树：所有模式恒显 */}
       {visibility.sideTree && (
-        <aside style={sideTreeStyle}>
+        <aside data-testid="study-side-tree" style={sideTreeStyle}>
           <SideTree onNavigateNode={handleNodeNavigate} playPosition={playPosition} />
         </aside>
       )}
+      <div ref={separatorRef} style={{ gridColumn: '2', gridRow: '2', display: 'flex' }}>
+        <LayoutSeparator label="调整目录树宽度" orientation="vertical" value={leftShare} minimum={0.05} maximum={leftShare + middleShare - 0.05} ready={ready} style={{ width: '100%' }} getExtent={columnExtent}
+          onChange={(next) => changeProportions({ ...proportions, columns: [next, leftShare + middleShare - next, rightShare] })} onCommit={saveProportions} />
+      </div>
 
       {/* 中间区：随模式变化 */}
-      <section style={middleStyle}>
+      <section data-testid="study-middle" ref={middleRef} style={{ ...middleStyle, gridTemplateRows: middleRows }}>
+        {visibility.catalogBar && (
+          <div ref={catalogRef} style={{ ...flexAutoStyle, gridRow: '1', height: 'var(--height-catalog)', minWidth: 0 }}>
+            <CatalogBar onSeek={handleSeek} />
+          </div>
+        )}
+        <div data-testid="study-visual-controls" style={{ gridRow: '2', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <div
           data-testid="video-zone-shell"
           aria-hidden={!visibility.videoZone}
@@ -433,23 +451,17 @@ export function StudyInterface() {
             onProgress={handlePlaybackProgress}
           />
         </div>
-        {visibility.catalogBar && (
-          // 目录横条高度 = 决策 76 的「目录横条 80」（`--height-catalog`，与顶栏/控制栏同一套
-          // `--height-*` 固定高度命名）。此前这里没有高度、横条按内容自然高度渲染，
-          // 真实桌面实测 **59.59375px**（= 2 × 23.796875 的行高计算值 + 2 × 6 的行内盒空白），
-          // 比冻结值 80 少 20.40625px（`VC-15`④）。
-          // **高度只落在容器上**：容器 80px、被测的 `data-testid="catalog-bar"` 用 `height:100%`
-          // 撑满它（该根元素的 `display` 仍是 `block`，两条目录行仍是原来的
-          // `shell > scroll row` 结构——**水平布局零改动**）。
-          // 为什么不在 `CatalogBar` 里改：本 Slice 先那么做过，结果把真实桌面判据
-          // 「长目录两行真实横向溢出」由绿改红（paragraph 行 extent 2499.09375 对 ownerWidth 2580，
-          // 差 3.1%；master 基线 run 36665063145 为绿）。改高度不该顺手改行内布局，故撤回。
-          <div style={{ ...flexAutoStyle, height: 'var(--height-catalog)' }}>
-            <CatalogBar onSeek={handleSeek} />
-          </div>
+        {visibility.diagramZone && (
+          <div style={flexFillStyle}><DiagramZone onNavigateNode={handleNodeNavigate} /></div>
         )}
+        <footer style={controlBarStyle}><VideoControls /></footer>
+        </div>
+        {layoutMode !== 'textExpand' && <LayoutSeparator
+          label={layoutMode === 'follow' ? '调整视频与文本比例' : '调整导图与预览比例'} orientation="horizontal" value={split} minimum={0.1} maximum={0.9} ready={ready} style={{ gridRow: '3' }}
+          getExtent={() => (middleRef.current?.getBoundingClientRect().height ?? 0) - (catalogRef.current?.getBoundingClientRect().height ?? 0) - 4}
+          onChange={(next) => changeProportions({ ...proportions, [layoutMode === 'follow' ? 'follow' : 'mapExpand']: next })} onCommit={saveProportions} />}
         {visibility.textZone && (
-          <div style={flexFillStyle}>
+          <div data-testid="study-text-shell" style={{ ...flexFillStyle, gridRow: layoutMode === 'textExpand' ? '3' : '4' }}>
             <TextZone
               onSeek={handleSeek}
               onExcerpt={handleExcerpt}
@@ -457,21 +469,18 @@ export function StudyInterface() {
             />
           </div>
         )}
-        {visibility.diagramZone && (
-          <div style={flexFillStyle}>
-            <DiagramZone onNavigateNode={handleNodeNavigate} />
-          </div>
-        )}
         {visibility.textPreview && (
-          <div style={flexFillStyle}>
+          <div data-testid="study-text-shell" style={{ ...flexFillStyle, gridRow: '4' }}>
             <TextPreview selectedNodeId={selectedNodeId} onSeek={handleSeek} />
           </div>
         )}
       </section>
+      <LayoutSeparator label="调整助手面板宽度" orientation="vertical" value={rightShare} minimum={0.05} maximum={rightShare + middleShare - 0.05} ready={ready} direction={-1} style={{ gridColumn: '4', gridRow: '2' }} getExtent={columnExtent}
+        onChange={(next) => changeProportions({ ...proportions, columns: [leftShare, rightShare + middleShare - next, next] })} onCommit={saveProportions} />
 
       {/* 右侧面板：Tab 切换 AI / 随记 */}
       {visibility.rightPanel && (
-        <aside style={rightPanelStyle}>
+        <aside data-testid="study-right-panel" style={rightPanelStyle}>
           <div style={tabBarStyle}>
             <button
               onClick={() => setAiPanel('ai')}
@@ -507,12 +516,6 @@ export function StudyInterface() {
         </aside>
       )}
 
-      {/* 控制栏：textExpand / mapExpand 模式显示 */}
-      {visibility.controlBar && (
-        <footer style={controlBarStyle}>
-          <VideoControls />
-        </footer>
-      )}
     </div>
   )
 }
