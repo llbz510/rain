@@ -170,7 +170,7 @@ npm run harness:control
 
 ### P3 — 在扩展导入导航前关闭 risk 22 的两个架构债
 
-状态：`Confirmed AC / architecture Gap`；risk 22a/22b 分别由 `AC-AR-05/06` 控制，仍须按两个独立 Slice 实现。
+状态：`AC-AR-05 merged protected PR #95; AC-AR-06 implemented candidate, independent Spec + Standards PASS; Hosted pending`；risk 22a/22b 分别由两条 AC 控制，按独立 Slice 实现；当前事实以 PROJECT_STATE 与 coverage 为准。
 
 按两个独立 Slice 处理，不合并重写：
 

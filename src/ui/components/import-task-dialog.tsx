@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import type { Video } from '@/models/types'
 import type { ImportProgress } from '@/pipeline/video-import-controller'
 import { getImportStatus } from '@/ui/video-list'
+import { getImportProgressView } from '@/ui/import-progress'
 
 interface ImportTaskDialogProps {
   video: Video
@@ -12,10 +13,10 @@ interface ImportTaskDialogProps {
   onCancel: (videoId: string) => void
 }
 
-const liveSubstageLabels: Partial<Record<NonNullable<ImportProgress['detailStage']>, string>> = {
-  asr_extraction: '提取音频',
-  asr_transcription: 'Whisper 转写',
-  asr_finalization: '整理转写结果',
+const liveSubstageLabels: Record<Extract<ImportProgress, { stage: 'asr' }>['substage'], string> = {
+  extraction: '提取音频',
+  transcription: 'Whisper 转写',
+  finalization: '整理转写结果',
 }
 
 const overlayStyle: CSSProperties = {
@@ -90,13 +91,9 @@ export function ImportTaskDialog({
   onCancel,
 }: ImportTaskDialogProps) {
   const titleId = `import-task-title-${video.id}`
-  const visibleVideo: Video = progress
-    ? { ...video, status: 'processing', stage: progress.stage, errorMessage: undefined }
-    : video
-  const status = getImportStatus(visibleVideo, progress?.percent)
-  const stageLabel = progress?.detailStage
-    ? liveSubstageLabels[progress.detailStage] ?? status?.stageLabel
-    : status?.stageLabel
+  const { video: visibleVideo, percent: livePercent, asr, stage2 } = getImportProgressView(video, progress)
+  const status = getImportStatus(visibleVideo, livePercent)
+  const stageLabel = asr ? liveSubstageLabels[asr.substage] : status?.stageLabel
   const percent = status?.percent ?? (visibleVideo.status === 'ready' ? 100 : 0)
 
   return (
@@ -107,17 +104,17 @@ export function ImportTaskDialog({
           {status && <div>{stageLabel} · {status.percent}%</div>}
           {!status && visibleVideo.status === 'ready' && <div>处理完成 · 100%</div>}
           <progress aria-label="导入进度" max={100} value={percent} style={{ width: '100%' }} />
-          {progress && (progress.blockTotal ?? 0) > 0 && (
-            <div>分块 {progress.blockCurrent ?? 0} / {progress.blockTotal}</div>
+          {stage2 && (
+            <div>分块 {stage2.blockCurrent} / {stage2.blockTotal}</div>
           )}
-          {progress?.retrying && <div>正在重试</div>}
-          {progress?.backend && (
+          {stage2?.retrying && <div>正在重试</div>}
+          {asr?.backend && (
             <div data-testid="whisper-active-backend">
-              Whisper 后端：{progress.backend === 'cuda' ? 'NVIDIA GPU' : 'CPU'}
+              Whisper 后端：{asr.backend === 'cuda' ? 'NVIDIA GPU' : 'CPU'}
             </div>
           )}
-          {progress?.fallbackReason && (
-            <div role="status">GPU 回退说明：{progress.fallbackReason}</div>
+          {asr?.fallbackReason && (
+            <div role="status">GPU 回退说明：{asr.fallbackReason}</div>
           )}
           {visibleVideo.errorMessage && <div role="alert">{visibleVideo.errorMessage}</div>}
         </div>

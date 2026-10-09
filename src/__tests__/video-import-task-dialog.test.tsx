@@ -227,7 +227,7 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
         { status: 'pending', stage: null },
         { status: 'processing', stage: 'asr' },
       )
-      callbacks.onProgress('asr', 25)
+      callbacks.onImportProgress({ videoId: inputVideo.id, stage: 'asr', substage: 'transcription', percent: 25 })
       await pipelineGate
       await transitionVideoImportState(
         inputDb,
@@ -568,13 +568,9 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
       lastStudiedAt: 1,
     })
     configureRunnableSettings()
-    let reportStage2: ((
-      stage: string,
-      percent: number,
-      details?: { blockCurrent: number; blockTotal: number; percent: number; retrying: boolean },
-    ) => void) | undefined
+    let reportStage2: ((progress: import('@/pipeline/import-progress').ImportProgress) => void) | undefined
     mocks.runPipeline.mockImplementation((...args: unknown[]) => {
-      reportStage2 = (args[2] as { onProgress: typeof reportStage2 }).onProgress
+      reportStage2 = (args[2] as { onImportProgress: typeof reportStage2 }).onImportProgress
       return new Promise<void>(() => undefined)
     })
 
@@ -586,7 +582,8 @@ describe('AC-LV-19 and AC-LV-20 import task details', () => {
     await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledOnce())
 
     act(() => {
-      reportStage2?.('stage2', 40, {
+      reportStage2?.({
+        videoId: 'progress-task', stage: 'stage2',
         blockCurrent: 2,
         blockTotal: 5,
         percent: 40,

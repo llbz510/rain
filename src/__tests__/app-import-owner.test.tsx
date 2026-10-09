@@ -91,6 +91,10 @@ describe('AC-AR-05 application import lifetime', () => {
       videoId: 'owner-task', stage: 'asr_transcription', percent: 47, backend: 'cpu',
       blockCurrent: 0, blockTotal: 0, retrying: false,
     } })))
+    act(() => native.listeners.forEach((listener) => listener({ payload: {
+      videoId: 'owner-task', stage: 'asr_transcription', percent: 12,
+      blockCurrent: 0, blockTotal: 0, retrying: false,
+    } })))
     act(() => useRainStore.getState().setPage('list'))
     const returned = await openTask()
     expect(screen.getByTestId('card-owner-task')).not.toBe(firstCard)

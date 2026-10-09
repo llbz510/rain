@@ -165,7 +165,7 @@
 | AC-AR-03 | `video-thumbnail-ownership.test.tsx`、`study-playback.test.tsx` | Partial | 生产媒体 URL adapter 已用于缩略图/播放器；Tauri capability 的允许/拒绝真实路径、scope 负向 policy 和规范化桌面 Judge 缺失 |
 | AC-AR-04 | `database-architecture-policy.test.ts`、Store/数据库相邻测试 | Partial | SQLite 公共 Owner 与多项重启事实存在；完整 Zustand 仅会话态 dependency policy、双 adapter 与禁止页面持久化复制未统一 |
 | AC-AR-05 | `app-import-owner.test.tsx`、`video-import-task-dialog.test.tsx`、`video-list-deletion.test.tsx`、M21 progress listener | Strong | 生产 App 路由真正卸载/重挂列表；外部 Tauri event/invoke 与 HTTP fixture 下运行真实 Controller/Pipeline/数据库公开接口，锁定双击 single-flight、后台 47% 进度保留、原任务取消及迟到 ASR 不完成、离页后台完整 ASR→Stage2→merge、同一 ready 记录/内容和订阅释放。无需 Desktop Evidence，不外推 GPU/模型/Visual/Release |
-| AC-AR-06 | M20/M21、Rust events/commands tests、Pipeline/Stage2 tests | Partial | 当前事件字段和阶段各有局部裁判；五类判别联合、非法组合、单调性、terminal 后 mutation 与 checkpoint retry 的统一域合同未建立 |
+| AC-AR-06 | `import-progress-domain.test.ts`、`import-progress-controller.test.ts`、`import-progress-pipeline.test.ts`、`import-progress.typecheck.ts`、`app-import-owner.test.tsx`；M20/M21/Rust wire 与既有 Pipeline/Stage2 回归 | Strong（候选，独立双审 PASS，Hosted 待完成） | 统一五类判别域经公开 session/Controller、真实 Pipeline/Stage2/内存数据库与生产 App 验证字段组合、未知阶段、百分比范围/倒退、block 范围、terminal 后拒绝更新和同记录 checkpoint 重试；TypeScript 反例与生产 UI 的 never 分支裁判编译期字段约束及穷尽处理。桌面 raw wire/旧 tuple callback 保留为兼容 adapter，生产状态不携带旧混合字段。无 Desktop Evidence 要求，不外推模型/GPU/Visual/Release |
 
 ## 8. 当前不设“已完成”门禁的能力
 

@@ -1,5 +1,6 @@
 import type { Video, Node, Sentence } from '@/models/types'
 import type { LlmSettings } from '@/llm/types'
+import type { ImportProgress } from '@/pipeline/import-progress'
 import { callStage2 } from '@/llm/client'
 import { assertTransition, type ImportStage } from '@/pipeline/import-state'
 import {
@@ -22,7 +23,9 @@ import {
 } from '@/models/database'
 
 export interface PipelineCallbacks {
+  /** Legacy tuple callback retained for the locked Harness adapter. */
   onProgress: (stage: string, percent: number, details?: Stage2Progress) => void
+  onImportProgress?: (progress: ImportProgress) => void
   onComplete: (video: Video, nodes: Node[], sentences: Sentence[]) => void
   onError: (error: Error) => void
 }
@@ -81,6 +84,7 @@ export async function runPipeline(
     let rawSentences: Sentence[]
     if (currentStage === 'asr') {
       callbacks.onProgress('asr', 0)
+      callbacks.onImportProgress?.({ videoId: video.id, stage: 'asr', substage: 'extraction', percent: 0 })
       rawSentences = await runAsrStage({
         video: workingVideo,
         asrModel,
@@ -91,6 +95,7 @@ export async function runPipeline(
         signal: dependencies.signal,
       })
       callbacks.onProgress('asr', 100)
+      callbacks.onImportProgress?.({ videoId: video.id, stage: 'asr', substage: 'finalization', percent: 100 })
       currentStage = 'stage2'
     } else if (currentStage === 'stage2') {
       rawSentences = await getSentencesByVideoId(db, workingVideo.id)
@@ -109,7 +114,10 @@ export async function runPipeline(
       db,
       callStage2: dependencies.callStage2,
       signal: dependencies.signal,
-      onProgress: (progress) => callbacks.onProgress('stage2', progress.percent, progress),
+      onProgress: (progress) => {
+        callbacks.onProgress('stage2', progress.percent, progress)
+        callbacks.onImportProgress?.({ videoId: video.id, stage: 'stage2', ...progress })
+      },
     })
     callbacks.onProgress('stage2', 100)
 
@@ -122,14 +130,17 @@ export async function runPipeline(
     )
     currentStage = 'merging'
     callbacks.onProgress('merging', 0)
+    callbacks.onImportProgress?.({ videoId: video.id, stage: 'merging', percent: 0 })
     const { nodes, sentences } = stage2Result
     await merge(db, video.id, nodes, sentences)
     callbacks.onProgress('merging', 100)
+    callbacks.onImportProgress?.({ videoId: video.id, stage: 'merging', percent: 100 })
 
     assertTransition('merging', 'ready')
     const updatedVideo = await getVideoById(db, video.id)
     if (!updatedVideo) throw new Error(`Video not found after pipeline completion: ${video.id}`)
     completed = { video: updatedVideo, nodes, sentences }
+    callbacks.onImportProgress?.({ videoId: video.id, stage: 'terminal', status: 'ready' })
   } catch (cause) {
     const error = asError(cause)
     const terminal = isCancellationError(error) ? 'cancelled' : 'failed'
@@ -141,6 +152,9 @@ export async function runPipeline(
         { status: 'processing', stage: currentStage },
         { status: terminal, stage: currentStage, errorMessage: error.message },
       )
+      callbacks.onImportProgress?.(terminal === 'failed'
+        ? { videoId: video.id, stage: 'terminal', status: 'failed', error: error.message }
+        : { videoId: video.id, stage: 'terminal', status: 'cancelled' })
     } catch {
       // Persistence failure must not replace the primary pipeline error.
     }
