@@ -800,6 +800,10 @@ function Assert-FadeOwners([string]$SessionId) {
     $endLeft = Find-WebDriverElement $SessionId $leftSelector -AllowMissing
     $endRight = Find-WebDriverElement $SessionId $rightSelector -AllowMissing
     $script:facts["${level}FadeEnd"] = "left=$([bool]$endLeft) right=$([bool]$endRight) scrollLeft=$(Get-WebDriverRowScrollLeft $SessionId $level)"
+    $script:facts["${level}FadeEndMetrics"] = Get-CatalogRowScrollMetrics $SessionId $level
+    $lastItem = (Find-WebDriverElements $SessionId "[data-catalog-scroll-row='$level'] > span")[-1]
+    $script:facts["${level}FadeEndGeometry"] = Get-CatalogRowItemVisibility $SessionId $level $lastItem
+    Write-Output "[DEBUG-su04-fade] $level metrics=$($script:facts["${level}FadeEndMetrics"]) geometry=$(ConvertTo-Json -InputObject $script:facts["${level}FadeEndGeometry"] -Compress)"
     if (-not $endLeft -or $endRight) {
       Fail-Condition "第③项不成立：$level 行真实滚轮至末端后不是「只左」" "$($script:facts["${level}FadeEnd"])"
     }
