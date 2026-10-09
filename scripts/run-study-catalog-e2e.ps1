@@ -270,6 +270,7 @@ function Get-JudgeFactSnapshot() {
     paragraphRowExtent = $script:facts['paragraphRowExtent']
     paragraphRowOwnerWidth = $script:facts['paragraphRowOwnerWidth']
     wavPlayback = $script:facts['wavPlayback']
+    layoutProportions = $script:facts['layoutProportions']
     currentItemTargetText = $script:facts['currentItemTargetText']
     currentItemText = $script:facts['currentItemText']
     currentItemCenterDeltaPx = $script:facts['currentItemCenterDeltaPx']
@@ -931,6 +932,131 @@ function Assert-PauseStopsForcedFollow([string]$SessionId) {
   $script:facts['pauseFollowAfterPlayRoundTrip'] = $roundTripSummary
 }
 
+function Get-StudyLayoutGeometry([string]$SessionId) {
+  $geometry = [ordered]@{}
+  foreach ($part in @('side-tree', 'middle', 'right-panel', 'visual-controls', 'text-shell')) {
+    $geometry[$part] = Get-WebDriverElementRect $SessionId (Find-WebDriverElement $SessionId "[data-testid='study-$part']")
+  }
+  return $geometry
+}
+
+function Assert-LayoutNear([double]$Actual, [double]$Expected, [string]$Label) {
+  if ([Math]::Abs($Actual - $Expected) -gt 2) {
+    Fail-Condition "AC-SU-04 $Label" "actual=$Actual expected=$Expected tolerance=2px"
+  }
+}
+
+function Invoke-LayoutDrag([string]$SessionId, [string]$Label, [int]$DeltaX, [int]$DeltaY) {
+  $element = Find-WebDriverElement $SessionId "[role='separator'][aria-label='$Label']"
+  Invoke-WebDriver 'Post' "/session/$SessionId/actions" @{
+    actions = @(@{ type = 'pointer'; id = 'layout-drag'; parameters = @{ pointerType = 'mouse' }; actions = @(
+      @{ type = 'pointerMove'; origin = @{ $elementKey = $element }; x = 0; y = 0; duration = 0 },
+      @{ type = 'pointerDown'; button = 0 },
+      @{ type = 'pointerMove'; origin = 'pointer'; x = $DeltaX; y = $DeltaY; duration = 300 },
+      @{ type = 'pointerUp'; button = 0 }
+    ) })
+  } | Out-Null
+  Invoke-WebDriver 'Delete' "/session/$SessionId/actions" | Out-Null
+  Wait-WebDriverCondition $SessionId 'layout setting committed' "return document.querySelector('$pageSelector')?.getAttribute('aria-busy') === 'false';"
+}
+
+function Invoke-LayoutMode([string]$SessionId, [string]$Mode) {
+  $index = if ($Mode -eq 'textExpand') { 3 } else { 4 }
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId "[data-testid='control-bar'] button:nth-child($index)")
+}
+
+function Assert-LayoutMediaWitness([string]$SessionId) {
+  # Media identity/properties are real page reads; geometry is exclusively the driver /rect endpoint.
+  $ok = Invoke-WebDriverScript $SessionId @'
+const w = window.__rainLayoutWitness;
+const v = document.querySelector('video');
+const selected = document.querySelector('[data-testid="side-tree"] [data-selected="true"]');
+const note = document.querySelector('[aria-label="随记内容"]');
+return v === w.media && v.paused && Math.abs(v.currentTime - w.position) < 0.1
+  && v.currentSrc === w.source && selected === w.selected && note === w.note && note.value === w.content;
+'@
+  if ($ok -ne $true) { Fail-Condition 'AC-SU-04 layout changed media/selection/note facts' 'production DOM/media witness changed' }
+}
+
+function Assert-StudyLayoutDrag([string]$SessionId) {
+  Wait-WebDriverCondition $SessionId 'study proportions ready' "return document.querySelector('$pageSelector')?.getAttribute('aria-busy') === 'false';"
+  $initial = Get-StudyLayoutGeometry $SessionId
+  $width = $initial['side-tree'].width + $initial['middle'].width + $initial['right-panel'].width
+  Assert-LayoutNear $initial['side-tree'].width ($width / 11) 'default left 1:7:3'
+  Assert-LayoutNear $initial['middle'].width ($width * 7 / 11) 'default middle 1:7:3'
+  Assert-LayoutNear $initial['right-panel'].width ($width * 3 / 11) 'default right 1:7:3'
+  $splitHeight = $initial['visual-controls'].height + $initial['text-shell'].height
+  Assert-LayoutNear $initial['visual-controls'].height ($splitHeight * 0.6) 'default video including controls 6:4'
+
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="side-tree"] [data-selected]')
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="study-right-panel"] button:nth-child(2)')
+  $composer = Find-WebDriverElement $SessionId '[aria-label="新随记内容"]'
+  Invoke-WebDriver 'Post' "/session/$SessionId/element/$composer/value" @{ text = 'Layout persistent note'; value = @('Layout persistent note'.ToCharArray() | ForEach-Object { [string]$_ }) } | Out-Null
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="notes-composer"] button')
+  Wait-WebDriverCondition $SessionId 'production note saved' @'
+return document.querySelector('[aria-label="随记内容"]')?.value === 'Layout persistent note';
+'@
+  Invoke-WebDriverScript $SessionId @'
+const media = document.querySelector('video');
+window.__rainLayoutWitness = { media, position: media.currentTime, source: media.currentSrc,
+  selected: document.querySelector('[data-testid="side-tree"] [data-selected="true"]'),
+  note: document.querySelector('[aria-label="随记内容"]'), content: 'Layout persistent note' };
+return true;
+'@ | Out-Null
+
+  Invoke-LayoutDrag $SessionId '调整目录树宽度' 40 0
+  $afterLeft = Get-StudyLayoutGeometry $SessionId
+  Assert-LayoutNear $afterLeft['side-tree'].width ($initial['side-tree'].width + 40) 'left pointer drag'
+  Assert-LayoutNear $afterLeft['middle'].width ($initial['middle'].width - 40) 'left adjacent middle'
+  Invoke-LayoutDrag $SessionId '调整助手面板宽度' -30 0
+  $afterRight = Get-StudyLayoutGeometry $SessionId
+  Assert-LayoutNear $afterRight['right-panel'].width ($initial['right-panel'].width + 30) 'right pointer drag'
+  Invoke-LayoutDrag $SessionId '调整视频与文本比例' 0 40
+  $follow = Get-StudyLayoutGeometry $SessionId
+  Assert-LayoutNear $follow['visual-controls'].height ($initial['visual-controls'].height + 40) 'follow pointer drag'
+  Assert-LayoutMediaWitness $SessionId
+
+  Invoke-LayoutMode $SessionId 'textExpand'
+  Invoke-LayoutDrag $SessionId '调整目录树宽度' 20 0
+  $text = Get-StudyLayoutGeometry $SessionId
+  Assert-LayoutNear $text['side-tree'].width ($follow['side-tree'].width + 20) 'text mode pointer drag'
+  Assert-LayoutNear $text['visual-controls'].height 40 'text mode controls only'
+  Assert-LayoutMediaWitness $SessionId
+  Invoke-LayoutMode $SessionId 'mapExpand'
+  $mapBefore = Get-StudyLayoutGeometry $SessionId
+  Invoke-LayoutDrag $SessionId '调整导图与预览比例' 0 -40
+  $map = Get-StudyLayoutGeometry $SessionId
+  Assert-LayoutNear $map['visual-controls'].height ($mapBefore['visual-controls'].height - 40) 'map pointer drag'
+  Assert-LayoutMediaWitness $SessionId
+  Invoke-LayoutMode $SessionId 'mapExpand'
+  $followFinal = Get-StudyLayoutGeometry $SessionId
+  Assert-LayoutNear $followFinal['visual-controls'].height $follow['visual-controls'].height 'follow split remembered across modes'
+  Assert-LayoutMediaWitness $SessionId
+  $script:facts['layoutProportions'] = [ordered]@{ initial = $initial; follow = $followFinal; text = $text; map = $map; mediaSelectionNoteStable = $true }
+}
+
+function Assert-StudyLayoutRestored([string]$SessionId) {
+  Wait-WebDriverCondition $SessionId 'restored study proportions ready' "return document.querySelector('$pageSelector')?.getAttribute('aria-busy') === 'false';"
+  $restored = Get-StudyLayoutGeometry $SessionId
+  $expected = $script:facts['layoutProportions']['follow']
+  foreach ($part in @('side-tree', 'middle', 'right-panel', 'visual-controls', 'text-shell')) {
+    Assert-LayoutNear $restored[$part].width $expected[$part].width "restart $part width"
+    Assert-LayoutNear $restored[$part].height $expected[$part].height "restart $part height"
+  }
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="study-right-panel"] button:nth-child(2)')
+  $noteValue = Invoke-WebDriverScript $SessionId @'
+return document.querySelector('[aria-label="随记内容"]')?.value;
+'@
+  if ($noteValue -ne 'Layout persistent note') {
+    Fail-Condition 'AC-SU-04 note did not survive real desktop restart' 'saved note content differs'
+  }
+  Invoke-LayoutMode $SessionId 'mapExpand'
+  $map = Get-StudyLayoutGeometry $SessionId
+  Assert-LayoutNear $map['visual-controls'].height $script:facts['layoutProportions']['map']['visual-controls'].height 'restart map split'
+  Invoke-LayoutMode $SessionId 'mapExpand'
+  $script:facts['layoutProportions']['restart'] = $restored
+}
+
 $tauriDriver = $null
 $driverProcess = $null
 $sessionId = $null
@@ -1112,6 +1238,18 @@ return JSON.stringify({
   $phase = 'judge-pause-stops-follow'
   Write-Output 'Study Catalog E2E phase: judge 4 paused position changes do not force scrolling'
   Assert-PauseStopsForcedFollow $sessionId
+
+  $phase = 'judge-layout-drag'
+  Write-Output 'Study Catalog E2E phase: AC-SU-04 real geometry, pointer drag, three modes and media facts'
+  Assert-StudyLayoutDrag $sessionId
+  Close-WebDriverSession $sessionId
+  $sessionId = New-WebDriverSession $appBinary
+  Wait-WebDriverCondition $sessionId 'the video card after layout restart' "return Boolean(document.querySelector('[data-testid^=card-] button'));"
+  Invoke-WebDriverElementClick $sessionId (Find-WebDriverElement $sessionId '[data-testid^="card-"] button')
+  Wait-WebDriverCondition $sessionId 'study page after layout restart' "return Boolean(document.querySelector('$pageSelector'));"
+  $phase = 'judge-layout-restart'
+  Assert-StudyLayoutRestored $sessionId
+  Write-Output ('AC-SU-04 desktop layout facts: ' + (ConvertTo-Json -InputObject $script:facts['layoutProportions'] -Depth 8 -Compress))
 
   # SR-t52-4 + 文档 §5 对齐：成功路径同样要留下证据——
   # (a) 仅附件截图 + ATTACHMENT-NOTICE.txt（Save-WebDriverScreenshot 此前从未被调用，文档承诺的附件其实不存在）；

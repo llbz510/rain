@@ -1,8 +1,8 @@
-# Study Catalog 桌面 E2E（AC-SU-01 最小托管骨架）
+# Study Catalog 桌面 E2E（AC-SU-01 / AC-SU-04）
 
 > 状态：Active
-> 更新日期：2026-09-27
-> 作用：为 `AC-SU-01` 提供**真实桌面 DOM + 真实操作/滚动**的最小托管裁判。它不是产品规格、不签发 `Visual Evidence`、不覆盖其他 AC。
+> 更新日期：2026-10-09
+> 作用：为 `AC-SU-01` 和 `AC-SU-04` 提供真实桌面 DOM、操作、媒体和重启裁判。它不是产品规格，不签发 `Visual Evidence` 或其他 AC 的 Evidence。
 > 位置：`scripts/run-study-catalog-e2e.ps1`（行为 Judge）、`.github/workflows/study-catalog-desktop-e2e.yml`（Hosted Windows 入口）、`src/e2e/real-e2e-runner.tsx` 的 `study-catalog` 短模式（受控夹具）、`src-tauri/src/e2e_config.rs`（E2E 门）。
 
 ## 1. 公开命令
@@ -33,6 +33,12 @@ npm run e2e:study-catalog
 - 实测依据：同一段逻辑在 `1a80de5` 的 run [`36312689535`](https://github.com/llbz510/rain/actions/runs/36312689535) 读到 `fixtureStatusAfterRestart=seeded` + 2 张卡并成功进入学习页，而在 `9271305` 的 run [`36313834100`](https://github.com/llbz510/rain/actions/runs/36313834100) 读到 `absent` + 0 张卡 ⇒ 确定是启动竞态（非确定性），不是产品缺陷。
 - **触发方式登记（t56/t57，裁判④）**：`element-click` 端点（`POST /element/{id}/click`）带 UA「**点击前先滚入视野**」语义。实测 run [`36314741172`](https://github.com/llbz510/rain/actions/runs/36314741172)：结构行最大 `scrollLeft=2072`（owner 508 / extent 2580.36）、目标行项 index 0 在可视框外，点击送达（`currentTime` 7.051835 → 0）但该行被驱动滚成 `scrollLeft=0` ⇒ 旧 ④ 的「单行 scrollLeft 不变」判据会被驱动行为污染。生产侧全部滚动写入点已逐条排除（`catalog.tsx:225` 不可达、`:313`/`:325` 与 `text-zone.tsx:35` 均以 `isPlaying` 为门控、`text-zone.tsx:41` 仅由 `textScrollTarget` 触发），并有 `src/__tests__/study-navigation.test.tsx:648-657` 的跟踪断言旁证 ⇒ 该 RED 属**裁判口径**而非产品缺陷。故 ④ 的暂停态 seek 改用 `/actions` 真实指针（Actions API 不做预滚）触发，见证加强为**双行 + 时间窗**；判据语义（暂停 + 公开 seek ⇒ 不强制跟随）与 AC 覆盖不变、敏感性上升。
 - **入视野助手的方向约定与 RED 入档（SR-t58-3，t60 三方诊断 / t61 修复）**：实测 RED = run [`36321757895`](https://github.com/llbz510/rain/actions/runs/36321757895)（head `827bab6`），`phase=judge-pause-stops-follow`、`第④项前置不成立：真实滚轮未能在有界步数内把行项「E2E 章节 1」滚入 owner 可视框（无法对其 in-view centre 发真实指针点击） | wheelSteps=8 fullyInside=False itemLeft=-1872 itemWidth=65 ownerLeft=200 ownerWidth=508`。根因：`Move-CatalogRowItemIntoView` 的步长写成 `ownerCenter − itemCenter`，与本脚本实测的宿主约定「**正 deltaX 增大 scrollLeft**」相反（依据 ③ 的实测：4×+200 → 800；16×+2000 → max 2072；−2000 → 0）⇒ 目标行项在最左、行已在 `maximumScrollLeft=2072` 时每步都被钳制，8 步**零位移**（恒等式 `ownerLeft − scrollLeft = 200 − 2072 = itemLeft = −1872` 与实测吻合）。修复：符号改为 `itemCenter − ownerCenter`（保留 ±800 限幅与有界步数），并新增**无进展检测**——每步前后读 `scrollLeft`、把 `(step, delta, scrollLeftBefore, scrollLeftAfter)` 写入 `pauseFollowIntoViewSteps-*` 事实，某步位置未变即立刻以具名条件 Fail；本次 8 步空转正是被「安静烧完上界步数」掩盖的。
+
+### AC-SU-04 区域比例与重启恢复
+
+同一公开命令在四项目录裁判之后继续运行比例 Judge。用真实 `/rect` 测量三列默认 1:7:3，以及随播视觉区（含固定40px控制栏）与文本6:4；再用真实 `/actions` 指针拖动左右列、随播上下分隔线、文本模式列与导图上下分隔线，验证相邻区域的像素变化。几何舍入容差保持2px，目录80px/顶栏40px/控制栏40px冻结值不变。
+
+通过生产目录选择、随记输入/保存和媒体属性读取建立非空学习事实，三模式间核验同一个 media DOM、播放位置、选中 DOM 与随记编辑器/内容。随后真正关闭并重建 WebDriver session，经生产列表卡重新打开学习页，以真实几何和保存随记证明隔离SQLite跨进程恢复；follow/map上下比例分别恢复。该扩展尚须在当前被审 head 的 Hosted run 上通过，测试存在不签发 Desktop；截图仍仅为附件，不签发Visual/GPU/Release。
 
 ## 3. 隔离与受控夹具
 
@@ -66,7 +72,7 @@ npm run e2e:study-catalog
 
 ## 7. 未覆盖边界（诚实声明）
 
-- 只覆盖第 2 节列出的四项条件；**不签发 Visual/Accessibility Evidence**，不覆盖 `AC-SU-02/SU-04/SU-05/SU-06`、`AC-VL-*`、`AC-UX-*` 或其他 AC。
+- 只覆盖第 2 节列出的 AC-SU-01 四项条件与 AC-SU-04 比例/重启条件；**不签发 Visual/Accessibility Evidence**，不覆盖 `AC-SU-02/SU-03/SU-05/SU-06`、`AC-VL-*`、`AC-UX-*` 或其他 AC。
 - 合成媒体 ≠ 真实用户素材；媒体真实时长为 fixture 声明的 14s，目录时间轴必须落在该时长内。
-- 本 Judge 的存在与通过**都不等于 `AC-SU-01` 已闭合**：闭合需独立 Spec 与 Standards 复审通过并受保护合并；在此之前文档只可写「其 `Strong + Desktop Evidence` 预算可判定满足」。
+- 本 Judge 的存在与通过**都不等于对应 AC 已闭合**：闭合需独立 Spec 与 Standards 复审通过并受保护合并；在此之前文档只可写「其 `Strong + Desktop Evidence` 预算可判定满足」。
 - `tauri-driver` 日志为 0 字节的既有诊断缺口见第 4 节。
