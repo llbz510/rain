@@ -32,7 +32,7 @@ Rust 系统能力（文件、媒体、Whisper、任务调度）
 | Import Task Details | `AppImportOwner` 在 App 生命周期持有 Controller、进度与刷新通知；`VideoListPage` 只选择当前 Video；dialog 合并 SQLite 任务事实与当前会话进度，并适配显式继续/重试/取消 | 卡片点击时启动任务、保存实时进度、重新实现 Pipeline 生命周期、扫描并自动恢复重启遗留任务 | `src/App.tsx`、`src/pipeline/app-import-owner.tsx`、`src/pages/VideoListPage.tsx`、`src/ui/components/import-task-dialog.tsx` |
 | Video Import Controller | 创建本地视频记录，启动/重试/取消 Pipeline，归一化进度并修复失败状态 | 文件选择 UI、列表排序和卡片渲染 | `src/pipeline/video-import-controller.ts` |
 | Import Pipeline | 执行 ASR -> Stage2 -> merging，处理取消、失败和恢复 | 页面布局、具体 SQL、Whisper 内部实现 | `src/pipeline/pipeline-orchestrator.ts` |
-| ASR Stage | 解析模型、调用 Whisper、校验结果、原子保存 ASR | Stage2、页面提示布局 | `src/pipeline/asr-runner.ts` |
+| ASR Stage | 消费本地选择或受控下载已附着的本地 filePath，保留 Video 来源；解析模型、调用 Whisper、校验结果、原子保存 ASR | Stage2、页面提示布局 | `src/pipeline/asr-runner.ts` |
 | Stage2 | 分块、调用已通过能力检查的 OpenAI-compatible LLM、校验、检查点和确定性合并 | ASR、UI、任意改写原始句子 | `src/pipeline/stage2-*.ts` |
 | Import Progress | 五类判别状态、字段约束、单调性、终态封闭；适配旧桌面 wire；每次 Controller 运行持有独立 session | 持久化实时百分比、猜测 UI 阶段、创建未授权重试 | `src/pipeline/import-progress.ts`；UI projection `src/ui/import-progress.ts` |
 | Import State | 定义合法状态和转换 | 数据库 I/O、UI | `src/pipeline/import-state.ts` |
@@ -248,7 +248,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | AC group | 生产 Owner / 推荐 seam | 关键边界 |
 | --- | --- | --- |
 | `AC-RL-01..20` | Tauri release config、GPU overlay/bundle、installer lifecycle、数据库 migration deep command、artifact/Evidence validator、人类 release/legal/security owner | 主程序保持 CPU-safe；CUDA 只在隔离 worker；安装/升级/卸载/签名/发布/回滚各自独立裁判，页面或 AI 不拥有私钥和法律批准 |
-| `AC-VL-01..04/07` | `VideoListPage` composition、`VideoCard`、公共 Database video query interface | 页面组合查询与动作，不复制排序/搜索/持久化规则；视觉与业务行为分层裁判 |
+| `AC-VL-01..04/07` | 生产 App/`VideoListPage` composition、`VideoCard`、公共 Database video query interface | 页面组合查询与显式动作；完整组合 Judge 贯通真实 Controller/Pipeline/数据库，受控 URL 的本地媒体由 ASR owner 消费；不复制流程规则，视觉与业务行为分层裁判 |
 | `AC-VL-05` | Rust `thumbnail_lifecycle` deep module + 现有数据库删除 workflow | 只处理合法 ID 推导的 app-owned `thumbnails/` target；先 commit、后由 blocking handle-based filesystem owner 删除，Windows 必须核验 opened target 的 resolved path，永不接受任意用户路径 |
 | `AC-VL-06` | 同一 Rust thumbnail lifecycle deep module + keep-set/GC workflow | keep-set 只来自真实 `video` 行；只扫描受控 `thumbnails/` 目录并复用既有 path validation，非法或越界条目一律保留；每轮有候选上限与失败上限，拿不到 keep-set 或受控目录不可用一律不删，进程内不得重入，正在导入的新近缩略图由保护窗口保护；不得把扫描放回页面或 command adapter |
 | `AC-SU-01..07` | `StudyInterface` composition、`src/study/` navigation/session、catalog、VideoZone、shortcut/focus policy、layout persistence | 页面保持组合入口；播放/选择/预览/面板焦点使用共享事实，不在组件间复制快捷键或持久状态 |

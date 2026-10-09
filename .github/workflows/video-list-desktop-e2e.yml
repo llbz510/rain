@@ -9,6 +9,8 @@ on:
       - 'scripts/run-video-list-e2e.ps1'
       - 'src/e2e/real-e2e-runner.tsx'
       - 'src/pages/VideoListPage.tsx'
+      - 'src/pipeline/asr-runner.ts'
+      - 'src/__tests__/video-list-composition.test.tsx'
       - 'src/ui/video-list.ts'
       - 'src/ui/components/video-list.tsx'
       - 'src/ui/components/import-task-dialog.tsx'

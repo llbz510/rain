@@ -210,7 +210,7 @@ export async function runAsrStage(input: RunAsrStageInput): Promise<Sentence[]> 
 
   try {
     throwIfAborted(signal)
-    if (video.source !== 'local' || !video.filePath?.trim()) {
+    if (!video.filePath?.trim()) {
       throw new Error('Whisper ASR requires a real local file path')
     }
 
