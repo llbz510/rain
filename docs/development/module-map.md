@@ -149,6 +149,8 @@ cancelAndWait(videoId)
 
 当前笔记写接口是 `createParagraphExcerpt(paragraphId)`、`createFreeNote()` 和 `saveNoteContent(noteId, content)`。它们以当前学习会话为输入事实，必须先完成数据库写入再更新 Store 缓存。整段摘注由 workflow 收集并排序该段全部句子；持久化引用通过 `resolveSentenceNavigationTarget(sentences, sentenceId)` 回到同一导航路径，Notes UI 不保存时间副本。
 
+AC-SU-03的HTTP输入Judge为`study-panel-http-stream.test.tsx`；真实Desktop复用`run-study-catalog-e2e.ps1`和E2E-only `real-e2e-runner.tsx`公开fixture，controlled loopback server仅提供SSE字节与request/abort观测，不提供renderer或替代生产streamAiChat。模型/能力/角色仍经公开Store和真实probe，隐藏期间笔记仍经公开getNotesByVideoId核SQLite事实。
+
 模型能力记录是 SQLite 中的设置事实，Zustand 只缓存当前加载副本。记录不保存 API Key 明文；读取时必须按当前配置重新评估指纹，不能直接相信旧状态字符串。
 
 当前默认 OpenAI-compatible endpoint/model 只在 `src/settings/default-runtime.ts` 定义。设置页连接测试使用用户实际选择的 LLM 配置；`live-qwen.test.ts` 通过 `RAIN_LIVE_LLM_*` 注入同一运行时配置，没有 Key 时跳过。历史 Evidence validator 可以固定历史指纹，但不得反向充当当前运行默认值。

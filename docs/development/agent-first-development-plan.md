@@ -181,7 +181,7 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ### P4 — 完成高价值、低外部成本的视频列表闭环
 
-状态：`AC-VL-02/03 Strong; AC-VL-04 Strong + Desktop, protected PR #97 merged`；当前列表组合通过实际 App/Controller/Pipeline/数据库裁判，在线下载的本地媒体交接断点已最小修复；独立两轴均 PASS 且各自 266 项全绿，最终 head Harness/列表 Desktop 均 success，PR #97 已受保护合并；下一 Slice 为 AC-SU-04 比例拖拽/跨会话恢复。精确视觉按其独立 AC 执行。
+状态：`AC-VL-02/03 Strong; AC-VL-04 Strong + Desktop, protected PR #97 merged`；当前列表组合通过实际 App/Controller/Pipeline/数据库裁判，在线下载的本地媒体交接断点已最小修复；独立两轴均 PASS 且各自 266 项全绿，最终 head Harness/列表 Desktop 均 success，PR #97 已受保护合并；AC-SU-04已随PR #98受保护合并，当前目标两Hosted及master门禁全绿、双审各119项PASS；下一Slice为AC-SU-03 Tab/流/草稿的真实Desktop收口。精确视觉按其独立 AC 执行。
 
 先审计现有排序、搜索、顶栏和空状态的真实生产行为，再按已确认 AC 拆分：
 

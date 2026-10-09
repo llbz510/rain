@@ -1,8 +1,8 @@
-# Study Catalog 桌面 E2E（AC-SU-01 / AC-SU-04）
+# Study Catalog 桌面 E2E（AC-SU-01 / AC-SU-03 / AC-SU-04）
 
 > 状态：Active
 > 更新日期：2026-10-09
-> 作用：为 `AC-SU-01` 和 `AC-SU-04` 提供真实桌面 DOM、操作、媒体和重启裁判。它不是产品规格，不签发 `Visual Evidence` 或其他 AC 的 Evidence。
+> 作用：为 `AC-SU-01`、`AC-SU-03` 和 `AC-SU-04` 提供真实桌面 DOM、操作、媒体和重启裁判。它不是产品规格，不签发 `Visual Evidence` 或其他 AC 的 Evidence。
 > 位置：`scripts/run-study-catalog-e2e.ps1`（行为 Judge）、`.github/workflows/study-catalog-desktop-e2e.yml`（Hosted Windows 入口）、`src/e2e/real-e2e-runner.tsx` 的 `study-catalog` 短模式（受控夹具）、`src-tauri/src/e2e_config.rs`（E2E 门）。
 
 ## 1. 公开命令
@@ -38,7 +38,11 @@ npm run e2e:study-catalog
 
 同一公开命令在四项目录裁判之后继续运行比例 Judge。用真实 `/rect` 测量三列默认 1:7:3，以及随播视觉区（含固定40px控制栏）与文本6:4；再用真实 `/actions` 指针拖动左右列、随播上下分隔线、文本模式列与导图上下分隔线，验证相邻区域的像素变化。几何舍入容差保持2px，目录80px/顶栏40px/控制栏40px冻结值不变。
 
-通过生产目录选择、随记输入/保存和媒体属性读取建立非空学习事实，三模式间核验同一个 media DOM、播放位置、选中 DOM 与随记编辑器/内容。随后真正关闭并重建 WebDriver session，经生产列表卡重新打开学习页，以真实几何和保存随记证明隔离SQLite跨进程恢复；follow/map上下比例分别恢复。该扩展尚须在当前被审 head 的 Hosted run 上通过，测试存在不签发 Desktop；截图仍仅为附件，不签发Visual/GPU/Release。
+通过生产目录选择、随记输入/保存和媒体属性读取建立非空学习事实，三模式间核验同一个 media DOM、播放位置、选中 DOM 与随记编辑器/内容。随后真正关闭并重建 WebDriver session，经生产列表卡重新打开学习页，以真实几何和保存随记证明隔离SQLite跨进程恢复；follow/map上下比例分别恢复。PR #98最终head的Hosted run37906611566已通过该扩展，双审各119项PASS并受保护合并；截图仍仅为附件，不签发Visual/GPU/Release。
+
+### AC-SU-03 Tab、草稿与真实HTTP流
+
+在上述重启之后，runner启动受控loopback SSE server，不调用真实模型或live key。E2E-only fixture通过生产助手probe及公共Store保存能力记录/角色；Judge使用真实WebDriver输入和Tab点击，断言未发送AI草稿恢复、同一媒体/非空选择/笔记草稿稳定，隐藏期间继续消费原HTTP流，切回显示完整回答。独立server记录只有一条probe和两条助手request：首条正常完成且未abort，第二条明确停止后实际HTTP abort。公开getNotesByVideoId重新读取隔离SQLite，证明隐藏编辑器不产生自动保存。success-facts.json/log包含panelTabs事实；该扩展尚待当前候选Hosted实跑，不签发真实模型能力、Visual、GPU或Release Evidence。
 
 ## 3. 隔离与受控夹具
 
@@ -72,7 +76,7 @@ npm run e2e:study-catalog
 
 ## 7. 未覆盖边界（诚实声明）
 
-- 只覆盖第 2 节列出的 AC-SU-01 四项条件与 AC-SU-04 比例/重启条件；**不签发 Visual/Accessibility Evidence**，不覆盖 `AC-SU-02/SU-03/SU-05/SU-06`、`AC-VL-*`、`AC-UX-*` 或其他 AC。
+- 只覆盖第 2 节列出的 AC-SU-01 四项条件、AC-SU-04比例/重启及AC-SU-03 Tab/流条件；**不签发 Visual/Accessibility Evidence**，不覆盖 `AC-SU-02/SU-05/SU-06`、`AC-VL-*`、`AC-UX-*` 或其他 AC。
 - 合成媒体 ≠ 真实用户素材；媒体真实时长为 fixture 声明的 14s，目录时间轴必须落在该时长内。
 - 本 Judge 的存在与通过**都不等于对应 AC 已闭合**：闭合需独立 Spec 与 Standards 复审通过并受保护合并；在此之前文档只可写「其 `Strong + Desktop Evidence` 预算可判定满足」。
 - `tauri-driver` 日志为 0 字节的既有诊断缺口见第 4 节。
