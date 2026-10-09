@@ -170,7 +170,7 @@ npm run harness:control
 
 ### P3 — 在扩展导入导航前关闭 risk 22 的两个架构债
 
-状态：`AC-AR-05 merged protected PR #95; AC-AR-06 implemented candidate, independent Spec + Standards PASS; Hosted pending`；risk 22a/22b 分别由两条 AC 控制，按独立 Slice 实现；当前事实以 PROJECT_STATE 与 coverage 为准。
+状态：`AC-AR-05/06 merged protected PR #95/#96; independent review and head Hosted gates passed`；risk 22a/22b 分别由两条 AC 控制，按独立 Slice 实现；当前事实以 PROJECT_STATE 与 coverage 为准。
 
 按两个独立 Slice 处理，不合并重写：
 
@@ -181,7 +181,7 @@ Judge 必须能在页面真正卸载/重挂或非法 payload mutation 时失败�
 
 ### P4 — 完成高价值、低外部成本的视频列表闭环
 
-状态：`Confirmed AC / implementation Gap`；`AC-VL-02/03/04` 已冻结排序、搜索和列表组合，仍须逐条实现并裁判。
+状态：`AC-VL-02/03 Strong; AC-VL-04 composition candidate GREEN, independent review PASS, Hosted pending`；当前列表组合通过实际 App/Controller/Pipeline/数据库裁判，在线下载的本地媒体交接断点已最小修复；独立两轴均 PASS 且各自 266 项全绿，当前目标桌面门禁仍须完成。精确视觉按其独立 AC 执行。
 
 先审计现有排序、搜索、顶栏和空状态的真实生产行为，再按已确认 AC 拆分：
 

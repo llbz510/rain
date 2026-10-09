@@ -27,7 +27,7 @@
 | LV-14 | Present | Runtime Settings Store snapshot | settings/UI/SQLite/E2E — Strong | 条件性：改变该桌面边界后重放 | 不把 Store 当 SQLite |
 | LV-15 | Present | Store removeModel snapshot | settings/UI/SQLite/E2E — Strong | 条件性：改变该桌面边界后重放 | 不拆分 Key/role 清理 |
 | LV-16 | Present | Store queue/hydration | settings readiness/E2E — Strong | 条件性：改变该桌面边界后重放 | 不绕过队列 |
-| LV-17 | Present | Controller URL handoff → Rust yt-dlp | URL/Rust/M20 — Strong | 真站点不在本 AC | 禁止外网能力外推 |
+| LV-17 | Present（ASR 接线修复候选） | Controller URL handoff → Rust yt-dlp → 附着本地 filePath → ASR | URL/Rust/M20 + 生产 App composition | 旧 source=url 拒绝已实跑 RED；最小修复及真实交接 GREEN，双审 PASS，Hosted 待完成 | 真站点不在本 AC，禁止外网能力外推 |
 | LV-18 | Present | thumbnail storage → VideoCard adapter | thumbnail ownership/Rust — Strong | 无；桌面 E2E 仅补强 | 不接受任意输出路径 |
 | LV-19 | Present | App owner → ImportTaskDialog | dialog/Pipeline/page — Strong | 自动恢复不在本行 | 禁止卡片点击产生副作用 |
 | LV-20 | Present | pending record → explicit continue | dialog/runtime-settings E2E — Strong | stale processing 不在本行 | 禁止自动启动 |
@@ -73,7 +73,7 @@
 | VL-01 | Partial | VideoListPage → VideoCard task states/actions | dialog/page-recovery/M17 — Partial | 阻断：Strong + Visual Evidence；既有 recovery Judge 已锁定持久 pending/failed 粗状态文字、无 live progress 的“正在处理”与阶段细节，以及现有 progress listener callback 后的“正在处理 47%”与阶段细节 | 仅补局部 DOM Judge；AC 仍 Partial，Visual Evidence 未闭合，禁用 jsdom/假截图替代 |
 | VL-02 | Present | queryVideos → VideoListPage sort | video-list-sorting/database-videos — Strong | 无新增必需 | 同一 fixture 的 Memory 与故意无序 SQLite adapter、以及生产 VideoListPage 已锁定默认最近学习、最近学习/导入时间/名称三档和每档稳定 ID tie-breaker；不外推 Desktop、Visual、Evidence 或其他列表 AC |
 | VL-03 | Present | queryVideos → VideoListPage title search | title-query/list DOM — Strong（公开双 adapter + 生产 UI） | 无新增必需；无 Desktop 要求 | 同一 fixture 的 Memory、故意无序 SQLite public adapter 与生产页面已锁定 title-only、trim、ASCII case-insensitive、非空无匹配为空列表及清空搜索保留选定排序；不外推 AC-VL-04 或 Evidence |
-| VL-04 | Present（proof Partial） | VideoListPage 顶栏与空库 CTA 均经既有导入菜单入口；非 ready 卡进入任务详情 | local-import/dialog/empty-import-cta — Partial；新增 `run-video-list-e2e.ps1` + `video-list-desktop-e2e.yml`（真实 Tauri/WebView2 托管桌面 DOM 与真实点击） | 阻断：Strong + Desktop Evidence；生产空库 CTA 的具名原生按钮已锁定点击后显示既有“本地文件”“在线视频”菜单，新增桌面 Judge 进一步覆盖顶栏组合、过滤空、非 ready 卡进入任务详情与失败徽章；完整页面组合 Strong Judge、其余桌面/Visual/Accessibility 条件仍未闭合，不得外推 | 禁用 jsdom/假截图替代；截图只是附件，不构成 Visual Evidence |
+| VL-04 | Present（当前候选待门禁） | 生产 App → VideoListPage → 实际 Controller/Pipeline/ASR | composition 三流程 — Strong（候选）；既有真实 Tauri/WebView2 Judge | 28 文件 / 266 项 GREEN；在线受控媒体交接断点已 RED/GREEN；独立两轴 PASS，各自 266 项；当前目标 Hosted 待完成 | jsdom 不代替 Desktop；Visual/Accessibility 分属其它 AC，截图只是附件 |
 | VL-05 | Present | `thumbnail_lifecycle` → existing video deletion transaction → controlled thumbnail handle delete | Rust lifecycle/SQLite/real filesystem — Strong | 无新增必需；桌面仅可作补强 | 只删合法 ID 推导的 app-owned target；缺失目标两分支（app-data 根缺失、受控目录存在但文件缺失且重复运行幂等）、级联 ABORT 无文件副作用、真实占用句柄下失败可见且无半状态、释放后可重试均已裁判；提交后文件失败在当次会话可见并可重试，重启后的残留缩略图归 `AC-VL-06`，Windows junction/reparse fail-closed。不外推 Desktop/Visual/GPU/安装器/Release Evidence |
 | VL-06 | Present | `thumbnail_lifecycle` → after-commit bounded orphan round over the controlled `thumbnails/` directory | Rust lifecycle/SQLite/real filesystem — Strong | 无新增必需；桌面/性能不在本行 | 只删合法 ID 推导、不在真实 `video` 行 keep-set 内且超出保护窗口的 app-owned target；候选上限、失败上限、幂等、部分失败、失败上限提前结束、进程内重入、受控目录逃逸与并发新建写窗口均已裁判；不外推 Desktop/Visual/GPU/安装器/Release Evidence |
 | VL-07 | Partial | VideoCard thumbnail rendering | M17/thumbnail UI — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |
@@ -99,7 +99,7 @@
 | AR-03 | Partial | localMediaUrl/Tauri asset seam | thumbnail/playback — Partial | capability scope negative/Desktop | 禁用 jsdom/假截图替代 |
 | AR-04 | Partial | Database + Zustand ownership | architecture/store adjacent — Partial | unified dependency/adapter policy | 不复制持久业务事实 |
 | AR-05 | Present | `AppImportOwner` → Controller；`App` 路由真实卸载/重挂列表 | app-import-owner/dialog/deletion/M21 — Strong | 无新增必需；生产 App + 真实 Pipeline/公共数据库 Judge 覆盖单飞、后台进度/完成、原任务取消和迟到结果 | 不外推 Tauri/SQLite Desktop、模型、Visual 或 Release Evidence |
-| AR-06 | Present（候选） | `import-progress` domain → Pipeline/Controller/event adapters → 穷尽 UI projection | domain/controller/pipeline/typecheck/App — Strong（候选） | 领域与相邻 27 文件 / 263 项通过；独立双审 PASS，Hosted 待完成；无 Desktop 要求 | 保留 locked wire/tuple adapters，不外推 GPU/模型/Visual/Release Evidence |
+| AR-06 | Present | `import-progress` domain → Pipeline/Controller/event adapters → 穷尽 UI projection | domain/controller/pipeline/typecheck/App — Strong | PR #96 受保护合并；独立两轴各 263 项及 head 完整 Hosted 全绿；无 Desktop 要求 | 保留 locked wire/tuple adapters，不外推 GPU/模型/Visual/Release Evidence |
 
 ## Proof closure / blocker ledger
 
@@ -108,7 +108,7 @@
 - `SU/UX`：Desktop/Visual blocker 仅为 `SU-01`（Desktop）、`SU-02`（Desktop/Visual）、`SU-03`（Desktop）、`SU-04`（Desktop）、`SU-05`（Desktop/Visual）、`SU-06`（Desktop/Visual）、`UX-01/02/04`（Visual）、`UX-03`（Visual/Accessibility）、`UX-05/06`（Desktop/Accessibility）。`UX-06` 已有 VideoCard 局部生产键盘/名称 Judge，但其余 Launch 主操作、可见焦点、非纯颜色状态、axe、AA 与 Desktop Evidence 仍阻断。`SU-07` 只需 Strong，不要求 Desktop；截图只能作附件，不能单独裁判。
 - `HE`：`HE-05` 只能由改变该桌面边界后的目标提交 workflow_dispatch 重放；本 Slice 不 dispatch。
 - `PF`：每条都缺冻结主机、fixture、样本/p95 或 soak Evidence，不能由开发机感觉代替。
-- `AR`：`AR-02/03/04` 仍需真实角色请求、Tauri capability/桌面或依赖政策；静态扫描/局部组件不等于完成。`AR-05` 已随 PR #95 合并；`AR-06` 当前候选的统一领域 Judge 已通过，独立双审 PASS，Hosted 待完成；两行均无新增 Desktop 要求。
+- `AR`：`AR-02/03/04` 仍需真实角色请求、Tauri capability/桌面或依赖政策；静态扫描/局部组件不等于完成。`AR-05` 已随 PR #95 合并；`AR-06` 已随 PR #96 受保护合并，独立双审与被审 head 完整 Hosted 均通过；两行均无新增 Desktop 要求。
 - `RL`：所有 Release 工作为用户暂停。受控 GPU run 已取消且未生成/上传 manifest、core/control artifact、build record 或 launcher；只有用户明确恢复后才可排期。不得以取消运行或此审计升级任何 RL AC。
 
 ## Proposed 局部面（23 条；不改变产品语义）

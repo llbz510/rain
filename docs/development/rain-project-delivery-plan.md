@@ -63,8 +63,8 @@ Rain 只有同时满足以下条件才算完成一次正式落地：
 - 本地视频导入、Stage2、学习页、模型管理、Runtime Settings、数据库原子边界和默认 Windows Harness 已形成强控制。
 - `AC-LV-21` 只有 Strong 行为和本机 NVIDIA 短样本，尚无受支持 NVIDIA 目标候选 Release Evidence。
 - Hosted Runtime Settings Judge 已在 `master` commit `a329059b8172dab82c7326deb0af322045a0c396` 上由 workflow_dispatch run `30756311932` 重放通过；该结论只属于此目标提交，后续相关桌面边界变化仍需重新签发。
-- `AC-VL-05` 已由生产 lifecycle + 真实文件系统/SQLite Judge 收口（PR #65，已合并进受保护 master `4a0b14c`）；`AC-VL-06` 的 keep-set/GC 已在受保护 PR #66 落地（同一 Rust `thumbnail_lifecycle` 深 module、keep-set 来自真实 `video` 行、真实 SQLite + 隔离真实目录 + 并发新建写窗口 Judge、tier Strong），并已随 PR #66 合并进受保护 master `3db8032`，第 2 轮 Spec/Standards 复审确认关闭；`AC-VL-04` 的桌面证据仍在独立受保护 PR 上（最小托管骨架：真实 Tauri/WebView2 的桌面 DOM 与真实点击、受控夹具跨进程重启、截图仅附件），尚未合并。`M4-S2` 与 `M4-S3` 由此收口；M4 仍需的只剩其它事项：`M4-S1` schema 升级兼容、`M4-S5` 判别式 progress contract 与 `M4-S6` 已确认架构政策的实现。
-- risk 22a 的 App-scope Controller Owner（`AC-AR-05`）已随 PR #95 受保护合并，PR 与 master 完整门禁、PR 列表桌面 Judge 全绿；risk 22b 的统一进度领域合同（`AC-AR-06`）当前候选已通过 27 文件 / 263 项与编译期 Judge，独立 Spec/Standards 均 PASS 且各自实跑 27 文件 / 263 项；Hosted 门禁待完成。
+- `AC-VL-05` 已由生产 lifecycle + 真实文件系统/SQLite Judge 收口（PR #65，已合并进受保护 master `4a0b14c`）；`AC-VL-06` 的 keep-set/GC 已在受保护 PR #66 落地（同一 Rust `thumbnail_lifecycle` 深 module、keep-set 来自真实 `video` 行、真实 SQLite + 隔离真实目录 + 并发新建写窗口 Judge、tier Strong），并已随 PR #66 合并进受保护 master `3db8032`，第 2 轮 Spec/Standards 复审确认关闭；`AC-VL-04` 的必要桌面 Judge 已随 PR #67 合并，PR #96 head 的独立真实桌面重放再次全绿；当前完整生产 App 组合与在线媒体接线修复候选为 28 文件 / 266 项 GREEN，独立两轴 PASS 且各自 266 项全绿，本候选 Hosted 待完成。`M4-S2` 与 `M4-S3` 由此收口；M4 仍需的只剩其它事项：`M4-S1` schema 升级兼容与 `M4-S6` 已确认架构政策的实现。
+- risk 22a 的 App-scope Controller Owner（`AC-AR-05`）已随 PR #95 受保护合并，PR 与 master 完整门禁、PR 列表桌面 Judge 全绿；risk 22b 的统一进度领域合同（`AC-AR-06`）已随 PR #96 受保护合并，两轴各自 263 项与最终 head 完整 Hosted 门禁全绿，合并树一致。
 - schema 升级兼容、正式安装生命周期、签名和发布许可已有 `AC-RL-*` 合同，但实现、外部 Evidence 与人类批准仍缺失。
 
 ## 4. 交付策略：先 Core Release，再扩展完整产品面
@@ -295,7 +295,7 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 
 ### M4-S5 discriminated progress contract
 
-- **状态**：`Implemented candidate — AC-AR-06; 27 files / 263 tests GREEN; independent Spec + Standards PASS, each 263 tests GREEN; Hosted gate pending`。
+- **状态**：`Merged protected PR #96 — AC-AR-06; independent Spec + Standards PASS, each 263 tests GREEN; head Hosted gates GREEN`。
 - **当前实现/Judge**：统一五类域、事件 adapter、Pipeline 判别回调、Controller 会话和 UI 穷尽投影；非法字段/单调性/终态/恢复由公开领域与实际 Pipeline/Controller/App Judge 裁判。旧 wire/tuple 是 locked 兼容 adapter；不签发 Desktop/Visual/Release。
 
 - 定义 download/asr/stage2/merging/terminal 的判别式 payload。
@@ -324,6 +324,8 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 - 不加入标签、正文搜索或未确认筛选。
 
 ### M5-S2 生产列表 UI
+
+- **当前候选**：`AC-VL-04` 三条完整 App 行为 Judge 与受控在线媒体 ASR 接线修复，28 文件 / 266 项 GREEN；独立两轴 PASS 且各自 266 项全绿，当前目标 Hosted 待完成。仅修复阻断该页面动作的既有 `AC-LV-17` 交接，不新增真实站点兼容或视觉合同。
 
 - 顶栏、导入入口、排序选择、搜索框、加载/错误/空状态完整。
 - 非 ready 卡仍只打开任务详情；ready 卡只在完整加载成功后进入学习页。
