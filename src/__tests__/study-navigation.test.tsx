@@ -370,6 +370,17 @@ describe('AC-SU-01 two-row study catalog', () => {
     const positions = { structure: 0, paragraph: 0 }
     const geometryReads = { structure: 0, paragraph: 0 }
     const rowKey = (element: HTMLElement) => element.dataset.catalogScrollRow as keyof typeof widths | undefined
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    const rectangle = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const ownerKey = rowKey(this)
+      const childKey = this.parentElement ? rowKey(this.parentElement) : undefined
+      const key = ownerKey ?? childKey
+      if (!key) return originalRect.call(this)
+      geometryReads[key] += 1
+      const right = ownerKey ? 100 : widths[key] - positions[key]
+      const left = ownerKey ? 0 : right - 1
+      return { x: left, y: 0, left, top: 0, right, bottom: 40, width: right - left, height: 40, toJSON() {} }
+    })
     const addEventListener = vi.spyOn(window, 'addEventListener')
     const removeEventListener = vi.spyOn(window, 'removeEventListener')
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
@@ -517,6 +528,7 @@ describe('AC-SU-01 two-row study catalog', () => {
       expect(addEventListener.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(resizeAddsBeforePositionChange)
       expect(removeEventListener.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(resizeRemovesBeforePositionChange)
     } finally {
+      rectangle.mockRestore()
       addEventListener.mockRestore()
       removeEventListener.mockRestore()
       if (originalClientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth)

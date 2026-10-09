@@ -21,6 +21,51 @@ beforeEach(() => { resetDb(); useRainStore.getState().reset(); configureStudy();
 afterEach(() => { cleanup(); useRainStore.getState().reset(); resetDb(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('AC-SU-04 production page proportions', () => {
+  it('updates catalog fades when a layout adjustment resizes the row without a window resize', async () => {
+    const callbacks = new Map<Element, () => void>()
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private notify: () => void) {}
+      observe(element: Element) { callbacks.set(element, this.notify) }
+      disconnect() { for (const [element, notify] of callbacks) if (notify === this.notify) callbacks.delete(element) }
+    })
+    render(<StudyInterface />)
+    await waitFor(() => expect(screen.getByTestId('study-interface')).toHaveAttribute('aria-busy', 'false'))
+    const row = screen.getByTestId('catalog-bar').querySelector<HTMLElement>('[data-catalog-scroll-row="paragraph"]')!
+    Object.defineProperties(row, { clientWidth: { configurable: true, value: 100 }, scrollWidth: { configurable: true, value: 200 } })
+    const rectangle = (width: number): DOMRect => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 40, width, height: 40, toJSON() {} })
+    const rowRect = vi.spyOn(row, 'getBoundingClientRect').mockReturnValue(rectangle(100))
+    vi.spyOn(row.lastElementChild!, 'getBoundingClientRect').mockReturnValue(rectangle(200))
+    fireEvent.scroll(row)
+    expect(screen.getByTestId('catalog-fade-right-paragraph')).toBeInTheDocument()
+    rowRect.mockReturnValue(rectangle(300))
+    fireEvent.keyDown(screen.getByRole('separator', { name: '调整目录树宽度' }), { key: 'ArrowLeft' })
+    act(() => { for (const notify of callbacks.values()) notify() })
+    expect(screen.queryByTestId('catalog-fade-right-paragraph')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('study-interface')).toHaveAttribute('aria-busy', 'false'))
+    cleanup()
+    expect(callbacks.size).toBe(0)
+  })
+  it('hides the trailing fade at the real visible edge despite a one-pixel rounded scroll remainder', async () => {
+    render(<StudyInterface />)
+    await waitFor(() => expect(screen.getByTestId('study-interface')).toHaveAttribute('aria-busy', 'false'))
+    const row = screen.getByTestId('catalog-bar').querySelector<HTMLElement>('[data-catalog-scroll-row="paragraph"]')!
+    // Replays run 37904028464's real row metrics and driver edge measurements.
+    Object.defineProperties(row, {
+      clientWidth: { configurable: true, value: 649 }, scrollWidth: { configurable: true, value: 2500 },
+      scrollLeft: { configurable: true, writable: true, value: 1850 },
+    })
+    const rectangle = (left: number, width: number): DOMRect => ({ x: left, y: 0, left, top: 0, right: left + width, bottom: 40, width, height: 40, toJSON() {} })
+    vi.spyOn(row, 'getBoundingClientRect').mockReturnValue(rectangle(96.71875, 649))
+    const last = row.lastElementChild!
+    const itemRect = vi.spyOn(last, 'getBoundingClientRect').mockReturnValue(rectangle(673.8125, 72))
+    fireEvent.scroll(row)
+    expect(screen.getByTestId('catalog-fade-left-paragraph')).toBeInTheDocument()
+    expect(screen.queryByTestId('catalog-fade-right-paragraph')).not.toBeInTheDocument()
+    // Actual content still outside the visible edge must keep its fade.
+    itemRect.mockReturnValue(rectangle(675.71875, 72))
+    fireEvent.scroll(row)
+    expect(screen.getByTestId('catalog-fade-right-paragraph')).toBeInTheDocument()
+  })
   it('consumes separator direction keys without seeking or changing the media volume', async () => {
     render(<StudyInterface />)
     const left = await screen.findByRole('separator', { name: '调整目录树宽度' })

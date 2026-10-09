@@ -127,9 +127,13 @@ function useEdgeFades(nodes: Node[]) {
     if (!row) return
     const maximumScrollLeft = Math.max(0, row.scrollWidth - row.clientWidth)
     const scrollLeft = Math.min(maximumScrollLeft, Math.max(0, row.scrollLeft))
+    // Integer scrollWidth/clientWidth can leave a 1px remainder at the native end.
+    // The fade describes content outside the visible row, measured in real pixels.
+    const rowRight = row.getBoundingClientRect().right
+    const contentRight = row.lastElementChild?.getBoundingClientRect().right ?? rowRight
     const nextFades = {
       left: maximumScrollLeft > EDGE_FADE_EPSILON && scrollLeft > EDGE_FADE_EPSILON,
-      right: maximumScrollLeft > EDGE_FADE_EPSILON && maximumScrollLeft - scrollLeft > EDGE_FADE_EPSILON,
+      right: contentRight - rowRight > EDGE_FADE_EPSILON,
     }
     setFades((previousFades) => (
       previousFades.left === nextFades.left && previousFades.right === nextFades.right
@@ -144,7 +148,12 @@ function useEdgeFades(nodes: Node[]) {
 
   React.useEffect(() => {
     window.addEventListener('resize', updateFades)
-    return () => window.removeEventListener('resize', updateFades)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateFades)
+    if (scrollRef.current) observer?.observe(scrollRef.current)
+    return () => {
+      window.removeEventListener('resize', updateFades)
+      observer?.disconnect()
+    }
   }, [updateFades])
 
   return { scrollRef, fades, updateFades }
