@@ -331,6 +331,8 @@ M8 Vision 与高级树编辑 ----------+--> 已确认进入 post-release
 - 非 ready 卡仍只打开任务详情；ready 卡只在完整加载成功后进入学习页。
 - 页面与数据库/Controller 通过现有业务 interface 协作。
 
+学习页相邻Launch Slice：AC-SU-04比例调整/跨会话恢复已随PR #98受保护合并，最终head Harness/真实Study Desktop与master Harness全绿、双审各119项PASS，AC-SU-01当前目标四项Desktop也已核证；当前推进AC-SU-03 Tab/流/草稿的真实Desktop，controlled HTTP输入不替代真实模型能力或Visual Evidence。
+
 ### M5-S3 卡片信息与网格
 
 - ready/non-ready 字段、缩略图、状态、进度、错误和动作层级有明确 AC。

@@ -692,7 +692,7 @@ export function RealE2eRunner() {
           const fixtureTitle = 'E2E 长目录样本'
           let catalogSeeding = false
           const publishCatalogFixture = (status: 'idle' | 'seeded' | 'failed', error?: string): void => {
-            ;(window as unknown as Record<string, unknown>).__RAIN_STUDY_CATALOG_FIXTURE__ = {
+            const fixture = {
               status,
               ...(error ? { error: redactSecret(error) } : {}),
               durationSeconds: fixtureDurationSeconds,
@@ -702,12 +702,39 @@ export function RealE2eRunner() {
               chapterCount: 8,
               sectionCount: 24,
               paragraphCount: 32, // 与 seed 的生成规则一致（t49/t50 定位：旧值 40 与实际产出不符，已统一为 32）
+              assistantStatus: 'idle',
+              assistantError: '',
+              noteContents: null as string[] | null,
+              configureAssistant: (baseUrl: string) => {
+                fixture.assistantStatus = 'loading'
+                void (async () => {
+                  const store = useRainStore.getState()
+                  const added = await store.addModel({ type: 'llm', provider: 'custom', alias: 'Controlled Tabs assistant',
+                    baseUrl, apiKey: 'controlled-fixture-key', modelName: 'rain-tabs-controlled', supportsVision: false })
+                  if (!added.ok) throw new Error(added.error)
+                  const model = useRainStore.getState().modelPool.find(entry => entry.modelName === 'rain-tabs-controlled')!
+                  // The real public probe runs against the controlled HTTP fixture; no capability is self-certified.
+                  const capability = await checkAssistantModelCapability(runtimeModelFromPoolEntry(model))
+                  await store.setCapabilityRecords([capability])
+                  const assigned = await store.setRoleModel('assistant', model.id)
+                  if (!assigned.ok) throw new Error(assigned.error)
+                  fixture.assistantStatus = 'ready'
+                })().catch(cause => { fixture.assistantStatus = 'failed'; fixture.assistantError = redactSecret(toError(cause).message) })
+              },
+              readNotes: () => {
+                fixture.noteContents = null
+                void (async () => {
+                  const { getNotesByVideoId } = await import('@/models/database')
+                  fixture.noteContents = (await getNotesByVideoId(await getDb(), fixtureVideoId)).map(note => note.content)
+                })().catch(cause => { fixture.assistantStatus = 'failed'; fixture.assistantError = redactSecret(toError(cause).message) })
+              },
               seed: () => {
                 if (catalogSeeding) return
                 catalogSeeding = true
                 void seedStudyCatalogFixture()
               },
             }
+            ;(window as unknown as Record<string, unknown>).__RAIN_STUDY_CATALOG_FIXTURE__ = fixture
           }
           const seedStudyCatalogFixture = async (): Promise<void> => {
             try {

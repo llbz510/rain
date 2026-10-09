@@ -271,6 +271,7 @@ function Get-JudgeFactSnapshot() {
     paragraphRowOwnerWidth = $script:facts['paragraphRowOwnerWidth']
     wavPlayback = $script:facts['wavPlayback']
     layoutProportions = $script:facts['layoutProportions']
+    panelTabs = $script:facts['panelTabs']
     currentItemTargetText = $script:facts['currentItemTargetText']
     currentItemText = $script:facts['currentItemText']
     currentItemCenterDeltaPx = $script:facts['currentItemCenterDeltaPx']
@@ -1057,11 +1058,104 @@ return document.querySelector('[aria-label="随记内容"]')?.value;
   $script:facts['layoutProportions']['restart'] = $restored
 }
 
+function Set-StudyInputText([string]$SessionId, [string]$Selector, [string]$Text) {
+  $inputElement = Find-WebDriverElement $SessionId $Selector
+  Invoke-WebDriver 'Post' "/session/$SessionId/element/$inputElement/clear" @{} | Out-Null
+  Invoke-WebDriver 'Post' "/session/$SessionId/element/$inputElement/value" @{ text = $Text; value = @($Text.ToCharArray() | ForEach-Object { [string]$_ }) } | Out-Null
+}
+
+function Invoke-StudyTab([string]$SessionId, [int]$Index) {
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId "[data-testid='study-right-panel'] button:nth-child($Index)")
+}
+
+function Assert-PanelLearningWitness([string]$SessionId) {
+  $stable = Invoke-WebDriverScript $SessionId @'
+const w = window.__rainTabWitness, v = document.querySelector('video');
+return v === w.media && v.paused && Math.abs(v.currentTime - w.position) < 0.1 && v.currentSrc === w.source
+  && document.querySelector('[data-testid="side-tree"] [data-selected="true"]') === w.selected
+  && document.querySelector('[aria-label="随记内容"]') === w.note && w.note.value === 'Tab persistent draft'
+  && document.querySelector('[aria-label="AI 输入"]') === w.input;
+'@
+  if ($stable -ne $true) { Fail-Condition 'AC-SU-03 Tab changed media/selection/draft identity or content' 'real page witness differs' }
+}
+
+function Assert-StudyPanelTabs([string]$SessionId) {
+  $readyFile = Join-Path $runRoot 'panel-sse-ready.json'
+  $fixturePath = Join-Path $repoRoot 'scripts/study-panel-sse-fixture.mjs'
+  $script:panelFixtureProcess = Start-Process -FilePath (Get-Command node).Source -ArgumentList @(('"' + $fixturePath + '"'), ('"' + $readyFile + '"')) -WindowStyle Hidden -PassThru
+  $deadline = (Get-Date).AddSeconds(10)
+  while (-not (Test-Path -LiteralPath $readyFile) -and (Get-Date) -lt $deadline -and -not $script:panelFixtureProcess.HasExited) { Start-Sleep -Milliseconds 100 }
+  if (-not (Test-Path -LiteralPath $readyFile)) { Fail-Condition 'AC-SU-03 controlled HTTP fixture did not start' 'readiness file absent' }
+  $httpFixture = Get-Content -LiteralPath $readyFile -Raw | ConvertFrom-Json
+  $baseUrl = [string]$httpFixture.baseUrl
+  $httpRoot = $baseUrl.Substring(0, $baseUrl.Length - 3)
+  Invoke-WebDriverScript $SessionId "window.__RAIN_STUDY_CATALOG_FIXTURE__.configureAssistant('$baseUrl'); return true;" | Out-Null
+  Wait-WebDriverCondition $SessionId 'real assistant capability probe and persisted role assignment' @'
+return ['ready','failed'].includes(window.__RAIN_STUDY_CATALOG_FIXTURE__.assistantStatus);
+'@
+  $assistantStatus = Invoke-WebDriverScript $SessionId 'return window.__RAIN_STUDY_CATALOG_FIXTURE__.assistantStatus;'
+  if ($assistantStatus -ne 'ready') { Fail-Condition 'AC-SU-03 controlled assistant setup failed' ([string](Invoke-WebDriverScript $SessionId 'return window.__RAIN_STUDY_CATALOG_FIXTURE__.assistantError;')) }
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="side-tree"] [data-selected]')
+  Invoke-StudyTab $SessionId 2
+  Set-StudyInputText $SessionId '[aria-label="随记内容"]' 'Tab persistent draft'
+  Invoke-StudyTab $SessionId 1
+  Set-StudyInputText $SessionId '[aria-label="AI 输入"]' 'Unsent AI draft'
+  $captured = Invoke-WebDriverScript $SessionId @'
+const media = document.querySelector('video'), selected = document.querySelector('[data-testid="side-tree"] [data-selected="true"]');
+window.__rainTabWitness = { media, selected, position: media?.currentTime, source: media?.currentSrc,
+  note: document.querySelector('[aria-label="随记内容"]'), input: document.querySelector('[aria-label="AI 输入"]') };
+return Boolean(media && selected && window.__rainTabWitness.note && window.__rainTabWitness.input);
+'@
+  if ($captured -ne $true) { Fail-Condition 'AC-SU-03 nonempty learning witness missing' 'media/selected/note/input required' }
+  Invoke-StudyTab $SessionId 2
+  Assert-PanelLearningWitness $SessionId
+  $hidden = Invoke-WebDriverScript $SessionId 'return Boolean(document.querySelector("[aria-label=\"AI 输入\"]").closest("[hidden]"));'
+  if ($hidden -ne $true) { Fail-Condition 'AC-SU-03 AI panel did not become hidden' 'native hidden owner absent' }
+  Invoke-StudyTab $SessionId 1
+  $draft = Invoke-WebDriverScript $SessionId 'return document.querySelector("[aria-label=\"AI 输入\"]").value;'
+  if ($draft -ne 'Unsent AI draft') { Fail-Condition 'AC-SU-03 unsent assistant draft lost' "observed=$draft" }
+  $before = Invoke-RestMethod "$httpRoot/status"
+  if ($before.probeCount -ne 1 -or $before.requests.Count -ne 0) { Fail-Condition 'AC-SU-03 unsent Tabs started another side effect' 'one real probe and zero assistant requests required' }
+  Set-StudyInputText $SessionId '[aria-label="AI 输入"]' ('Tabs first request' + [char]0xE007)
+  Wait-WebDriverCondition $SessionId 'real first SSE token in production assistant' 'return document.querySelector("[data-testid=message-assistant]")?.textContent === "Visible";'
+  Invoke-StudyTab $SessionId 2
+  Invoke-RestMethod "$httpRoot/release/1/hidden" -Method Post | Out-Null
+  Wait-WebDriverCondition $SessionId 'hidden assistant receives the same live stream' 'return document.querySelector("[data-testid=message-assistant]")?.textContent === "Visible hidden";'
+  Assert-PanelLearningWitness $SessionId
+  Invoke-WebDriverScript $SessionId 'window.__RAIN_STUDY_CATALOG_FIXTURE__.readNotes(); return true;' | Out-Null
+  Wait-WebDriverCondition $SessionId 'fresh public SQLite note snapshot' 'return window.__RAIN_STUDY_CATALOG_FIXTURE__.noteContents !== null;'
+  $saved = Invoke-WebDriverScript $SessionId @'
+const contents = window.__RAIN_STUDY_CATALOG_FIXTURE__.noteContents;
+return contents.length === 1 && contents[0] === 'Layout persistent note';
+'@
+  if ($saved -ne $true) { Fail-Condition 'AC-SU-03 hiding a note caused an unrequested save' 'SQLite must retain saved content while draft stays local' }
+  Invoke-StudyTab $SessionId 1
+  Invoke-RestMethod "$httpRoot/release/1/done" -Method Post | Out-Null
+  Wait-WebDriverCondition $SessionId 'first request completed without a new request' @'
+const panel = document.querySelector('[data-testid="ai-assistant"]');
+return panel?.querySelector('[data-testid="message-assistant"]')?.textContent === 'Visible hidden complete' && !panel.querySelector('button');
+'@
+  Set-StudyInputText $SessionId '[aria-label="AI 输入"]' ('Tabs second request' + [char]0xE007)
+  Wait-WebDriverCondition $SessionId 'second real stream active' 'return document.querySelectorAll("[data-testid=message-assistant]")[1]?.textContent === "Visible";'
+  Invoke-WebDriverElementClick $SessionId (Find-WebDriverElement $SessionId '[data-testid="ai-assistant"] > button')
+  $deadline = (Get-Date).AddSeconds(5)
+  do { $status = Invoke-RestMethod "$httpRoot/status"; if ($status.requests.Count -eq 2 -and $status.requests[1].aborted) { break }; Start-Sleep -Milliseconds 100 } while ((Get-Date) -lt $deadline)
+  if ($status.probeCount -ne 1 -or $status.requests.Count -ne 2 -or -not $status.requests[0].completed -or $status.requests[0].aborted -or -not $status.requests[1].aborted) {
+    Fail-Condition 'AC-SU-03 request repeated, hidden stream aborted, or explicit stop failed to abort HTTP' (ConvertTo-Json -InputObject $status -Depth 4 -Compress)
+  }
+  Assert-PanelLearningWitness $SessionId
+  Invoke-StudyTab $SessionId 2
+  Assert-PanelLearningWitness $SessionId
+  $script:facts['panelTabs'] = @{ requestStatus = $status; mediaSelectionDraftStable = $true; unsentDraftRestored = $true; hiddenNoteNotSaved = $true }
+  Write-Output ('AC-SU-03 desktop Tab facts: ' + (ConvertTo-Json -InputObject $script:facts['panelTabs'] -Depth 6 -Compress))
+}
+
 $tauriDriver = $null
 $driverProcess = $null
 $sessionId = $null
 $runSucceeded = $false
 $phase = 'bootstrap'
+$script:panelFixtureProcess = $null
 $primaryError = $null
 try {
   $tauriDriver = Require-Command 'tauri-driver' 'Install with: cargo install tauri-driver --locked'
@@ -1250,6 +1344,8 @@ return JSON.stringify({
   $phase = 'judge-layout-restart'
   Assert-StudyLayoutRestored $sessionId
   Write-Output ('AC-SU-04 desktop layout facts: ' + (ConvertTo-Json -InputObject $script:facts['layoutProportions'] -Depth 8 -Compress))
+  $phase = 'judge-panel-tabs'
+  Assert-StudyPanelTabs $sessionId
 
   # SR-t52-4 + 文档 §5 对齐：成功路径同样要留下证据——
   # (a) 仅附件截图 + ATTACHMENT-NOTICE.txt（Save-WebDriverScreenshot 此前从未被调用，文档承诺的附件其实不存在）；
@@ -1258,10 +1354,14 @@ return JSON.stringify({
   Save-WebDriverScreenshot $sessionId
   Save-SuccessFacts | Out-Null
   $runSucceeded = $true
-  Write-Output 'Study Catalog desktop E2E passed: fixture -> restart -> study page -> WAV playback -> two-row structure -> centered follow -> fade owners -> paused no-forced-follow.'
+  Write-Output 'Study desktop E2E passed: fixture -> restart -> media/catalog -> layout drag/restart -> panel Tabs and real SSE.'
 } catch {
   $primaryError = $_
 } finally {
+  if ($script:panelFixtureProcess -and -not $script:panelFixtureProcess.HasExited) {
+    Stop-Process -Id $script:panelFixtureProcess.Id -Force -ErrorAction SilentlyContinue
+    $script:panelFixtureProcess.WaitForExit(5000) | Out-Null
+  }
   if ($sessionId) { try { Close-WebDriverSession $sessionId } catch { } }
   if ($driverProcess -and -not $driverProcess.HasExited) {
     Stop-Process -Id $driverProcess.Id -Force -ErrorAction SilentlyContinue
