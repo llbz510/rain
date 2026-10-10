@@ -165,7 +165,7 @@ pub async fn start_asr(
     .await
 }
 
-fn rain_database_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn rain_database_path(app: &AppHandle) -> Result<PathBuf, String> {
     if std::env::var("RAIN_E2E_MODE").ok().as_deref() == Some("1") {
         if let Ok(path) = std::env::var("RAIN_E2E_DB_PATH") {
             let database_path = PathBuf::from(path);

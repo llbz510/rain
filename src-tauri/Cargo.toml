@@ -13,6 +13,10 @@ name = "rain-whisper-cuda"
 path = "src/bin/rain-whisper-cuda.rs"
 required-features = ["cuda-whisper"]
 
+[[test]]
+name = "asset_scope"
+path = "src/asset_scope_tests.rs"
+
 [features]
 default = []
 cuda-whisper = ["whisper-rs/cuda"]

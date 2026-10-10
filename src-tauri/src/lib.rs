@@ -1,6 +1,7 @@
 pub mod asr_execution;
 pub mod asr_persistence;
 pub mod asr_transcript;
+pub mod asset_scope;
 pub mod commands;
 pub mod e2e_config;
 pub mod events;
@@ -28,6 +29,7 @@ mod thumbnail_storage_tests;
 mod thumbnail_lifecycle_tests;
 
 use std::sync::Arc;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -41,6 +43,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .setup(|app| {
+            let database_path = commands::rain_database_path(app.handle())?;
+            tauri::async_runtime::block_on(asset_scope::restore_local_media_access(
+                &database_path,
+                &app.asset_protocol_scope(),
+            ))?;
+            Ok(())
+        })
         .manage(Arc::new(scheduler::ImportScheduler::new()))
         .manage(Arc::new(whisper_model_download::ModelDownloadManager::new()))
         .invoke_handler(tauri::generate_handler![

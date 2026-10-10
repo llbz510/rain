@@ -31,6 +31,7 @@ import {
 } from '@/settings/model-pool'
 import { checkStructuringModelCapability } from '@/settings/structuring-capability'
 import { useRainStore } from '@/store/rain-store'
+import { localMediaUrl } from '@/ui/components/video'
 
 interface RealE2eConfig {
   enabled: boolean
@@ -705,6 +706,19 @@ export function RealE2eRunner() {
               assistantStatus: 'idle',
               assistantError: '',
               noteContents: null as string[] | null,
+              assetReads: null as Array<{ status: number; byteLength: number; error?: string }> | null,
+              readAssets: (paths: string[]) => {
+                fixture.assetReads = null
+                void Promise.all(paths.map(async path => {
+                  try {
+                    // Real WebView requests through the same adapter as cards/media.
+                    const response = await fetch(localMediaUrl(path))
+                    return { status: response.status, byteLength: (await response.arrayBuffer()).byteLength }
+                  } catch (cause) {
+                    return { status: 0, byteLength: 0, error: redactSecret(toError(cause).message) }
+                  }
+                })).then(reads => { fixture.assetReads = reads })
+              },
               configureAssistant: (baseUrl: string) => {
                 fixture.assistantStatus = 'loading'
                 void (async () => {

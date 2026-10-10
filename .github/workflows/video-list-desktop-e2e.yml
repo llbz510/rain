@@ -16,6 +16,9 @@ on:
       - 'src/ui/components/import-task-dialog.tsx'
       - 'src/models/database-videos.ts'
       - 'src-tauri/src/e2e_config.rs'
+      - 'src-tauri/src/asset_scope*.rs'
+      - 'src-tauri/src/lib.rs'
+      - 'src-tauri/tauri.conf.json'
       - 'package.json'
   # 合并后的重放入口；不参与 master 必需状态检查。
   workflow_dispatch:

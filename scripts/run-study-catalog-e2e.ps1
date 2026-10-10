@@ -34,6 +34,7 @@ $paragraphRowSelector = '[data-catalog-scroll-row="paragraph"]'
 
 $script:missingConditions = New-Object System.Collections.Generic.List[string]
 $script:facts = [ordered]@{}
+$script:assetFixtureFiles = @()
 
 $secretVariableNames = @('RAIN_E2E_LLM_API_KEY', 'RAIN_QWEN_API_KEY', 'RAIN_LIVE_LLM_API_KEY')
 $diagnosticSecrets = @($secretVariableNames | ForEach-Object {
@@ -171,6 +172,22 @@ function Invoke-WebDriverScript([string]$SessionId, [string]$Script) {
   return $response.value
 }
 
+function Read-DesktopAssets([string]$SessionId, [string[]]$Paths) {
+  $pathsJson = ConvertTo-Json -InputObject @($Paths) -Compress
+  Invoke-WebDriverScript $SessionId "window.__RAIN_STUDY_CATALOG_FIXTURE__.readAssets($pathsJson); return true;" | Out-Null
+  Wait-WebDriverCondition $SessionId 'real asset protocol responses' 'return window.__RAIN_STUDY_CATALOG_FIXTURE__.assetReads !== null;'
+  return @(Invoke-WebDriverScript $SessionId 'return window.__RAIN_STUDY_CATALOG_FIXTURE__.assetReads;')
+}
+
+function Assert-AssetReads($Reads, [int[]]$Statuses, [int[]]$Lengths, [string]$Label) {
+  if ($Reads.Count -ne $Statuses.Count) { Fail-Condition "AC-AR-03 $Label response count" "expected=$($Statuses.Count) actual=$($Reads.Count)" }
+  for ($index = 0; $index -lt $Statuses.Count; $index++) {
+    if ($Reads[$index].status -ne $Statuses[$index] -or $Reads[$index].byteLength -ne $Lengths[$index]) {
+      Fail-Condition "AC-AR-03 $Label path $index" (ConvertTo-Json -InputObject $Reads[$index] -Compress)
+    }
+  }
+}
+
 function Wait-WebDriverCondition([string]$SessionId, [string]$Description, [string]$Script) {
   $deadline = (Get-Date).AddSeconds($MaxSeconds)
   do {
@@ -272,6 +289,8 @@ function Get-JudgeFactSnapshot() {
     wavPlayback = $script:facts['wavPlayback']
     layoutProportions = $script:facts['layoutProportions']
     panelTabs = $script:facts['panelTabs']
+    assetReadsBeforeRestart = $script:facts['assetReadsBeforeRestart']
+    assetScope = $script:facts['assetScope']
     currentItemTargetText = $script:facts['currentItemTargetText']
     currentItemText = $script:facts['currentItemText']
     currentItemCenterDeltaPx = $script:facts['currentItemCenterDeltaPx']
@@ -1180,7 +1199,7 @@ try {
 
   # 合成媒体优先（无外部工具依赖）：WAV 由 Node 生成，时长显式声明并写入诊断。
   # 该文件是否被 <video> 接受、currentTime 是否真实推进，由 t30b 的学习页探针回答。
-  $mediaPath = Join-Path $runRoot 'rain-study-catalog-media.wav'
+  $mediaPath = Join-Path $runRoot 'rain-study-catalog-media [1].wav'
   $mediaDeclarationSeconds = 14
   & node -e @"
 const fs = require('fs')
@@ -1197,6 +1216,26 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   $script:facts['mediaPath'] = 'isolated-run-root (not uploaded)'
   $script:facts['mediaDeclarationSeconds'] = $mediaDeclarationSeconds
   $script:facts['mediaBytes'] = (Get-Item -LiteralPath $mediaPath).Length
+
+  # AC-AR-03: all denied files really exist; only the declared local Video is selected.
+  $neighborPath = Join-Path $runRoot 'rain-study-catalog-media 1.wav'
+  Copy-Item -LiteralPath $mediaPath -Destination $neighborPath
+  New-Item -ItemType Directory -Path (Join-Path $runRoot 'sub') | Out-Null
+  $normalizedMediaPath = Join-Path $runRoot '.\rain-study-catalog-media [1].wav'
+  $appDataRoot = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'com.rain.app'
+  $assetFixtureId = 'rain-ar03-' + [Guid]::NewGuid().ToString('N')
+  $thumbnailPath = Join-Path $appDataRoot "thumbnails\$assetFixtureId.png"
+  $downloadPath = Join-Path $appDataRoot "online-videos\$assetFixtureId\video.bin"
+  $privatePath = Join-Path $appDataRoot "$assetFixtureId-private.txt"
+  $script:assetFixtureFiles = @($thumbnailPath, $downloadPath, $privatePath)
+  foreach ($path in $script:assetFixtureFiles) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+    [System.IO.File]::WriteAllBytes($path, [byte[]](65, 82, 48, 51))
+  }
+  $thumbnailBytes = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=')
+  [System.IO.File]::WriteAllBytes($thumbnailPath, $thumbnailBytes)
+  $escapedPrivatePath = Join-Path $appDataRoot "thumbnails\..\$assetFixtureId-private.txt"
+  $escapedDownloadPath = Join-Path $appDataRoot "online-videos\$assetFixtureId\..\..\$assetFixtureId-private.txt"
 
   $env:RAIN_E2E_MODE = '1'
   $env:RAIN_E2E_RUN_MODE = 'study-catalog'
@@ -1227,6 +1266,10 @@ fs.writeFileSync(process.argv[1], Buffer.concat([header, data]))
   $phase = 'seed-fixture'
   Write-Output 'Study Catalog E2E phase: publish controlled catalog fixture'
   Request-CatalogFixtureSeed $sessionId
+  $phase = 'judge-unselected-asset'
+  $initialReads = Read-DesktopAssets $sessionId @($mediaPath, $neighborPath)
+  Assert-AssetReads $initialReads @(403, 403) @(0, 0) 'before selected media grant restoration'
+  $script:facts['assetReadsBeforeRestart'] = $initialReads
   Close-WebDriverSession $sessionId
   $sessionId = $null
 
@@ -1313,6 +1356,13 @@ return JSON.stringify({
     Fail-Condition '真实点击卡主操作后生产学习页未出现：loadVideo 失败（最可能是夹具缺 sentences）或列表页报错，需按 observed 的 alert/currentPage 定位' "state=$diagnostics"
   }
 
+  $phase = 'judge-asset-scope'
+  $assetReads = Read-DesktopAssets $sessionId @($mediaPath, $normalizedMediaPath, $thumbnailPath, $downloadPath, $neighborPath, $privatePath, $escapedPrivatePath, $escapedDownloadPath)
+  Assert-AssetReads $assetReads @(200, 200, 200, 200, 403, 403, 403, 403) @($script:facts['mediaBytes'], $script:facts['mediaBytes'], $thumbnailBytes.Length, 4, 0, 0, 0, 0) 'restored media, owned roots, neighbors and traversal'
+  $script:facts['assetScope'] = [ordered]@{
+    cases = @('selected literal brackets', 'selected normalized dot segments', 'owned thumbnail', 'owned downloaded media', 'unselected neighbor', 'private app data', 'thumbnail traversal', 'download traversal')
+    reads = $assetReads
+  }
   $phase = 'wav-playback-probe'
   Write-Output 'Study Catalog E2E phase: synthetic WAV playback probe'
   Assert-WavPlaybackAdvances $sessionId
@@ -1366,6 +1416,10 @@ return JSON.stringify({
   if ($driverProcess -and -not $driverProcess.HasExited) {
     Stop-Process -Id $driverProcess.Id -Force -ErrorAction SilentlyContinue
     $driverProcess.WaitForExit(5000) | Out-Null
+  }
+  foreach ($path in $script:assetFixtureFiles) {
+    # Exact owned fixture files only; never remove an app-data directory tree.
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
   }
   if ($primaryError) {
     try { Save-FailureDiagnostics $phase $primaryError } catch {

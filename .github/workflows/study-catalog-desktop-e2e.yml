@@ -27,6 +27,10 @@ on:
       - 'scripts/study-panel-sse-fixture.mjs'
       - 'src/models/database-content.ts'
       - 'src-tauri/src/e2e_config.rs'
+      - 'src-tauri/src/asset_scope*.rs'
+      - 'src-tauri/src/lib.rs'
+      - 'src-tauri/tauri.conf.json'
+      - 'scripts/asset-protocol-policy.test.ts'
       - 'package.json'
   # 合并后的重放入口；不参与 master 必需状态检查。
   workflow_dispatch:
