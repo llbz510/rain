@@ -257,7 +257,7 @@ Runtime Settings 首次加载完成前不得写入。加载后，模型、角色
 | `AC-UX-01..06` | `src/index.css` token system、生产组件、visual/accessibility policy | CSS token 是唯一视觉事实源；完整页面 visual/keyboard/axe/contrast Judge 不由 token 存在自证 |
 | `AC-PF-01..05` | 独立 performance/soak runners + 对应 startup/List/Study/progress/App lifecycle Owner | runner 只测量，不成为生产 Owner；冻结机器、fixture、样本数、p95、资源斜率和退出残留必须写入 Evidence |
 | `AC-AR-02` | `src/llm/` 和角色 request workflows | 所有 OpenAI-compatible LLM 请求留在前端 adapter；Rust command 精确集合不得出现 LLM HTTP 边界 |
-| `AC-AR-03` | Tauri asset capability + 共享 `localMediaUrl` adapter | 只允许 app-owned 或用户明确选择的规范化本地路径；禁止任意文件系统通配 scope |
+| `AC-AR-03` | Tauri固定app-owned scope + `asset_scope.rs`启动从canonical SQLite恢复local单文件 +共享`localMediaUrl` | native dialog初次精确授权；只恢复local Video绝对路径，不授权父目录；Rust scope/SQLite与Study WebView真实fetch判允许/拒绝/规范化，无新增command |
 | `AC-AR-04` | 公共 Database interfaces + Zustand session Store | SQLite 是跨会话业务事实源；Store 只拥有当前会话选择/播放/UI 草稿，不恢复或复制持久业务事实 |
 | `AC-AR-05` | `src/pipeline/app-import-owner.tsx` + `VideoImportController`；`App` 持有 Owner，列表页消费 context | Controller、数据库连接、实时进度与刷新通知高于页面；真实路由卸载/重挂仍复用同任务，取消或后台结算回写同一记录；进度订阅由 Owner 释放 |
 | `AC-AR-06` | `src/pipeline/import-progress.ts` + Pipeline/Controller/event adapters；UI `getImportProgressView` 穷尽投影 | 五类判别联合、字段合法性、单调性、终态和 checkpoint retry 在域边界统一；UI 不推断或发明阶段 |

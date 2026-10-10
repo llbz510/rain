@@ -79,7 +79,7 @@
 | VL-07 | Partial | VideoCard thumbnail rendering | M17/thumbnail UI — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |
 | SU-01 | Present（PR #98当前目标核证） | StudyInterface → CatalogBar真实滚动边界与row resize | production navigation +真实Study Desktop — Strong + Desktop | head f5d50019 Desktop37906611566四项GREEN，双审各119项PASS，受保护合并 | 只闭合对应Desktop预算，不外推Visual |
 | SU-02 | Partial | StudyInterface → CatalogBar 以 Store `playPosition` 推导当前 chapter/section，并提供由 `--anim-base` 控制的有向横向切换反馈；reduced-motion 无位移即时更新 | M05/playback、生产 StudyInterface DOM/CSS — Partial | 阻断：Strong + Desktop/Visual Evidence；公开 media `timeupdate` 与目录点击 Judge 已覆盖 current structure item、相邻 `playPosition` 样本决定的嵌套父/子播放/seek方向（同一 current 的后续样本不取消已启动动效）、连续前进/回退每次动画重启且不重挂 scroll owner、同级 paragraph 无动画；Judge 直接读取生产 `src/index.css`，锁定仅两套 A/B keyframe 各一次的精确 `translateX` from/to、唯一 `--anim-base: 200ms` 和 ±12px CSS 位移。运行中 `prefers-reduced-motion` change 立即取消并在偏好取消后的下一切换恢复，卸载会释放 listener。它不是 Tauri/Desktop 或 Visual Evidence | 不把局部 DOM/CSS Judge 当完成 |
-| SU-03 | Partial（Tab证据候选） | StudyInterface retained AI/NotesPanel →真实fetch/SSE、公共settings/notes | callback + HTTP输入生产页面/受控HTTP夹具 — 21文件148项GREEN | 五类注入RED/还原GREEN；真实Tab/隐藏stream/SQLite无自动写入Judge已接入，独立双审各148项PASS；Hosted待完成 | AC仍Partial，controlled SSE不是模型能力Evidence，不改正确产品行为 |
+| SU-03 | Present（PR #99已合并） | retained AI/NotesPanel →真实fetch/SSE、公共settings/notes | 生产HTTP输入及真实Study Desktop — Strong + Desktop | head fdcb9efe三个Hosted全绿、双审各148项PASS、protected merge与逐blob一致 | controlled SSE不签发模型能力/Visual |
 | SU-04 | Present（PR #98已合并） | StudyInterface → layout proportions →公共settings | production pointer/remount +真实几何/SQLite restart — Strong + Desktop | head f5d50019两Hosted全绿、双审各119项PASS；合并tree与被审tree逐blob一致 | 已收口；GPU/Release仍暂停 |
 | SU-05 | Partial（本 diff 将字幕生产接线由 Shadow 提升） | StudyInterface exact sentence → VideoZone；`subtitleOn` | study-playback、M07 — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁止 nearest fallback、译文开关或假截图 |
 | SU-06 | Partial | StudyInterface navigation/DiagramZone | navigation/M05 — Partial | 阻断：Strong + Desktop/Visual Evidence | 禁用 jsdom/假截图替代 |
@@ -96,7 +96,7 @@
 | PF-04 | Absent | 无 progress latency runner | 无 — Gap | 100 event end-to-end p95 | 先建 performance runner |
 | PF-05 | Absent | 无 soak runner | 无 — Gap | 25-minute resource/exit Evidence | 先建 performance runner |
 | AR-02 | Partial | front-end LLM request boundary | m20/LLM adjacent — Partial | role request/dependency/Desktop Evidence | 禁用静态存在自证 |
-| AR-03 | Partial | localMediaUrl/Tauri asset seam | thumbnail/playback — Partial | capability scope negative/Desktop | 禁用 jsdom/假截图替代 |
+| AR-03 | Partial（当前授权范围Slice） | static app-owned scope → canonical SQLite local file restore →localMediaUrl | config negative RED/GREEN、25文件165项GREEN；Rust/真实WebView Judge已接入 | 独立双审各165项PASS；当前head Hosted待完成 | 不新增任意路径grant command；不以jsdom替代Desktop |
 | AR-04 | Partial | Database + Zustand ownership | architecture/store adjacent — Partial | unified dependency/adapter policy | 不复制持久业务事实 |
 | AR-05 | Present | `AppImportOwner` → Controller；`App` 路由真实卸载/重挂列表 | app-import-owner/dialog/deletion/M21 — Strong | 无新增必需；生产 App + 真实 Pipeline/公共数据库 Judge 覆盖单飞、后台进度/完成、原任务取消和迟到结果 | 不外推 Tauri/SQLite Desktop、模型、Visual 或 Release Evidence |
 | AR-06 | Present | `import-progress` domain → Pipeline/Controller/event adapters → 穷尽 UI projection | domain/controller/pipeline/typecheck/App — Strong | PR #96 受保护合并；独立两轴各 263 项及 head 完整 Hosted 全绿；无 Desktop 要求 | 保留 locked wire/tuple adapters，不外推 GPU/模型/Visual/Release Evidence |
