@@ -96,7 +96,7 @@
 | PF-04 | Absent | 无 progress latency runner | 无 — Gap | 100 event end-to-end p95 | 先建 performance runner |
 | PF-05 | Absent | 无 soak runner | 无 — Gap | 25-minute resource/exit Evidence | 先建 performance runner |
 | AR-02 | Partial | front-end LLM request boundary | m20/LLM adjacent — Partial | role request/dependency/Desktop Evidence | 禁用静态存在自证 |
-| AR-03 | Partial（当前授权范围Slice） | static app-owned scope → canonical SQLite local file restore →localMediaUrl | config negative RED/GREEN、25文件165项GREEN；Rust/真实WebView Judge已接入 | 独立双审各165项PASS；当前head Hosted待完成 | 不新增任意路径grant command；不以jsdom替代Desktop |
+| AR-03 | Partial（当前授权范围Slice） | static app-owned scope → canonical SQLite local file restore →localMediaUrl | config negative RED/GREEN、25文件165项GREEN；真实WebView Desktop已核证 | 原head Desktop success，Rust测试装载失败；保留三条scope/SQLite断言并修复测试v6资源链接，修复候选双轴各165项PASS，最终文档复核/新head Hosted待完成 | 不新增任意路径grant command；不以jsdom替代Desktop、不跳过Rust |
 | AR-04 | Partial | Database + Zustand ownership | architecture/store adjacent — Partial | unified dependency/adapter policy | 不复制持久业务事实 |
 | AR-05 | Present | `AppImportOwner` → Controller；`App` 路由真实卸载/重挂列表 | app-import-owner/dialog/deletion/M21 — Strong | 无新增必需；生产 App + 真实 Pipeline/公共数据库 Judge 覆盖单飞、后台进度/完成、原任务取消和迟到结果 | 不外推 Tauri/SQLite Desktop、模型、Visual 或 Release Evidence |
 | AR-06 | Present | `import-progress` domain → Pipeline/Controller/event adapters → 穷尽 UI projection | domain/controller/pipeline/typecheck/App — Strong | PR #96 受保护合并；独立两轴各 263 项及 head 完整 Hosted 全绿；无 Desktop 要求 | 保留 locked wire/tuple adapters，不外推 GPU/模型/Visual/Release Evidence |

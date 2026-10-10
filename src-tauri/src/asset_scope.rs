@@ -50,7 +50,3 @@ pub async fn restore_local_media_access(database_path: &Path, scope: &Scope) -> 
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "asset_scope_tests.rs"]
-mod tests;

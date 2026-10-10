@@ -1,8 +1,8 @@
-# Study Catalog 桌面 E2E（AC-SU-01 / AC-SU-03 / AC-SU-04）
+# Study Catalog 桌面 E2E（AC-SU-01 / AC-SU-03 / AC-SU-04 / AC-AR-03）
 
 > 状态：Active
-> 更新日期：2026-10-09
-> 作用：为 `AC-SU-01`、`AC-SU-03` 和 `AC-SU-04` 提供真实桌面 DOM、操作、媒体和重启裁判。它不是产品规格，不签发 `Visual Evidence` 或其他 AC 的 Evidence。
+> 更新日期：2026-10-10
+> 作用：为 `AC-SU-01`、`AC-SU-03`、`AC-SU-04` 和 `AC-AR-03` 提供真实桌面 DOM、操作、媒体、重启及 asset 路径裁判。它不是产品规格，不签发 Visual/Accessibility、模型、Release 或这四条以外 AC 的 Evidence。
 > 位置：`scripts/run-study-catalog-e2e.ps1`（行为 Judge）、`.github/workflows/study-catalog-desktop-e2e.yml`（Hosted Windows 入口）、`src/e2e/real-e2e-runner.tsx` 的 `study-catalog` 短模式（受控夹具）、`src-tauri/src/e2e_config.rs`（E2E 门）。
 
 ## 1. 公开命令
@@ -83,4 +83,4 @@ npm run e2e:study-catalog
 
 ## 8. AC-AR-03 真实asset路径Judge
 
-当前候选复用本入口，在首次seed后确认尚未授权的实际媒体及相邻文件均403；公共Video事实持久化并关闭进程重启后，生产启动恢复精确grant。WebView经共享localMediaUrl真实fetch裁判选中媒体与合法current-dir dot段规范化为200且完整响应字节长度匹配；固定app-owned thumbnail/download文件200；相邻未选文件、其他app-data文件以及从两个owned根越界的路径均403/0字节。媒体文件名含空格与字面括号，随后原有真实播放及SU01/SU03/SU04全部回归继续执行。Rust邻接测试通过真实SQLite与Tauri Scope补来源过滤/relative拒绝/不存在DB无副作用。该候选尚无Hosted结果，不据代码存在升级AC-AR-03。夹具只创建随机命名的owned文件并逐文件清理，不删除app-data目录树。
+当前候选复用本入口，在首次seed后确认尚未授权的实际媒体及相邻文件均403；公共Video事实持久化并关闭进程重启后，生产启动恢复精确grant。WebView经共享localMediaUrl真实fetch裁判选中媒体与合法current-dir dot段规范化为200且完整响应字节长度匹配；固定app-owned thumbnail/download文件200；相邻未选文件、其他app-data文件以及从两个owned根越界的路径均403/0字节。媒体文件名含空格与字面括号，随后原有真实播放及SU01/SU03/SU04全部回归继续执行。Rust邻接测试通过真实SQLite与Tauri Scope补来源过滤/relative拒绝/不存在DB无副作用。首个head已有真实Desktop结果，但Rust测试程序装载失败；当前修复保留同三条Scope/SQLite断言并修复测试manifest链接，新head完整Harness及Desktop结果仍待核证，不据代码存在升级AC-AR-03。夹具只创建随机命名的owned文件并逐文件清理，不删除app-data目录树。

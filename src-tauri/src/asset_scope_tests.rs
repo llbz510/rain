@@ -1,6 +1,8 @@
-use super::*;
-use std::fs;
+use rain_lib::asset_scope::restore_local_media_access;
+use sqlx::{sqlite::SqliteConnectOptions, Connection, SqliteConnection};
+use std::{fs, path::PathBuf};
 use tauri::{
+    scope::fs::Scope,
     test::{mock_builder, mock_context, noop_assets},
     utils::config::FsScope,
 };
