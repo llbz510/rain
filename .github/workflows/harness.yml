@@ -66,3 +66,50 @@ jobs:
 
       - name: Run repository Harness
         run: npm run harness:check
+
+      # Temporary PR100 probe: retain the original failing Harness verdict.
+      - name: Diagnose native test imports after failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class RainImportProbe {
+            [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+            public static extern IntPtr LoadLibraryW(string name);
+            [DllImport("kernel32.dll", CharSet=CharSet.Ansi, ExactSpelling=true)]
+            public static extern IntPtr GetProcAddress(IntPtr module, string name);
+            [DllImport("kernel32.dll", CharSet=CharSet.Unicode)]
+            public static extern uint GetModuleFileNameW(IntPtr module, StringBuilder path, int size);
+            [DllImport("kernel32.dll")]
+            public static extern uint SetErrorMode(uint mode);
+          }
+          "@
+          [void][RainImportProbe]::SetErrorMode(3)
+          $testBinaries = Get-ChildItem -LiteralPath 'src-tauri/target/debug/deps' -Filter 'rain_lib-*.exe'
+          foreach ($binary in $testBinaries) {
+            Write-Output "[PR100-native] binary=$($binary.FullName)"
+            $imports = & 'C:/Program Files/LLVM/bin/llvm-readobj.exe' --coff-imports $binary.FullName
+            $imports | Write-Output
+            $module = [IntPtr]::Zero
+            $dll = ''
+            foreach ($line in $imports) {
+              if ($line -match '^  Name: (.+)$') {
+                $dll = $Matches[1]
+                $module = [RainImportProbe]::LoadLibraryW($dll)
+                $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                $resolved = [Text.StringBuilder]::new(2048)
+                if ($module -ne [IntPtr]::Zero) {
+                  [void][RainImportProbe]::GetModuleFileNameW($module, $resolved, $resolved.Capacity)
+                }
+                Write-Output "[PR100-native] DLL=$dll resolved=$resolved handle=$module loadError=$errorCode"
+              } elseif ($module -ne [IntPtr]::Zero -and $line -match '^  Symbol: (.+) \(\d+\)$') {
+                $symbol = $Matches[1]
+                if ([RainImportProbe]::GetProcAddress($module, $symbol) -eq [IntPtr]::Zero) {
+                  Write-Output "[PR100-native] MISSING_ENTRY DLL=$dll symbol=$symbol"
+                }
+              }
+            }
+          }
